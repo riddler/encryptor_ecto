@@ -716,6 +716,19 @@ restriction with a clear error, an `order_by:` escape hatch in the plan, or
 something else, is ADR-0002's Q6 to answer. Owner: this repo, before
 implementation.
 
+*Answered 2026-08-27 (ece-4ib), by ADR-0002's Q6 as that record's proposed
+amendment 4 - status proposed, acceptance is the operator's. The operator
+accepted the written recommendation "integer/binary PKs day one, composite
+documented-unsupported until asked for": keyset pagination orders on
+single-column integer and binary primary keys day one, and a composite or
+otherwise non-orderable primary key is refused with a clear error naming the
+schema and its key, documented as unsupported until a real request arrives.
+The `order_by:` escape hatch this question named is not added. The concern
+recorded here - that refusing a composite-key table is refusing a host, not a
+feature - is answered by "until asked for": such a host is the request that
+reopens it, and reopening it adds to the plan surface rather than changing
+it.*
+
 **Q4. Whether the `legacy_load` telemetry event is the right shape for the
 window-end signal.** A counter that has read zero for a retention period is
 evidence about *traffic*, not about *rows*: a table with a cold partition

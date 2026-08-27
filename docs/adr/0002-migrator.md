@@ -70,6 +70,39 @@ question 2. It already does: the reword landed with this record's acceptance,
 and both the status line above and the A14 resolution below carry it. This
 section records the check rather than a change.
 
+**4. Q6 is answered: keyset ordering covers single-column integer and binary
+primary keys, and composite primary keys are documented as unsupported.**
+The operator's ruling of 2026-08-27 accepted the written recommendation for
+this question as it stood:
+
+> integer/binary PKs day one, composite documented-unsupported until asked
+> for.
+
+Decision 6's `where: r.id > ^cursor` / `order_by: r.id` keyset pagination is
+therefore defined for a schema whose primary key is a single column of an
+integer type or a binary type. Both are a total order every supported adapter
+expresses as one `>` comparison on one column, which is exactly what decision
+6's query needs, and the binary case covers UUID keys stored as
+`:binary_id`. A UUIDv4 key orders correctly
+and scatters over the index; that is a cost in read locality, not a
+correctness problem, and it does not change what the migrator does.
+
+A schema whose primary key is composite, or a single column of a type with no
+total order the query builder can express, is **out of scope for the founding
+implementation and is documented as such**. The migrator refuses it with a
+clear error naming the schema and its primary key rather than paging over it
+under a guess. No `order_by:` escape hatch is added: the escape hatch was the
+other candidate ADR-0004 Q3 named, and adding it now would buy an untested
+generality at the cost of a plan option every host reads and almost none
+needs. "Until asked for" is the operative half of the ruling - a real host
+arriving with a composite-key table is what reopens this, and reopening it is
+additive to the plan surface rather than a change to it.
+
+Consequence for the implementer (`ece-b25` builds directly on this): keyset
+pagination orders on integer and binary primary keys day one; composite and
+non-orderable primary keys are documented as unsupported until a real request
+arrives, and are refused with a clear error rather than handled partially.
+
 ## Context
 
 ADR-0001 makes a schema field encrypted by naming a type module, and says
@@ -619,6 +652,13 @@ scatter over the index; composite keys need tuple comparison the query builder
 does not express uniformly across adapters. The founding implementation may
 restrict itself to single-column primary keys and say so. Owner: this repo,
 before implementation.
+
+*Answered 2026-08-27 (ece-4ib), recorded as proposed amendment 4 above: the
+operator accepted "integer/binary PKs day one, composite
+documented-unsupported until asked for". Single-column integer and binary
+primary keys are ordered day one; composite and otherwise non-orderable
+primary keys are refused with a clear error and documented as unsupported
+until a real request arrives. No `order_by:` escape hatch.*
 
 ## Consequences
 
