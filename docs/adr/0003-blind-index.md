@@ -1,6 +1,11 @@
 # ADR-0003: keyed blind indexes, per-tenant by default, equality only
 
-Status: proposed (2026-08-26)
+Status: accepted (2026-08-27, with one amendment: index keys are derived
+subkeys of the tenant master key for now - enc-ADR-0003 decision 7's
+`"encryptor/v1/blind-index"` label - so the search-only capability claim is
+softened to a key-hierarchy claim; independently wrapped index keys are the
+recorded upgrade path if a search-only consumer materializes. See the A9
+resolution below.)
 
 ## Context
 
@@ -62,10 +67,11 @@ construction, a value an attacker can compute if they hold the key - that is
 what makes it searchable. If the searching key and the decrypting key are the
 same key, then any component that legitimately needs to *build a query* (a
 search service, an admin console, a data pipeline) must hold the key that
-*decrypts every row*. Separating them at derivation time means the search
-capability can be handed out without the decrypt capability, and it means a
-compromise of an index key discloses the equality structure of one field
-rather than the contents of the database.
+*decrypts every row*. Separating them at derivation time means a compromise
+of an index key discloses the equality structure of one field rather than
+the contents of the database - and, if the derivation surface ever supports
+it, that the search capability could be handed out without the decrypt
+capability. (As accepted, it does not yet: see the A9 resolution below.)
 
 **The motivating host is a multi-tenant host app** with a small number of
 exact-match lookups (find the record by email, find it by phone) over columns
@@ -366,6 +372,19 @@ decision 2 still holds and the *capability separation* claim in the security
 table weakens to a key-hierarchy claim only. That is the one assumption whose
 failure changes what this record promises rather than only how it is built,
 and it is flagged for acceptance accordingly.
+
+*Resolved at acceptance (2026-08-27): A9 is wrong as stated, and the record
+is accepted with the weakened claim. enc-ADR-0003 decision 7's derived
+subkeys require the tenant master key in hand, so a component that can
+compute index values can also decrypt; the security table's "search without
+decrypt" reading does not hold today. What survives in full: index keys are
+never encryption keys (domain separation, decision 2), the index shreds
+with the tenant key, and every leakage row of the security table. The
+genuine search-only capability requires an independently random,
+independently wrapped index key per tenant - a second `WrappedKey` row and
+provisioning step - which enc-ADR-0003 open question 4 holds open as the
+recorded upgrade path. A8 and A10-A13 are design obligations on the
+derivation surface, to be honored when it is built.*
 
 ## The contract as typespecs
 
