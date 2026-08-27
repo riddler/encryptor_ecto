@@ -24,9 +24,25 @@ defmodule Encryptor.Ecto.Tenant do
       Task.async(fn -> Encryptor.Ecto.Tenant.wrap(tenant, &settle_batch/0) end)
 
   Making this visible is the point: an invisible propagation mechanism is one
-  whose gaps are also invisible. The boundaries a host is expected to wrap are
-  every place a unit of work starts - a Plug pipeline, a job's `perform/1`, a
-  channel `join/3`, a test case's setup, a `Task` a request spawns.
+  whose gaps are also invisible.
+
+  ## The boundaries a host is expected to wrap
+
+  Every place a unit of work starts, and every place one crosses into a process
+  that did not inherit the scope. ADR-0001 decision 5b names the first four;
+  the rest are the same rule applied to the places a host meets it:
+
+    * a `Plug` pipeline, once the request's tenant is known
+    * an Oban worker's `perform/1`
+    * a `Task` or a `Task.Supervisor` child that a request spawns
+    * a `GenServer` callback doing a write on someone else's behalf
+    * a `Phoenix.Channel` `join/3`, and anything the channel process runs after
+    * a test case's setup - `Encryptor.Ecto.TenantScope` ships for exactly this
+    * a seed or a data-migration script that writes encrypted rows
+
+  The list is finite because the rule is: a process that did not run the
+  `put/1` or `wrap/2` has no tenant, and a write from it raises rather than
+  guessing (decision 5c).
 
   ## Prefer `wrap/2` in a pooled process
 
