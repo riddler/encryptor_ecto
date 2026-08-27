@@ -16,6 +16,7 @@ defmodule Encryptor.Ecto.MixProject do
       description:
         "Encrypted Ecto types for the Encryptor vault - drop-in field encryption with a two-line migration",
       source_url: @source_url,
+      docs: docs(),
       package: package(),
       test_coverage: [tool: ExCoveralls],
       dialyzer: [plt_add_apps: [:ex_unit]],
@@ -36,19 +37,38 @@ defmodule Encryptor.Ecto.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
+  # Hexdocs configuration. These paths are read off the publisher's disk at
+  # `mix docs` time and need no entry in package()'s files: list - the docs
+  # tarball hexdocs hosts is built separately from the package tarball
+  # `mix deps.get` fetches.
+  defp docs do
+    [
+      name: "Encryptor.Ecto",
+      source_ref: "v#{@version}",
+      canonical: "https://hexdocs.pm/encryptor_ecto",
+      source_url: @source_url,
+      main: "readme",
+      extras: [
+        "README.md",
+        "CHANGELOG.md"
+      ],
+      skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
+    ]
+  end
+
   defp package do
     [
       name: "encryptor_ecto",
       licenses: ["MIT"],
-      files: ~w(lib mix.exs README.md LICENSE),
+      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md),
       links: %{
-        "GitHub" => @source_url
+        "GitHub" => @source_url,
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
       }
     ]
   end
 
-  # ex_doc and its `docs/0` configuration, and CI, are added by the beads that
-  # follow this one in the bootstrap stack.
+  # CI is added by the bead that follows this one in the bootstrap stack.
   #
   # `encryptor` is not on Hex yet. Until its first release it enters as a git
   # dep pinned to a pushed SHA, which is the committed form - never a path
@@ -62,7 +82,8 @@ defmodule Encryptor.Ecto.MixProject do
       {:ex_quality, "~> 0.14", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
     ]
   end
 end
