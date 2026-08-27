@@ -1,6 +1,47 @@
 # ADR-0001: cloak_ecto-shaped vault-backed types, with tenant context from an explicit process scope
 
-Status: proposed (2026-08-26)
+Status: accepted (2026-08-27, with amendments)
+
+## Acceptance amendments (2026-08-27)
+
+Accepted jointly with the encryptor founding records; enc-ADR-0004's review
+of assumptions A1-A7 (its own acceptance carries the verdicts in full)
+lands here as five amendments, already applied to the text below.
+
+1. **Call shape (A1/A3).** The vault surface is `encrypt(plaintext, opts)` /
+   `decrypt(ciphertext, opts)` with a keyword list carrying `:key` and
+   `:encryption_context`. The tenant passes as `key:` and never as a context
+   pair - the vault injects the pair itself, and as amended upstream the
+   pair is `"tenant_ref"` (a keyed derivation of the selector), never the
+   raw identifier. This layer's resolution machinery is unchanged; only the
+   shape of the vault call in `dump/3`/`load/3` is.
+2. **AAD mismatch is not distinguishable in `:reason` (A5).**
+   `Encryptor.Ecto.DecryptError` cannot branch on the vault's `:reason` -
+   every message-dependent decrypt failure is `:decrypt_failed`. The
+   operator-facing detail (e.g. `{:encryption_context_mismatch, key}`) is
+   available in the error's `:engine` field, which is not a versioned
+   contract and must never be matched for control flow. The one
+   distinguishable context failure, `{:missing_required_context_keys, _}`,
+   is a host misconfiguration and gets its own exception,
+   `Encryptor.Ecto.MissingContextError`.
+3. **`tenant: :none` fields declare a `:single` vault (5e).** A global field
+   cannot ride a `:tenant`-profile vault with the pair omitted, because the
+   profile's required set enforces the pair. Global fields point their type
+   at a `:single`-profile vault.
+4. **The option set gains `legacy:`** - a load-only migration affordance
+   (ADR-0002's mixed window, its Q1) that loads through the named legacy
+   type when the primary load fails and always dumps through the new type.
+   Documented as self-expiring; dropping it is a runbook step.
+5. **`table`/`column` context is frozen at declaration.** The values are
+   still derived from `:schema`/`:field`, but once, at declaration time,
+   as explicit overridable options - so an ordinary physical rename no
+   longer invalidates every stored row (that failure was `:decrypt_failed`
+   fleet-wide, recoverable only by a full re-encrypt). Renaming the
+   physical source while pinning the declared value is free; changing a
+   declared value is an R3 migration. The implementation adds a
+   compile-or-start-time uniqueness check across declarations, since two
+   fields sharing one declared pair would be silently mutually
+   substitutable.
 
 ## Context
 
@@ -119,6 +160,8 @@ the database, and this record does not pretend otherwise (decision 10).
 | `:tenant` | no | Tenant-context strategy: `:scope` (default), `:none`, or a module implementing `Encryptor.Ecto.TenantContext` (decision 5) |
 | `:context` | no | Static extra context pairs merged into every operation, e.g. `%{"purpose" => "pii"}` |
 | `:json` | Map only | Serializer module, default `Jason` (decision 8) |
+| `:legacy` | no | *(Acceptance amendment 4.)* A legacy type module for the migration mixed window: load through it when the primary load fails, always dump through the new type. Load-only, self-expiring - dropping it is a runbook step (ADR-0002 decision 8) |
+| `:table`, `:column` | no | *(Acceptance amendment 5.)* Overrides for the frozen declared context values; default to the schema source and field name at declaration time (decision 4) |
 
 Unknown options raise at compile time. There is no `Application` env fallback
 for `:vault`: the vault is named at the declaration or the module does not
@@ -132,10 +175,18 @@ field's options. The generated type resolves, once, at field-declaration time:
 - `"table"` from `schema.__schema__(:source)`
 - `"column"` from the `:field` option
 
-and bakes both into its params. A host cannot forget them, cannot misspell
-them, and cannot make two fields in one table share a context by accident. If
+and bakes both into its params **as frozen declared values** (acceptance
+amendment 5): the derivation happens once, at declaration time, and the
+resulting values are explicit, overridable options (`:table`, `:column`)
+rather than facts re-read from the live schema on every operation. A host
+cannot forget them, cannot misspell them, and cannot make two fields in one
+table share a context by accident - a uniqueness check across declarations
+enforces the last. Renaming the physical table or field while pinning the
+declared value leaves stored rows readable; changing a declared value
+invalidates the column and is an R3 migration (ADR-0002). If
 either is unavailable (the type used outside a schema, e.g. in a bare
-`Ecto.Query` cast), `init/1` raises: a context-less encrypt is never performed.
+`Ecto.Query` cast) and not supplied as an option, `init/1` raises: a
+context-less encrypt is never performed.
 
 Schema prefixes are deliberately **not** part of the context. A prefix is a
 deployment-time placement decision and can differ between environments for the
@@ -194,7 +245,12 @@ such rather than as a missing-scope error.
 the schema, where a reviewer sees it next to the column it applies to. Fields
 declared `:none` omit the tenant key from their context entirely, and their
 ciphertexts are therefore *not* crypto-shreddable with a tenant key - a
-consequence the documentation states plainly at the option.
+consequence the documentation states plainly at the option. *(Acceptance
+amendment 3.)* A `:none` field must name a `:single`-profile vault: a
+`:tenant`-profile vault has the tenant pair in its required set and refuses
+an operation without it, so "a tenant vault with the pair omitted" is not a
+representable configuration. The host runs a second, single-key vault for
+global fields, which is the shape enc-ADR-0001 decision 3 already expects.
 
 **5f.** `tenant: MyApp.SomeResolver` escapes the whole mechanism. The
 `Encryptor.Ecto.TenantContext` behaviour is one callback,
@@ -241,7 +297,8 @@ proceeds. The types therefore raise:
 |---|---|
 | No tenant in scope, strategy `:scope` | `Encryptor.Ecto.MissingTenantError` |
 | Vault returns an encrypt error | `Encryptor.Ecto.EncryptError` |
-| Vault returns a decrypt error (including AAD mismatch) | `Encryptor.Ecto.DecryptError` |
+| Vault returns a decrypt error (including AAD mismatch) | `Encryptor.Ecto.DecryptError` (detail from the vault error's `:engine` field, non-contractual - acceptance amendment 2) |
+| Vault reports missing required context keys | `Encryptor.Ecto.MissingContextError` (host misconfiguration, not an integrity event) |
 | Stored bytes are not a well-formed message | `Encryptor.Ecto.DecryptError` |
 | Serializer fails on a `Map` value | `Encryptor.Ecto.SerializationError` |
 
@@ -313,6 +370,12 @@ These are assumptions about the `encryptor` package, whose founding records are
 being drafted in parallel with this one. **Each is a review item for
 acceptance**, not a settled fact; if any is wrong, the affected decision here
 changes mechanically and the shape survives.
+
+*Resolved at acceptance (2026-08-27): enc-ADR-0004 carries the full verdict
+per assumption. A1/A2/A4/A6 confirmed; A3 confirmed in shape with the tenant
+pair being `tenant_ref` and vault-supplied; A5 denied in `:reason` with the
+detail in `:engine`; A7 confirmed and tightened to a string selector. The
+resulting amendments here are the acceptance amendments above.*
 
 | # | Assumed | Used by |
 |---|---|---|
@@ -436,13 +499,15 @@ end
 And what it gets, without changing a call site:
 
 ```elixir
-# In request scope for account "acct_A".
+# In request scope for account "acct_A". The type calls the vault with
+# key: "acct_A"; the vault injects the derived tenant pair itself.
 MyApp.Repo.insert!(%Customer{account_id: "acct_A", tax_id: "123456789"})
-# context: %{"tenant_id" => "acct_A", "table" => "customers", "column" => "tax_id"}
+# context: %{"tenant_ref" => "6Qk2_1xZ...", "table" => "customers", "column" => "tax_id"}
 
 # The same bytes, read back in account "acct_B"'s scope, do not decrypt.
-# ** (Encryptor.Ecto.DecryptError) customers.tax_id: encryption context
-#    mismatch (tenant_id) - the message was not written for this context
+# ** (Encryptor.Ecto.DecryptError) customers.tax_id: could not decrypt -
+#    the message was not written for this context (detail, from the vault's
+#    :engine field, in the log line only)
 
 # A background job that forgot to wrap fails on the first write, not the
 # thousandth read.

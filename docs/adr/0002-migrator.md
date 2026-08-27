@@ -1,6 +1,8 @@
 # ADR-0002: the migrator - a plan-driven, resumable, compare-and-swap row rewriter
 
-Status: proposed (2026-08-26)
+Status: accepted (2026-08-27; the design is unchanged - the assumption
+table and open questions carry their acceptance resolutions, and A14 is
+reworded per enc-ADR-0005)
 
 ## Context
 
@@ -334,7 +336,26 @@ acceptance**, not a settled fact. A1-A7 continue to hold and are not restated.
 | A11 | Decrypt resolves the writing key version from the message, so old and new versions coexist in one table for the duration of a pass | 4, 8 |
 | A12 | Tenant key rotation produces a new current version while prior versions stay decryptable until an explicit shred - rotation and shred are separate operations with a window between them | R2, 11 |
 | A13 | A shredded tenant's decrypt failure is distinguishable from a corrupt-message failure, so verification can classify rather than guess | 10, 11 |
-| A14 | Re-wrap of wrapped tenant keys (R1) is offered by `encryptor` and needs nothing from the Ecto layer | 9 |
+| A14 | Re-wrap of wrapped tenant keys (R1) is offered by `encryptor` and needs nothing from the migrator | 9 |
+
+*Resolved at acceptance (2026-08-27), verdicts from enc-ADR-0004/0005:*
+
+- *A9 is satisfied: enc-ADR-0004 decision 12's `describe/1` returns the
+  stored context and every EDK's `{provider_id, key_name}` (which carries
+  the key version) keylessly, so the probe short-circuit and the census
+  are real. Its output is unauthenticated and is never an authorization
+  input. A8's byte-stable header remains a stated engine-format fact.*
+- *A10 and A11 hold. A12 holds exactly as stated: the window exists, is
+  unbounded above, has a non-zero lower bound (rewrite + verify + cache
+  drainage), and only an explicit shred closes it (enc-ADR-0005 d2).*
+- *A13 holds for whole-tenant shreds (`{:unknown_key, _}` at resolution)
+  and not for a single retired version (`:decrypt_failed`); decision 11's
+  tenant-filter shape is the one that works, so no change here.*
+- *A14 as originally written ("needs nothing from the Ecto layer") was one
+  notch too broad and is reworded above: R1/R4 need a narrow key-store API
+  on the store-backed provider (enumerate/update/delete wrappings), outside
+  the migrator's plan and task surface. Decision 9's refusal survives
+  intact for the migrator.*
 
 A12 is the load-bearing one. If rotation and shred were a single operation, or
 if a rotated-away version stopped decrypting immediately, then R2 would require
@@ -485,6 +506,9 @@ a sibling record. Either ADR-0001 gains the option at acceptance, or this record
 loses decision 8 step 4 and the migration needs a stop-the-world window. Owner:
 ADR-0001, at acceptance.
 
+*Resolved at acceptance (2026-08-27): granted. ADR-0001's acceptance
+amendment 4 adds `legacy:` as a load-only, self-expiring option.*
+
 **Q2. Whether A9 (key version without decrypt) actually exists.** If upstream
 cannot report a message's key version without decrypting it, the probe in
 decision 5 costs a full decrypt on every already-migrated row, and the SQL
@@ -493,11 +517,19 @@ works - probe-first is still correct - but a resumed pass over a mostly-migrated
 table gets expensive, and the checkpoint stops being merely an optimization in
 practice. Owner: enc-14p (the vault layer).
 
+*Resolved at acceptance (2026-08-27): it exists - enc-ADR-0004 decision 12's
+`describe/1`, keyless and unauthenticated. See the A9 resolution above.*
+
 **Q3. Where the wrapped-key store lives, and whether R1 truly needs nothing
 here.** Decision 9 asserts A14 on the strength of the envelope being upstream's.
 If the wrapped per-tenant keys turn out to live in a host-owned Ecto table, then
 re-wrap is an Ecto operation after all and the seam in decision 9 is drawn in
 the wrong place. Owner: enc-2u6 / enc-53a.
+
+*Resolved at acceptance (2026-08-27): the store is an Ecto table in this
+package, and the seam holds one notch narrower than drawn - R1/R4 get a
+narrow key-store API on the store-backed provider, outside the migrator's
+plan and task surface (enc-ADR-0005's answer; A14 reworded accordingly).*
 
 **Q4. Whether shipping a migration *generator* is consistent with "no DDL".**
 Decision 6 needs a checkpoint table and decision 9 forbids this package from
