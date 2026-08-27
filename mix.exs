@@ -60,7 +60,7 @@ defmodule Encryptor.Ecto.MixProject do
     [
       name: "encryptor_ecto",
       licenses: ["Apache-2.0"],
-      files: ~w(lib mix.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(lib mix.exs .formatter.exs README.md LICENSE CHANGELOG.md),
       links: %{
         "GitHub" => @source_url,
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
