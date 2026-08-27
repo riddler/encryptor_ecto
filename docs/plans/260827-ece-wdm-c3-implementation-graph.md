@@ -165,12 +165,17 @@ survives in this repository's `CLAUDE.md`, which is `ece-0rn` item 4.
 
 Three beads sit ahead of the engine deliberately.
 
-`ece-4ib` and `ece-l6t` are decisions, not implementations. Both records assign
-their open questions to this repository "before implementation", and the
-questions shape surfaces: whether the plan grows an `order_by:` escape hatch or
-a documented restriction changes the plan format, and whether the checkpoint is
-a generated migration or a file changes what `gen.migration` is for. Answering
-them after the engine exists means changing the engine.
+`ece-4ib` and `ece-l6t` are decisions, not implementations, and they sit ahead
+of the surfaces they shape: whether the plan grows an `order_by:` escape hatch
+or a documented restriction changes the plan format, and whether the checkpoint
+is a generated migration or a file changes what `gen.migration` is for.
+Answering them after the engine exists means changing the engine.
+
+Three of the four questions carry an explicit owner line assigning them to this
+repository "before implementation" - ADR-0002 Q5 and Q6, and ADR-0004 Q3, which
+restates Q6. ADR-0002 Q4 carries no owner and is recorded only as "Not
+settled"; it is folded into `ece-l6t` because `ece-5qb` ships `gen.migration`
+either way and somebody has to have decided by then.
 
 `ece-cuo` is a build item and it lands alone. `ece-b25`'s own description asked
 for the CI service; splitting it out keeps a workflow-file change off a branch
