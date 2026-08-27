@@ -103,6 +103,152 @@ pagination orders on integer and binary primary keys day one; composite and
 non-orderable primary keys are documented as unsupported until a real request
 arrives, and are refused with a clear error rather than handled partially.
 
+**5. Q4 is proposed answered: `gen.migration` ships, because decision 9's
+refusal is about *executing* DDL and not about *authoring* it.** Recorded on
+`ece-l6t`. Unlike amendment 4 above, this one carries no operator ruling
+behind it: it is a recommendation drafted for the operator's read, and
+acceptance is theirs.
+
+Q4 asks whether shipping a migration generator is consistent with "no DDL".
+The recommendation is that it is, and that the apparent tension comes from
+reading decision 9 as a refusal to have opinions about tables rather than a
+refusal to hold authority over them. Decision 9's own seam sentence is the
+test: *if an operation would still be needed by a host that stores its
+ciphertext somewhere other than Ecto, it is not this package's.* A host that
+does not store ciphertext in Ecto needs no checkpoint table at all, so the
+checkpoint is on this side of the seam by that record's own rule. What
+decision 9 protects is the host's control over schema change - its review,
+its rollback, its deploy coupling - and a file the host reads in a diff,
+commits, and runs with its own `mix ecto.migrate` preserves every one of
+those. The package opens no connection and runs no DDL, at runtime or from a
+task, which is what the refusal actually says.
+
+The alternative Q4 names, progress to a file or to stdout only, is rejected
+as the *default* for the reason Q4 itself gives and for one it does not. The
+reason it gives: a container has no durable filesystem, so the cursor a
+six-hour pass earned dies with the pod. The reason it does not: the
+checkpoint written by the same transaction as the batch it describes is
+consistent with that batch by construction, and a file written beside a
+database transaction is not - a crash between the commit and the write leaves
+a cursor that disagrees with the rows. Decision 5 means that disagreement
+costs a re-scan rather than correctness, which is exactly why this is a
+recommendation about cost and not about safety.
+
+Accepting this answer would add three things the accepted text leaves
+unspecified, and all three exist because "this package effectively owns a
+table's schema" is a real cost that is better paid explicitly than left
+implicit:
+
+- **The table is named, and the name is an option.** The generated migration
+  creates `encryptor_ecto_migration_checkpoints` by default, and both `run/2`
+  and the generator accept `checkpoint_table:` for a host whose naming
+  convention or schema layout differs. Its columns are decision 6's tuple, one
+  row per field per prefix: `plan`, `schema`, `field`, `prefix`, `last_id`,
+  the counts, `started_at`, `updated_at`, with a unique index over
+  `{plan, schema, field, prefix}`. `last_id` stores the rendered primary key
+  as text rather than a typed column, because amendment 4 admits both integer
+  and binary primary keys and one checkpoint table serves both.
+- **A missing or stale checkpoint table is a refusal, never a creation.**
+  `run/2` preflights the table and, if it is absent, halts naming
+  `mix encryptor.ecto.gen.migration` rather than issuing the `CREATE TABLE`
+  itself. This is the line decision 9 draws, drawn at the one place where
+  crossing it would be convenient.
+- **`checkpoint: :none` keeps the rejected alternative available as a
+  documented degraded mode.** A host that will not add the table runs the pass
+  with no checkpoint at all and reports progress to stdout. Decision 5 makes
+  that correct rather than merely tolerable: without a checkpoint, `resume:
+  true` is meaningless and every run is a full scan, which is slow and never
+  wrong. Naming the mode is what turns "we thought about a file and decided
+  against it" into a choice the host can make.
+
+Consequence for the implementer (`ece-5qb` ships `gen.migration` either way,
+and `ece-b25` builds the preflight): the generator emits the named table, the
+engine refuses rather than creates, and `checkpoint: :none` is an `opts()`
+member alongside `resume:`.
+
+**6. Q5 is proposed answered: the plan stays single-repo and prefix-free,
+visiting prefixes is a run option rather than a plan option, and the
+checkpoint key gains the prefix.** Recorded on `ece-l6t`. This one likewise
+carries no operator ruling; it is a recommendation for the operator's read.
+
+*The multi-repo half is already answered and is restated only so that
+`ece-vqe` does not reopen it.* Decision 12 says a plan names one repo and a
+host with several writes several plans. Nothing here changes that: the plan's
+`repo:` stays singular and no `repos:` list is added. A sharded host is the
+same shape - `Repo.put_dynamic_repo/1` before `run/2`, per decision 12 - and
+it needs no shard component in the checkpoint key, because the checkpoint
+lives in whichever repo is current, so each shard already keeps its own.
+
+*The prefix half is the open part, and the recommendation is the middle of
+Q5's three candidates.* A `prefix:` option on `run/2` (and `--prefix` on the
+task), singular, defaulting to the repo's own default prefix. Not a
+`prefixes:` list in the plan module, and not "nowhere yet".
+
+Not in the plan, because ADR-0001 decision 4 supplies the argument in its own
+words while excluding the prefix from the encryption context: a prefix is *a
+deployment-time placement decision and can differ between environments for the
+same logical table*. Decision 2's case for the plan being code is that its
+contents are facts about the schema, reviewed in a diff and versioned with the
+schema they describe. A prefix list is not such a fact, and baking one in
+means either a plan module that differs per environment or one that carries
+every environment's list - both of which put a deployment fact through code
+review as though it were a schema fact.
+
+Not "nowhere yet", because "nowhere yet" is not free, and this is the finding
+that decides the question. Decision 6 keys the checkpoint on `{plan, schema,
+field, last_id, ...}`, which carries no prefix. A caller looping `run/2` over
+prefixes today - the thing "nowhere yet" tells them to do - has every prefix
+sharing one checkpoint row, so the second prefix resumes at the first's cursor
+and *silently skips every row below it*. Decision 5's probe-first idempotence
+does not cover this: probe-first makes re-visiting a row safe, and this is a
+row never visited. So the prefix has to reach the checkpoint key whether or
+not the option exists, and once it is in the key the option is the honest way
+to put it there.
+
+What is deliberately not added: any enumeration of prefixes. The package ships
+no "all prefixes" mode and reads no database catalog to find them. A host
+knows its own prefix list, catalog introspection is closer to the schema
+authority decision 9 refuses than anything else in this record, and a loop the
+host writes is three lines it can see. Because the ciphertext is portable
+across prefixes (ADR-0001 decision 4), that loop needs no per-prefix
+configuration of any kind - the same plan, the same types, one option
+changing.
+
+Consequence for the implementers: `ece-vqe` adds no prefix construct to the
+plan DSL and keeps `repo:` singular; `ece-b25` puts `prefix` in the checkpoint
+key and in its unique index; `ece-5qb` adds `--prefix` to the `migrate` and
+`verify` grammars.
+
+**Amendments 5 and 6 together, rendered against "The contract as typespecs"
+below.** Three additions, no removals, and no change to `Plan.t()` - the plan
+struct keeps its single `repo:` and gains nothing:
+
+```elixir
+@type opts :: [
+        mode: mode(),
+        batch_size: pos_integer(),
+        resume: boolean(),
+        prefix: String.t() | nil,
+        checkpoint: :table | :none,
+        checkpoint_table: String.t(),
+        on_error: :halt | :continue,
+        only_tenants: [String.t()] | nil,
+        except_tenants: [String.t()],
+        only: [{module(), [atom()]}] | nil,
+        progress: (Report.t() -> any())
+      ]
+
+@spec verify(plan :: module(), [sample: pos_integer() | :all, prefix: String.t() | nil]) ::
+        {:ok, Report.t()} | {:error, Report.t()}
+```
+
+and `Report.t()`'s `cursors` key widens from `%{{module(), atom()} => term()}`
+to `%{{module(), atom(), String.t() | nil} => term()}`, which is the in-memory
+face of the same prefix component the checkpoint row gains. `checkpoint:
+:table` is the default and `checkpoint: :none` with `resume: true` is an
+argument error, for the reason ADR-0004's amended grammar gives: resuming from
+a checkpoint that was never written is a request with no meaning.
+
 ## Context
 
 ADR-0001 makes a schema field encrypted by naming a type module, and says
@@ -638,6 +784,17 @@ but it does mean this package effectively owns a table's schema while
 disclaiming DDL. The alternative - progress to a file or to stdout only - keeps
 the disclaimer clean and makes resume unreliable in a container. Not settled.
 
+*Answered 2026-08-27 (`ece-l6t`), recorded as proposed amendment 5 above -
+status proposed, and unlike amendment 4 this one carries no operator ruling
+behind it, so acceptance is entirely the operator's. Recommendation: the
+generator is consistent with decision 9, because that refusal is about
+executing DDL and holding schema authority, not about authoring a file the
+host reviews and runs. Accepting it names the table
+(`encryptor_ecto_migration_checkpoints`, overridable), makes a missing table a
+refusal that points at the generator rather than a `CREATE TABLE`, and keeps
+Q4's alternative alive as an explicit `checkpoint: :none` degraded mode that
+decision 5 makes correct.*
+
 **Q5. Multi-repo, per-tenant prefix, and sharded hosts.** A plan names one repo
 and no prefix. ADR-0001 decision 4 deliberately excludes the prefix from the
 encryption context, which means ciphertext is portable across prefixes and the
@@ -645,6 +802,18 @@ migrator only needs to *visit* every prefix, not vary its context per prefix.
 Whether that visiting belongs in the plan (a `prefixes:` list), in the caller (a
 loop over `run/2`), or nowhere yet is open. Owner: this repo, before
 implementation.
+
+*Answered 2026-08-27 (`ece-l6t`), recorded as proposed amendment 6 above -
+status proposed, no operator ruling behind it, acceptance is the operator's.
+Recommendation: the middle candidate. A `prefix:` run option and a `--prefix`
+flag, not a `prefixes:` list in the plan, because ADR-0001 decision 4 calls a
+prefix a deployment-time placement decision and decision 2's case for the plan
+being code is that its contents are schema facts. Not "nowhere yet" either:
+decision 6's checkpoint key carries no prefix, so a caller looping `run/2`
+over prefixes today has the second prefix resume at the first's cursor and
+silently skip rows - decision 5's idempotence covers a row re-visited, not a
+row never visited. The multi-repo and sharded halves are decision 12's already
+and are unchanged. No prefix enumeration is shipped.*
 
 **Q6. Ordering guarantees for non-integer and composite primary keys.** Keyset
 pagination needs a total order on the primary key. UUIDv4 keys order fine but

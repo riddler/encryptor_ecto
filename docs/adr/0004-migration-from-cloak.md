@@ -2,6 +2,51 @@
 
 Status: accepted (2026-08-27)
 
+## Proposed amendments (2026-08-27)
+
+Status: **proposed**. Acceptance is the operator's; the decision text below is
+unchanged. These record, in the record that owns the task surface, what
+accepting ADR-0002's proposed amendments 5 and 6 (`ece-l6t`) would add to it.
+Neither carries an operator ruling behind it - both are recommendations
+drafted for the operator's read.
+
+**1. Decision 6's grammar gains `--prefix` and `--no-checkpoint`; the four
+verbs are unchanged.** Decision 6 fixes the task family and closes it, and
+this amendment closes it at the same four verbs. What it adds is two flags,
+each of which is decision 6's own rule applied to a new `opts()` member: every
+flag maps one-to-one onto an option in ADR-0002's `opts()`, and the tasks add
+no capability the library function does not have. As amended:
+
+```
+mix encryptor.ecto.migrate PLAN --mode dry-run|write
+                                [--batch-size N] [--resume] [--no-resume]
+                                [--prefix PREFIX] [--no-checkpoint]
+                                [--only Schema:field,Schema:field]
+                                [--only-tenant ID] [--except-tenant ID]
+                                [--on-error halt|continue]
+
+mix encryptor.ecto.verify PLAN [--prefix PREFIX] [--sample N | --sample all]
+```
+
+`--prefix` names one schema prefix to visit and defaults to the repo's own
+default prefix; a host with several loops the task or `run/2` over its own
+list, and no flag enumerates prefixes for it. `--no-checkpoint` is
+`checkpoint: :none`, the documented degraded mode for a host that will not add
+the checkpoint table: every run becomes a full scan, which ADR-0002 decision 5
+makes correct rather than merely tolerable. `--no-checkpoint` and `--resume`
+together are a usage error and exit 2, because resuming from a checkpoint that
+was never written is a request with no meaning.
+
+Exit codes are unchanged. `verify` takes `--prefix` because a verification
+that silently checked a different prefix than the pass wrote to would be worse
+than no verification.
+
+**2. `gen.migration` writes the named checkpoint table.** ADR-0002 proposed
+amendment 5 names it `encryptor_ecto_migration_checkpoints`, gives its
+columns, and makes the name overridable. Decision 6's table row for
+`mix encryptor.ecto.gen.migration` is otherwise unchanged: it still writes one
+Ecto migration file into the host's tree and still runs no DDL itself.
+
 ## Context
 
 ADR-0001 argues that this package's type surface should be `cloak_ecto`'s
