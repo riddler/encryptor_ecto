@@ -50,7 +50,7 @@ defmodule Encryptor.Ecto.MixProject do
   defp deps do
     [
       {:ecto, "~> 3.13"},
-      {:encryptor, github: "riddler/encryptor", ref: "ed94a60ee0b350dc9874f8baffb73592e60c9f45"}
+      {:encryptor, github: "riddler/encryptor", ref: "05bd67c0c4840e363911a2a70f1aa48a448fffd1"}
     ]
   end
 end
