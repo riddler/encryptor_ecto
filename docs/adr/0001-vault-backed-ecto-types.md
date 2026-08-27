@@ -43,6 +43,66 @@ lands here as five amendments, already applied to the text below.
    fields sharing one declared pair would be silently mutually
    substitutable.
 
+## Proposed amendments (2026-08-27)
+
+Status: **proposed**. Acceptance is the operator's; the decision text below
+is unchanged. These are `ece-0rn` items 3 and 7 - two places where a
+rendering of an accepted decision was not carried forward when the decision
+was amended at acceptance. Neither changes what this record decides; both
+make a stale rendering agree with it.
+
+The operator's ruling of 2026-08-27 opens with the words that decide these:
+
+> accept all recs as written
+
+**1. The `opts/0` typespec renders the amended option set.** Decision 3's
+option table, as amended at acceptance, carries `:vault`, `:tenant`,
+`:context`, `:json` (Map only), `:legacy` (amendment 4) and `:table` /
+`:column` (amendment 5). The typespec block below renders only the first
+three, and is stale against the table it renders rather than stating a
+different option set. As amended it reads:
+
+```elixir
+defmodule Encryptor.Ecto.Binary do
+  @type opts :: [
+          vault: module(),
+          tenant: :scope | :none | module(),
+          context: %{optional(String.t()) => String.t()},
+          legacy: module(),
+          table: String.t(),
+          column: String.t()
+        ]
+
+  @spec __using__(opts()) :: Macro.t()
+end
+
+defmodule Encryptor.Ecto.Map do
+  @type opts :: [{:json, module()} | Encryptor.Ecto.Binary.opts()]
+
+  @spec __using__(opts()) :: Macro.t()
+end
+```
+
+`:json` stays off `Binary`'s list because decision 3 marks it Map-only, and
+the option set stays closed: unknown options raise at compile time, exactly
+as decision 3 says.
+
+**2. Assumption rows A1 and A3 carry their acceptance verdicts in place.**
+ADR-0002's A14 was reworded in its own table when acceptance narrowed it,
+while A1 and A3 here were left at their pre-acceptance wording with the
+verdicts recorded only in the italic resolution paragraph above the table.
+That is the same staleness class as item 1, so the rows are amended to
+state what acceptance amendment 1 decided:
+
+| # | Assumed | Used by |
+|---|---|---|
+| A1 | A vault module exports `encrypt(plaintext, opts)` and `decrypt(ciphertext, opts)`, taking a keyword list carrying `:key` and `:encryption_context`, and returning `{:ok, binary}` / `{:error, reason}` | 1, 6 |
+| A3 | The canonical context keys include `"table"` and `"column"`, which this layer supplies, and `"tenant_ref"` - a keyed derivation of the tenant selector, injected by the vault and never supplied here | 4, 5 |
+
+The italic resolution paragraph above the table stays as the record of how
+each assumption was judged; these rows stay as the statement of what is
+assumed now. A2 and A4-A7 are unchanged and are confirmed as written.
+
 ## Context
 
 This package exists to put field-level encryption behind an `Ecto.Type`, so

@@ -7,6 +7,83 @@ softened to a key-hierarchy claim; independently wrapped index keys are the
 recorded upgrade path if a search-only consumer materializes. See the A9
 resolution below.)
 
+## Proposed amendments (2026-08-27)
+
+Status: **proposed**. Acceptance is the operator's; until then the decision
+text below is unchanged and these two sections are the operative reading of
+the points they name. They resolve `ece-0rn` items 1 and 2 - two places
+where this record contradicts itself rather than two new decisions.
+
+The operator's ruling of 2026-08-27, verbatim:
+
+> accept all recs as written, D1) rule that :version participates, and amend
+> d2's info string to include it; D2) compose by nesting - the index key is
+> derived as a subkey under the upstream label, and d2's literal prefix
+> becomes the info string inside that subkey derivation
+
+**1. `:version` participates in the derivation, and decision 2's `info`
+string carries it (D1).** Decision 7 says an index carries a `:version` that
+participates in the HKDF `info` (decision 2); decision 2's `info` string
+carries a prefix, a table, a column and an `index_name`, and no version
+component. Decision 7 is the operative half - "rule that `:version`
+participates" - and decision 2's `info` string is amended to include it:
+
+```
+info = "encryptor_ecto/blind_index/v1|" <> table <> "|" <> column <> "|" <>
+       index_name <> "|" <> Integer.to_string(version)
+```
+
+`:version` is already in `index_opts/0` as `version: pos_integer()` and
+defaults to `1`, so an index that declares no version derives under
+`...|<index_name>|1` and nothing about an existing declaration changes.
+
+What the amendment buys is the property decision 7 assumes and decision 2
+did not deliver: **a version bump derives different key bytes**. Without it
+the new column in the two-column rotation dance would be recomputed to
+byte-identical values, and the sequence would rotate nothing while reporting
+that it had. The version joins `index_name` for the same reason `index_name`
+is there - it distinguishes two indexes over one column - and it is what
+makes a key rotation, as opposed to a second concurrent index, expressible.
+
+**2. The upstream label and decision 2's prefix compose by nesting (D2).**
+The acceptance amendment above derives index keys as subkeys under
+enc-ADR-0003 decision 7's `"encryptor/v1/blind-index"` label. Decision 2
+states its own literal domain-separation prefix. Neither supersedes the
+other - the acceptance amendment's "What survives in full" list keeps "index
+keys are never encryption keys (domain separation, decision 2)" - and the
+unwritten part was how the two labels compose. They "compose by nesting -
+the index key is derived as a subkey under the upstream label, and d2's
+literal prefix becomes the info string inside that subkey derivation":
+
+```
+index_root = HKDF-Expand(
+  tenant_master_key,
+  info = "encryptor/v1/blind-index",
+  32
+)
+
+index_key = HKDF-SHA256(
+  ikm  = index_root,
+  salt = <vault-configured, per-deployment>,
+  info = "encryptor_ecto/blind_index/v1|" <> table <> "|" <> column <> "|" <>
+         index_name <> "|" <> Integer.to_string(version)
+)
+```
+
+Two derivations, in order, each separating at its own layer. The outer label
+separates the whole blind-index tree from every other use of a tenant master
+key, and belongs to enc-ADR-0003 decision 7, which reserves the
+`"encryptor/v<n>/<purpose>"` namespace for exactly this. The inner prefix
+separates this package's index derivation from anything else that might one
+day derive under that tree, and belongs to this record. Both halves of the
+structural "never the encryption key" guarantee therefore hold, and the
+`ikm` line of decision 2 reads as the *derived index root* for that scope
+rather than the scope's key material directly.
+
+The capability claim is unaffected: computing `index_root` requires the
+tenant master key, so this remains the key-hierarchy claim the acceptance
+amendment softened it to, not a search-only capability.
+
 ## Context
 
 ADR-0001 closed the door on querying encrypted columns and left one door open

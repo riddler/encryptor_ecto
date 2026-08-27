@@ -26,7 +26,7 @@ wraps for the Ecto layer.
 
 | Situation | Rule |
 |---|---|
-| A decision is recorded in both trackers and they disagree | The repository whose files change owns the decision. The Ecto types, the schema conventions, the migration and backfill story, the blind index and the re-wrap mix task are this repo's call; the vault surface, the key-provider behaviour, the envelope and key-derivation scheme, the encryption-context convention and the rotation model are encryptor's |
+| A decision is recorded in both trackers and they disagree | The repository whose files change owns the decision. The Ecto types, the schema conventions, the migration and backfill story and the blind index are this repo's call; the vault surface, the key-provider behaviour, the envelope and key-derivation scheme, the encryption-context convention, the rotation model, and re-wrap and crypto-shred are encryptor's. ADR-0002 decision 9 draws the seam: re-wrap touches the key store, the key store is the vault's, and this package's task list contains no verb that operates on a key |
 | A bead pairs with one in the other repo | Both halves carry `mirrors: <id>` as the first line of the description |
 | You are about to schedule, claim, plan against, or cite the status of a mirrored bead | Re-read the other tracker first and write a new dated note above the old one, then act |
 | A `mirrors:` line names an id that no longer resolves | Broken immediately, not stale. Fix it with one `bd update` the moment you notice |
@@ -99,8 +99,9 @@ Also avoid `bd edit`, which opens `$EDITOR` and blocks. Use
 
 `encryptor_ecto`: encrypted Ecto types for the
 [encryptor](https://github.com/riddler/encryptor) vault - `cloak_ecto`-shaped
-field encryption, where turning a plaintext column into an encrypted one is a
-two-line migration and a one-word schema change.
+field encryption, where an encrypted field is a type module the schema names
+like any other type, and moving an already-encrypted column onto this stack is
+a two-line change in the type modules with the schemas untouched.
 
 The vault answers the key-management questions: where key material comes from,
 which key a given record's data belongs to, and how that key rotates. What it
@@ -110,15 +111,22 @@ dump arms disagree about `nil`, the ciphertext lands in a column nobody
 remembered to widen, and the tenant a value belongs to gets resolved a slightly
 different way at every call site. This package is that glue:
 
-- **Encrypted field types.** An encrypted field is an `Ecto.Type` module, so a
-  schema declares it the way it declares any other type. Changesets, queries,
+- **Encrypted field types.** An encrypted field is a type module - an
+  `Ecto.ParameterizedType` (ADR-0001 decision 1) - so a schema declares it the
+  way it declares any other type. Changesets, queries,
   and `Repo` calls keep their ordinary form; the encryption happens in the
   type, not at the call site.
-- **A two-line migration.** Adopting encryption on an existing field is a
-  column type change to `:binary` and a backfill - no new table, no companion
-  column, no shadow schema. Ciphertext carries the AWS Encryption SDK message
-  format the vault produces, key identity included, so the column is
-  self-describing and rotation needs no flag day.
+- **A migration that needs no downtime.** For a field that is *already*
+  encrypted - through `cloak_ecto` or a hand-rolled type - both formats are
+  bytes in the `:binary` column that already exists, so the move is a data
+  migration rather than a schema one: the type modules change, the schemas do
+  not, and the rewrite runs against live traffic. Adopting encryption on a
+  column that was never encrypted is not that case: plaintext lives in a text
+  column and ciphertext must live in a binary one, so it is an expand,
+  backfill and contract across two columns and two deploys (ADR-0002
+  decision 8). The stored bytes are the vault's format, stored verbatim -
+  this layer adds no envelope, no version prefix and no magic bytes, and has
+  no opinion on ciphertext size (ADR-0001 decision 11).
 - **Tenant context, resolved once.** Which tenant a value belongs to is
   resolved by a declared strategy the type reads, rather than being threaded
   through every changeset by hand.
@@ -131,7 +139,7 @@ almost every convention below is inherited rather than demonstrated.
 ### Read before writing any code here
 
 The founding ADR beads (`ece-alx` the `cloak_ecto`-shaped vault-backed Ecto
-types, `ece-56a` the re-wrap and rotation mix task, `ece-azn` the blind index)
+types, `ece-56a` the migrator, `ece-azn` the blind index)
 decide the contracts this package is built out of, and `ece-404` is the
 operator gate that accepts them. Until an ADR is accepted, its contract is
 open: do not encode a guess about it in code, and stop and report if a bead

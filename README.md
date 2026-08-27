@@ -23,7 +23,11 @@ makes it reviewable.
 | [ADR-0001](docs/adr/0001-vault-backed-ecto-types.md) | accepted, with amendments | The types, the closed option set, the encryption context, tenant resolution |
 | [ADR-0002](docs/adr/0002-migrator.md) | accepted | The migrator: plan-driven, probe-first, compare-and-swap, live traffic |
 | [ADR-0003](docs/adr/0003-blind-index.md) | accepted, with one amendment | Keyed blind indexes, per-tenant by default, equality only |
-| [ADR-0004](docs/adr/0004-migration-from-cloak.md) | proposed | Adoption: the migration runbook, the task family, the mixed window |
+| [ADR-0004](docs/adr/0004-migration-from-cloak.md) | accepted | Adoption: the migration runbook, the task family, the mixed window |
+
+ADR-0001, ADR-0002 and ADR-0003 each carry a *Proposed amendments
+(2026-08-27)* section awaiting an acceptance reading; the accepted decision
+text in each is unchanged.
 
 The implementation graph derived from them is
 [`docs/plans/260827-ece-wdm-c3-implementation-graph.md`](docs/plans/260827-ece-wdm-c3-implementation-graph.md).

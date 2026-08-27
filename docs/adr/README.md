@@ -7,6 +7,11 @@
 | [0003](0003-blind-index.md) | keyed blind indexes, per-tenant by default, equality only | accepted (2026-08-27, with one amendment) |
 | [0004](0004-migration-from-cloak.md) | Migration from a prior encryption scheme, with cloak_ecto as the named case | accepted (2026-08-27) |
 
+ADR-0001, ADR-0002 and ADR-0003 each carry a **Proposed amendments
+(2026-08-27)** section, awaiting the operator's acceptance reading. The
+accepted decision text in each is unchanged; the Status column above moves
+only when those are read.
+
 New ADRs: next number, same three-section format (Context, Decision,
 Consequences), plus the typespecs and worked-example sections this family's
 records carry. Pick the number against a freshly fetched remote.

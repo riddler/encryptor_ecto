@@ -4,6 +4,72 @@ Status: accepted (2026-08-27; the design is unchanged - the assumption
 table and open questions carry their acceptance resolutions, and A14 is
 reworded per enc-ADR-0005)
 
+## Proposed amendments (2026-08-27)
+
+Status: **proposed**. Acceptance is the operator's; the decision text below
+is unchanged. These fold ADR-0004's extensions to this record into this
+record, so that the field spec and the report classification are readable in
+one place rather than assembled from two.
+
+The operator's ruling of 2026-08-27 opens with the words that decide this
+one:
+
+> accept all recs as written
+
+**1. `field_spec/0` gains `source_authenticated:` and `validate:`.**
+ADR-0004 decision 3a lets a plan field declare `source_authenticated: false`
+where the legacy cipher is unauthenticated, and decision 3b adds `validate:`,
+a host-supplied `(term() -> boolean())` applied to the loaded plaintext
+before it is re-encrypted. The declaration is an acknowledgement rather than
+a capability flag, and it is not free: a field declaring
+`source_authenticated: false` refuses to run in `--mode write` unless
+`validate:` is declared alongside it. The spec in "The contract as typespecs"
+below reads, as amended:
+
+```elixir
+@type field_spec :: [
+        from: module(),
+        to: module(),
+        into: atom() | nil,
+        source_authenticated: boolean(),
+        validate: (term() -> boolean()) | nil
+      ]
+```
+
+An AEAD legacy cipher - the common case - declares neither and is unaffected.
+
+**2. `Report.class/0` gains `:migratable_unverified`.** Decision 7's
+classification gains a fifth class, reported in place of `:migratable` for a
+field declared `source_authenticated: false`: the probe failed and the `from`
+load succeeded, but nothing authenticated the bytes it read. `verify` counts
+it separately, so an operator's evidence never says "verified" about rows
+nothing verified. As amended:
+
+```elixir
+@type class ::
+        :null
+        | :already_target
+        | :migratable
+        | :migratable_unverified
+        | :undecryptable
+```
+
+and decision 7's table gains the corresponding row:
+
+| Class | Meaning |
+|---|---|
+| `:migratable_unverified` | Probe failed, `from` load succeeded, and the source cipher is unauthenticated (ADR-0004 d3) |
+
+A row whose loaded value fails `validate:` is classified `:undecryptable`
+and handled by decision 11 exactly as any other failure - there is still no
+class that means "skipped silently".
+
+**3. A14 needed no change.** `ece-0rn` carries a conductor addition recording
+that A14 should read "needs nothing from the migrator" per enc-ADR-0005 open
+question 2. It already does: the reword landed with this record's acceptance,
+and both the status line above and the A14 resolution below carry it. This
+section records the check rather than a change.
+
 ## Context
 
 ADR-0001 makes a schema field encrypted by naming a type module, and says
