@@ -16,7 +16,14 @@ defmodule Encryptor.Ecto.MixProject do
       description:
         "Encrypted Ecto types for the Encryptor vault - drop-in field encryption with a two-line migration",
       source_url: @source_url,
-      package: package()
+      package: package(),
+      test_coverage: [tool: ExCoveralls],
+      dialyzer: [plt_add_apps: [:ex_unit]],
+      preferred_cli_env: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.html": :test
+      ]
     ]
   end
 
@@ -40,9 +47,8 @@ defmodule Encryptor.Ecto.MixProject do
     ]
   end
 
-  # The quality tooling (ex_quality, credo, dialyxir, excoveralls), ex_doc and
-  # its `docs/0` configuration, and CI are added by the beads that follow this
-  # one in the bootstrap stack.
+  # ex_doc and its `docs/0` configuration, and CI, are added by the beads that
+  # follow this one in the bootstrap stack.
   #
   # `encryptor` is not on Hex yet. Until its first release it enters as a git
   # dep pinned to a pushed SHA, which is the committed form - never a path
@@ -50,7 +56,13 @@ defmodule Encryptor.Ecto.MixProject do
   defp deps do
     [
       {:ecto, "~> 3.13"},
-      {:encryptor, github: "riddler/encryptor", ref: "05bd67c0c4840e363911a2a70f1aa48a448fffd1"}
+      {:encryptor, github: "riddler/encryptor", ref: "05bd67c0c4840e363911a2a70f1aa48a448fffd1"},
+
+      # Dev / test
+      {:ex_quality, "~> 0.14", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:excoveralls, "~> 0.18", only: :test}
     ]
   end
 end
