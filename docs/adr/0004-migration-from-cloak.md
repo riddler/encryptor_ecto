@@ -127,7 +127,7 @@ Three properties follow, and they are the reason for the indirection:
   proceeds: ADR-0002 decision 11's default is still to halt the pass.
 - **A zero-arity function returned by a source is invoked once, and the result
   is the plaintext.** Deferred decryption is a real convention among legacy
-  types - `cloak_ecto`'s `:closure` option is exactly it (C3) - and a source
+  types - `cloak_ecto`'s `:closure` option is exactly it (C10) - and a source
   that returns a closure would otherwise have the migrator re-encrypt the
   *function* rather than the value. The unwrap is stated as a generic rule
   about the `Source` contract, not as cloak handling, and it inherits ADR-0002
@@ -451,10 +451,11 @@ than an omission:
 ADR-0001 and ADR-0002 carry tables of assumptions about the *upstream* vault,
 resolved at acceptance. These are different in kind: they are facts about a
 third-party library this package deliberately does not depend on, observed
-from its source rather than promised by it. They are listed because decisions
-2, 3, 6, 7 and 9 lean on them, and because a future reader deserves to know
-which parts of this record are observations about someone else's code and how
-firmly each was established.
+from its source rather than promised by it. They are listed because most of
+the decisions above lean on one or more of them - the table's last column says
+which - and because a future reader deserves to know which parts of this
+record are observations about someone else's code and how firmly each was
+established.
 
 **None of them is load-bearing on this package's code.** Decision 1 means no
 `lib/` file changes if any turns out wrong or goes stale; what changes is a
@@ -472,6 +473,7 @@ paragraph of the guide. The one exception is C8, which is load-bearing on a
 | C7 | Cloak's `Ecto.Type` layer has no per-user or per-tenant key model - its README says so directly - so a migrating host's legacy rows are under one key | README | 5 |
 | C8 | `Cloak.Ciphers.AES.GCM` is AEAD with a 16-byte auth tag; `Cloak.Ciphers.AES.CTR` is an unauthenticated stream cipher whose decrypt cannot fail on wrong content | Read from source | 3 |
 | C9 | The cloak migrator identifies its own fields by testing for an exported `__cloak__/0` on the type module | Read from source | 1, 7 |
+| C10 | A cloak type declared with `closure: true` returns a zero-arity function from `load/1` rather than the plaintext, deferring the decryption until it is called | Read from source | 2 |
 
 C2 and C8 are the load-bearing pair, and they interact. C2 is what makes the
 probe in ADR-0002 decision 5 decisive; C8 is the case where C2 holds
