@@ -15,8 +15,10 @@ defmodule Encryptor.Ecto do
   changeset, the query, and the migration all keep their ordinary form, and
   the column changes to `:binary` and nothing else.
 
-  Nothing is implemented yet. This module exists so the package has a root;
-  the type surface, the tenant-context strategy, and the error vocabulary are
-  each being decided in an ADR before any of them is built.
+  The package is being built out against its accepted ADRs. Tenant resolution
+  is in place - `Encryptor.Ecto.Tenant` holds the current tenant for a unit of
+  work and `Encryptor.Ecto.TenantContext` is the behaviour a host implements to
+  resolve it some other way. The type surface and the error vocabulary are
+  still ahead.
   """
 end
