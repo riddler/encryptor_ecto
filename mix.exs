@@ -68,21 +68,10 @@ defmodule Encryptor.Ecto.MixProject do
     ]
   end
 
-  # `encryptor` is not on Hex yet. Until its first release it enters as a git
-  # dep pinned to a pushed SHA, which is the committed form - never a path
-  # override. Re-pin to `{:encryptor, "~> 0.1"}` at that release.
-  #
-  # One consequence, since it is not obvious from anything else here: a git
-  # dependency cannot be published, so `mix hex.build` stops with
-  # "Dependencies excluded from the package (only Hex packages can be
-  # dependencies): encryptor" until the re-pin. That is expected, not a
-  # defect - the package() metadata above is complete and correct, and this
-  # package is not publishable before the vault is anyway. CI does not run
-  # hex.build, so nothing in the gate depends on it.
   defp deps do
     [
       {:ecto, "~> 3.13"},
-      {:encryptor, github: "riddler/encryptor", ref: "05bd67c0c4840e363911a2a70f1aa48a448fffd1"},
+      {:encryptor, "~> 0.1"},
 
       # Dev / test
       {:ex_quality, "~> 0.14", only: :dev, runtime: false},
