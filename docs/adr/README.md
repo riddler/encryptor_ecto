@@ -4,6 +4,7 @@
 |---|---|---|
 | [0001](0001-vault-backed-ecto-types.md) | cloak_ecto-shaped vault-backed types, with tenant context from an explicit process scope | proposed |
 | [0002](0002-migrator.md) | The migrator: a plan-driven, resumable, compare-and-swap row rewriter | proposed |
+| [0003](0003-blind-index.md) | keyed blind indexes, per-tenant by default, equality only | proposed |
 
 New ADRs: next number, same three-section format (Context, Decision,
 Consequences), plus the typespecs and worked-example sections this family's
