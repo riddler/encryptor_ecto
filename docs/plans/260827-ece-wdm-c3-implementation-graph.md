@@ -21,8 +21,12 @@ this repository.
 
 ADR-0004 is proposed, not accepted. Every bead it implies is filed and
 sequenced here, because the graph is more useful whole than partial, but none
-of them may be started before the record is accepted. The beads say so where
-it matters; this line is the general one.
+of them may be started before the record is accepted. **That gate lives in this
+document and nowhere else** - none of `ece-e8k`, `ece-90m`, `ece-4mg`,
+`ece-5qb`, `ece-6ba`, `ece-k5i`, `ece-22g`, `ece-xk6` or `ece-cxk` carries a
+not-before-acceptance line of its own. Whoever schedules those beads is
+responsible for checking the record's status first; if that proves too thin a
+guarantee, the fix is a note on each bead rather than a stronger sentence here.
 
 Two of the graph's roots are cross-repository and are named here rather than
 buried in a description:
@@ -69,7 +73,7 @@ Epic: `ece-1o7`, which now depends on `ece-55n`, `ece-rvs`, `ece-gr3`,
 |---|---|---|
 | `ece-1br` Tenant and the TenantContext behaviour | d5a, d5b, d5f, and both typespec blocks | - |
 | `ece-ld8` The exception family | d6, acceptance amendment 2 | - |
-| `ece-55n` Binary and the ParameterizedType callbacks | d1 (Binary), d2, d3, d6, d7, d9, d11, acceptance amendment 1 | `ece-1br`, `ece-ld8` |
+| `ece-55n` Binary and the ParameterizedType callbacks | d1 (Binary), d2, d3, **d5c, d5d**, d6, d7, d9, d11, acceptance amendment 1 | `ece-1br`, `ece-ld8` |
 | `ece-rvs` The declared-context freeze and its uniqueness check | d4, acceptance amendment 5 | `ece-55n` |
 | `ece-gr3` String and Map | d1 (the other two), d8 | `ece-55n` |
 | `ece-9p0` `tenant: :none` and the `:single`-vault rule | d5e, acceptance amendment 3 | `ece-55n` |
@@ -77,6 +81,16 @@ Epic: `ece-1o7`, which now depends on `ece-55n`, `ece-rvs`, `ece-gr3`,
 | `ece-rh0` The remaining wrapper types | d1's explicit deferral | `ece-gr3` (P3, additive) |
 
 Three notes on why the splits fall where they do.
+
+**Decisions 5c and 5d live in `ece-55n`, not in `ece-1br` or `ece-ld8`**, and
+the split is easy to get wrong. `ece-1br` resolves the tenant; `ece-ld8`
+defines `MissingTenantError` as a struct; the *raising* - a dump with no tenant
+in scope raises, and a load raises the same way - happens inside `dump/3` and
+`load/3`. ADR-0001 calls decision 5 its hard decision, and 5c is the half that
+is hardest to keep: the failure it forbids is a row written under the wrong key
+because a background job forgot, which is unrecoverable in a way an exception
+on the first test run is not. A graph that left it implied by "raises per
+decision 6" would be a graph in which nobody owned it.
 
 `ece-1br` and `ece-ld8` are separated from `ece-55n` because neither touches
 the vault. They are the only nodes in the whole graph that can be built and
@@ -134,11 +148,20 @@ query struct carries an invisible tenant-specific constant) is carried on
 
 **`ece-d72` has a blocking text defect ahead of it**, filed as `ece-0rn` item
 2. As accepted, index keys are derived subkeys under the upstream derivation
-label, while decision 2 states its own literal domain-separation prefix.
-Whether the two compose or the amendment supersedes the prefix is not written
-down, and that prefix is the structural half of the "an index key is never an
-encryption key" guarantee. This is a cryptographic decision, so per this
-repository's own rule it is an ADR answer and not an implementation one.
+label, while decision 2 states its own literal domain-separation prefix. The
+amendment does not supersede that prefix - its "What survives in full" list
+explicitly keeps "index keys are never encryption keys (domain separation,
+decision 2)" - so the open part is narrower than it first reads: how the two
+labels *compose*. It still blocks, because that prefix is the structural half
+of the "an index key is never an encryption key" guarantee, and a cryptographic
+choice is an ADR answer rather than an implementation one under this
+repository's own rule.
+
+**`ece-6a6` has the other one**, `ece-0rn` item 1: decision 7 says an index's
+`:version` participates in the HKDF `info`, and decision 2's `info` string has
+no version component. If decision 2 is the operative text, a version bump
+derives identical key bytes and decision 7's rotation dance rotates nothing.
+The `:bits` and `:slow` halves of that bead are unaffected.
 
 ## Migrator: ADR-0002 and ADR-0004
 
@@ -212,8 +235,8 @@ should say the tutorial is missing on purpose; `ece-22g` carries that line.
 
 One page is outside decision 10's set and is still a deliverable: `ece-q0s`,
 the blind-index option reference and security-properties table. ADR-0003's
-Consequences call that table "the deliverable a host reviews before adding an
-index, not after", which makes it a shipped artifact rather than an appendix.
+Consequences call that table "the deliverable a host reviews before adding one,
+not after", which makes it a shipped artifact rather than an appendix.
 
 The README is not in this table because it is not part of the set. It is
 brought current with the accepted ADR surface on this bead, as a design-phase
@@ -248,10 +271,15 @@ arms that would otherwise start against a half-built surface.
   is the one with a downstream consequence: `ece-d72` should not start before
   it is answered.
 - **ADR-0002's R1 and R4** - re-wrapping the key-encrypting key, and
-  crypto-shredding a tenant - are the vault's, on the record, and no bead here
-  touches them. The seam decision 9 draws is: if an operation would still be
-  needed by a host that stores its ciphertext somewhere other than Ecto, it is
-  not this package's.
+  crypto-shredding a tenant - are the vault's, and no bead here touches them.
+  The seam decision 9 draws is: if an operation would still be needed by a host
+  that stores its ciphertext somewhere other than Ecto, it is not this
+  package's. Note the acceptance narrowing rather than the original wording:
+  A14 as first written ("needs nothing from the Ecto layer") was judged one
+  notch too broad, and R1/R4 do need a narrow key-store API on the store-backed
+  provider - enumerate, update, delete wrappings - which sits outside the
+  migrator's plan and task surface. Decision 9's refusal survives intact *for
+  the migrator*; it is not a claim that the Ecto layer is uninvolved.
 - **Concurrency in the migrator** is deferred by ADR-0002 decision 12 and has
   no bead. Keyset ranges partition cleanly, so adding it later is additive and
   needs no change to the plan format or the checkpoint schema.

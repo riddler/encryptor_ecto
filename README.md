@@ -43,17 +43,21 @@ slightly different way at every call site.
 
 This package is that glue, in the shape Ecto already expects:
 
-- **Encrypted field types.** An encrypted field is an `Ecto.Type` module, so
-  a schema declares it the way it declares any other type. Changesets,
+- **Encrypted field types.** An encrypted field is a type module - an
+  `Ecto.ParameterizedType` - so a schema declares it the way it declares any
+  other type, naming a module the host defines. Changesets,
   queries, and `Repo` calls keep their ordinary form; the encryption happens
   in the type, not at the call site. The column is `:binary`, always.
 
-- **Anti-substitution by construction.** Every value is encrypted under an
-  encryption context that identifies the tenant, the table, and the column,
-  bound into the message as additional authenticated data. A ciphertext
-  lifted out of one row and dropped into another fails authentication rather
-  than decrypting into the wrong place, and a host cannot forget to supply
-  the context because it never supplies it.
+- **Anti-substitution by construction.** A value is encrypted under an
+  encryption context that identifies the table, the column, and - unless the
+  field is declared global - the tenant, bound into the message as additional
+  authenticated data. A ciphertext lifted out of one row and dropped into
+  another fails authentication rather than decrypting into the wrong place.
+  The table and column values are derived from the schema once, at declaration
+  time, and then frozen, so a physical rename does not invalidate stored rows;
+  they can be pinned explicitly, but nothing has to remember to pass them per
+  call.
 
 - **Tenant context, resolved once, and fail-closed.** A multi-tenant host app
   needs each tenant's rows encrypted under that tenant's own key. Which
@@ -79,8 +83,9 @@ This package is that glue, in the shape Ecto already expects:
   no `LIKE`, no prefix search, no range, and no ordering - permanently.
 
 The vault stays `Encryptor`. This package wraps it for the Ecto layer only; it
-adds no key management of its own and no dependency beyond Ecto and the vault.
-It issues no DDL, and its task list contains no verb that operates on a key:
+adds no key management of its own, and no dependency beyond Ecto, the vault,
+and a JSON serializer for the map type. It issues no DDL, and its task list
+contains no verb that operates on a key:
 rotating the key-encrypting key and crypto-shredding a tenant are the vault's
 operations, not this package's.
 
