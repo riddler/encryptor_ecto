@@ -62,5 +62,5 @@ version.
 
 ## License
 
-MIT - see
+Apache-2.0 - see
 [LICENSE](https://github.com/riddler/encryptor_ecto/blob/main/LICENSE).
