@@ -20,6 +20,51 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
+    # What the migrator promises is not expressible against a mock repo:
+    # compare-and-swap against a concurrent writer, keyset resume across a
+    # killed process, and the probe classifying an already-migrated row all
+    # need real rows. So the database-backed tests are tagged :database and
+    # this service is what lets CI run them.
+    #
+    # The suite must stay green with and without a database reachable, which
+    # is test/test_helper.exs's job: it probes PGHOST/PGPORT and excludes the
+    # :database tag when nothing answers, so a developer with no Postgres
+    # running gets legible skips rather than a red gate they cannot explain.
+    # Nothing in the gate command changes for the database - the connection
+    # is described entirely by the PG* environment below, which is also what
+    # a developer sets locally.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: encryptor_ecto_test
+        ports:
+          - 5432:5432
+        # Without a health check the job can reach the test stage before the
+        # server accepts connections, and the probe would then legitimately
+        # report "not reachable" and skip the very tests this service exists
+        # to run - a green run that tested nothing.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    # ECTO_REQUIRE_DATABASE is the part that makes a green run mean something:
+    # it turns "no database reachable" from a skip into a failure. A skip is
+    # the right answer on a developer's machine and the wrong one here, where
+    # a service container that failed to come up would otherwise produce a
+    # green run that exercised none of the tests it exists for.
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: encryptor_ecto_test
+      ECTO_REQUIRE_DATABASE: "1"
+
     steps:
       - uses: actions/checkout@v4
 
