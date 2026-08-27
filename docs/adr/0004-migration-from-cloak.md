@@ -1,6 +1,6 @@
 # ADR-0004: migration from a prior encryption scheme, with cloak_ecto as the named case
 
-Status: proposed
+Status: accepted (2026-08-27)
 
 ## Context
 
