@@ -109,10 +109,11 @@ defmodule Encryptor.Ecto.Migrator.ReportTest do
     end
 
     # Sabotage: made `verified?/1` list the classes that count *against* a
-    # verification instead of dropping the two that do not - the fifth class
-    # `ece-4mg` adds then verified green by default, and the operator's
-    # evidence said "verified" about rows nothing authenticated. This is the
-    # additive property ADR-0002 proposed amendment 2 depends on.
+    # verification instead of dropping the two that do not - a class added
+    # later then verified green by default, and the operator's evidence said
+    # "verified" about rows nothing authenticated. This is the additive
+    # property ADR-0002 proposed amendment 2 depended on, and still does for
+    # whatever a sixth class turns out to be.
     test "a class the function has never heard of counts against it" do
       report = Report.new(:verify) |> Report.count(:some_later_class) |> Report.finish()
 
@@ -127,6 +128,37 @@ defmodule Encryptor.Ecto.Migrator.ReportTest do
     test "a recorded failure is never verified" do
       report = Report.new(:verify) |> Report.record_failure(failure(1)) |> Report.finish()
 
+      refute Report.verified?(report)
+    end
+  end
+
+  describe "the fifth class" do
+    # Sabotage: dropped `:migratable_unverified` from `classes/0` - a report
+    # carried no zero for it, so an operator reading a dry run of an
+    # unacknowledged plan learned nothing about the class's existence, and
+    # `counts/1` wrote a checkpoint row without it.
+    test "is zeroed with the rest, and printed between its neighbours" do
+      report = Report.new(:dry_run)
+
+      assert Report.classes() == [
+               :null,
+               :already_target,
+               :migratable,
+               :migratable_unverified,
+               :undecryptable
+             ]
+
+      assert report.counts.migratable_unverified == 0
+    end
+
+    # Sabotage: made `verified?/1` drop `:migratable_unverified` alongside
+    # `:null` and `:already_target` - rows nothing authenticated verified
+    # green, which is the exact claim ADR-0004 decision 3a exists to stop the
+    # evidence making.
+    test "counts against a verification" do
+      report = Report.new(:verify) |> Report.count(:migratable_unverified) |> Report.finish()
+
+      assert Report.ok?(report)
       refute Report.verified?(report)
     end
   end

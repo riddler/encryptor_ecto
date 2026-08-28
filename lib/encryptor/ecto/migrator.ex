@@ -58,6 +58,15 @@ defmodule Encryptor.Ecto.Migrator do
   which rows fail to decrypt, how long it takes, and whether the checkpoint
   table is there.
 
+  `mode: :write` is refused outright - before a row is visited - while any
+  field in scope declares `source_authenticated: false` without a `validate:`
+  (ADR-0004 decision 3a). That field's legacy cipher cannot fail a decrypt on
+  wrong bytes, so nothing but the host's own check stands between a corrupt
+  row and a permanent, authenticated re-encryption of whatever it decrypted
+  to. A dry run and a verification are unaffected: they answer the question
+  the operator is supposed to ask first, and their counts say
+  `:migratable_unverified` while they do it.
+
   ## Options
 
   | Option | Default | |
@@ -101,10 +110,10 @@ defmodule Encryptor.Ecto.Migrator do
   `Encryptor.Ecto.Migrator.Census` renders the SQL half of decision 10 - the
   queries a DBA runs against the database with no application and no key.
   The `mix` task family is `ece-5qb`. `source_authenticated:` and `validate:`
-  - and with them the `:migratable_unverified` class - are `ece-4mg`; the
-  report is built so that adding that class is additive
-  (`Encryptor.Ecto.Migrator.Report.classes/0`), and `Report.verified?/1`
-  counts it against a verification without being told about it.
+  are declared in `Encryptor.Ecto.Migration` and applied in
+  `Encryptor.Ecto.Migrator.Pass`; this module carries only the half that has
+  to be decided before any row is read, which is the `--mode write` refusal
+  below.
   """
 
   alias Encryptor.Ecto.Migrator.Checkpoint
@@ -320,6 +329,7 @@ defmodule Encryptor.Ecto.Migrator do
 
   @spec pass!(module(), Plan.t(), Plan.rewrite(), {atom(), keyword()}, options()) :: Pass.t()
   defp pass!(plan_module, plan, rewrite, {field, spec}, options) do
+    :ok = writable!(rewrite.schema, field, spec, options)
     key = key!(rewrite.schema)
     target_column = Keyword.get(spec, :into) || field
     to = Keyword.fetch!(spec, :to)
@@ -337,6 +347,8 @@ defmodule Encryptor.Ecto.Migrator do
       tenant: rewrite.tenant,
       tenant_column: tenant_column!(rewrite, options),
       from_source: Keyword.fetch!(spec, :source),
+      source_authenticated: Keyword.fetch!(spec, :source_authenticated),
+      validate: Keyword.fetch!(spec, :validate),
       to: to,
       to_arity: arity,
       to_params: params,
@@ -352,6 +364,24 @@ defmodule Encryptor.Ecto.Migrator do
       progress: options.progress
     }
   end
+
+  # ADR-0004 decision 3a's second behaviour. Raised rather than reported,
+  # and raised from the pass construction so that a plan whose third field is
+  # unacknowledged never starts rewriting its first: this is a run that cannot
+  # start, and an empty report would not improve it. Only fields in scope are
+  # checked, because `only:` has already narrowed what this run would write.
+  @spec writable!(module(), atom(), keyword(), options()) :: :ok
+  defp writable!(schema, field, spec, %{mode: :write}) do
+    unverifiable? =
+      Keyword.fetch!(spec, :source_authenticated) == false and
+        Keyword.fetch!(spec, :validate) == nil
+
+    if unverifiable?, do: raise(ArgumentError, unvalidated_write_message(schema, field))
+
+    :ok
+  end
+
+  defp writable!(_schema, _field, _spec, _options), do: :ok
 
   @spec key!(module()) :: Keyset.key()
   defp key!(schema) do
@@ -705,6 +735,19 @@ defmodule Encryptor.Ecto.Migrator do
       "is nothing to filter on. `only_tenants:` and `except_tenants:` are a " <>
       "`where` on the tenant column (ADR-0002 decision 11); narrow the run " <>
       "with `only:` instead, or give the rewrite a `tenant_from`."
+  end
+
+  defp unvalidated_write_message(schema, field) do
+    "#{inspect(schema)}.#{field} declares `source_authenticated: false`, so " <>
+      "`mode: :write` is refused for it without a `validate:` (ADR-0004 " <>
+      "decision 3a). Its legacy cipher has no authentication tag: a wrong " <>
+      "key or a corrupt row decrypts to something rather than failing, and " <>
+      "the pass would re-encrypt that something into authenticated storage " <>
+      "permanently. Declare `validate:` with the host's own check on the " <>
+      "loaded value - a kept legacy hash column is the strongest one " <>
+      "available (decision 3c) - or narrow the run with `only:`. " <>
+      "`mode: :dry_run` and `verify/2` need neither and are how this field " <>
+      "is inspected first."
   end
 
   defp unwritable_target_message(schema, to) do

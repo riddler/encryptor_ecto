@@ -3,6 +3,7 @@ defmodule Encryptor.Ecto.MigrationTest do
 
   alias Encryptor.Ecto.Migrator.Plan
   alias Encryptor.Ecto.Migrator.Source
+  alias Encryptor.Ecto.TestChecks
   alias Encryptor.Ecto.TestPlans
   alias Encryptor.Ecto.TestSchemas.Card
 
@@ -386,9 +387,9 @@ defmodule Encryptor.Ecto.MigrationTest do
       assert message =~ "declares no `to:`"
     end
 
-    # Sabotage: `refuse_unknown!/4` skipped for fields - `source_authenticated:`
-    # was accepted and ignored, which is the one way that option could be
-    # worse than absent.
+    # Sabotage: `refuse_unknown!/4` skipped for fields - a misspelled
+    # `source_authenticated:` was accepted and ignored, which is the one way
+    # that option could be worse than absent.
     test "refuses an unknown option, naming the ones it knows" do
       message =
         refusal(fn ->
@@ -397,12 +398,12 @@ defmodule Encryptor.Ecto.MigrationTest do
               field :pan,
                 from: Encryptor.Ecto.TestTypes.Pan,
                 to: Encryptor.Ecto.TestTypes.Pan,
-                source_authenticated: false
+                source_authenticated?: false
           """)
         end)
 
-      assert message =~ "unknown option [:source_authenticated]"
-      assert message =~ "[:from, :to, :into]"
+      assert message =~ "unknown option [:source_authenticated?]"
+      assert message =~ "[:from, :to, :into, :source_authenticated, :validate]"
     end
 
     # Sabotage: `validate_into!/3`'s membership check dropped - the backfill
@@ -483,7 +484,8 @@ defmodule Encryptor.Ecto.MigrationTest do
                    tenant :none
                    field :pan,
                      from: Encryptor.Ecto.MigrationTest.PlainTarget,
-                     to: Encryptor.Ecto.MigrationTest.PlainTarget
+                     to: Encryptor.Ecto.MigrationTest.PlainTarget,
+                     source_authenticated: true
                """)
     end
 
@@ -499,6 +501,119 @@ defmodule Encryptor.Ecto.MigrationTest do
         end)
 
       assert Exception.message(error) =~ "plan.ex:"
+    end
+  end
+
+  describe "the unauthenticated-source acknowledgement" do
+    # Sabotage: made `source_authenticated!/4`'s `:error` arm return `true`
+    # instead of asking `vault_backed?/2` - every silent field compiled, which
+    # is the state ADR-0004 Q2 was answered to end.
+    test "refuses a from: this package cannot prove authenticates" do
+      message =
+        refusal(fn ->
+          compile_rewrite("""
+              tenant :none
+              field :pan,
+                from: Encryptor.Ecto.TestSources.LegacyType,
+                to: Encryptor.Ecto.TestTypes.Pan
+          """)
+        end)
+
+      assert message =~ "Card.pan"
+      assert message =~ "declares no `source_authenticated:`"
+      assert message =~ "source_authenticated: true"
+      assert message =~ "source_authenticated: false"
+    end
+
+    # Sabotage: made `vault_backed?/2` answer `false` for everything - the
+    # context-change plan of ADR-0002 decision 3 stopped compiling, and the
+    # amendment's one silent case was gone. (Red before the suite ran: the
+    # `ContextChange` fixture is compiled by the compiler.)
+    test "one of this package's own types needs no declaration" do
+      %Plan{rewrites: [rewrite]} = TestPlans.ContextChange.__plan__()
+      {:pan, spec} = List.keyfind(rewrite.fields, :pan, 0)
+
+      assert spec[:from] == Encryptor.Ecto.TestTypes.Pan
+      assert spec[:source_authenticated] == true
+      assert spec[:validate] == nil
+    end
+
+    # Sabotage: made the compiled spec omit `:source_authenticated` when the
+    # plan declared nothing - the engine's `Keyword.fetch!/2` then failed on
+    # the first pass of a plan that compiled.
+    test "an undeclared field is authenticated in the compiled spec" do
+      %Plan{rewrites: [rewrite, _signup]} = TestPlans.Cloak.__plan__()
+      {:pan, spec} = List.keyfind(rewrite.fields, :pan, 0)
+
+      assert spec[:source_authenticated] == true
+    end
+
+    # Sabotage: made `source_authenticated!/4` discard a declared `false` and
+    # return `true` - the acknowledgement compiled away, and with it both
+    # behaviours decision 3a attaches to it.
+    test "carries a declared acknowledgement and its validator" do
+      %Plan{rewrites: [rewrite]} = TestPlans.Adoption.__plan__()
+      {:email, spec} = List.keyfind(rewrite.fields, :email, 0)
+
+      assert spec[:source_authenticated] == false
+      assert spec[:validate] == (&TestChecks.email?/1)
+      assert spec[:validate].("buyer@example.com")
+    end
+
+    # Sabotage: dropped the `is_boolean/1` guard - `source_authenticated: nil`
+    # compiled and read as authenticated, which is the unsafe answer arriving
+    # through a typo.
+    test "refuses an acknowledgement that is not true or false" do
+      message =
+        refusal(fn ->
+          compile_rewrite("""
+              tenant :none
+              field :pan,
+                from: Encryptor.Ecto.TestTypes.Pan,
+                to: Encryptor.Ecto.TestTypes.Pan,
+                source_authenticated: :maybe
+          """)
+        end)
+
+      assert message =~ "Card.pan"
+      assert message =~ "`source_authenticated: :maybe`"
+    end
+
+    # Sabotage: dropped `validate_fun!/4`'s arity guard - `validate: :tax_id?`
+    # compiled, and the pass raised on row one calling an atom.
+    test "refuses a validator that is not a one-argument function" do
+      message =
+        refusal(fn ->
+          compile_rewrite("""
+              tenant :none
+              field :pan,
+                from: Encryptor.Ecto.TestTypes.Pan,
+                to: Encryptor.Ecto.TestTypes.Pan,
+                validate: :pan?
+          """)
+        end)
+
+      assert message =~ "Card.pan"
+      assert message =~ "not a one-argument function"
+    end
+
+    # Sabotage: dropped the external-capture check - `Macro.escape/1` refused
+    # the anonymous function instead, with a message about quoting that says
+    # nothing about plans or validators.
+    test "refuses an anonymous validator, which cannot survive into the plan" do
+      message =
+        refusal(fn ->
+          compile_rewrite("""
+              tenant :none
+              field :pan,
+                from: Encryptor.Ecto.TestTypes.Pan,
+                to: Encryptor.Ecto.TestTypes.Pan,
+                validate: fn value -> is_binary(value) end
+          """)
+        end)
+
+      assert message =~ "Card.pan"
+      assert message =~ "not a remote capture"
     end
   end
 end

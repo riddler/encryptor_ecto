@@ -15,9 +15,10 @@ defmodule Encryptor.Ecto.Migrator.Pass do
      target state and is skipped. Probe-first is what makes the whole pass
      idempotent by construction, which in turn is what makes the checkpoint a
      performance record rather than a correctness one.
-  3. **Load through the source** (`from:`, ADR-0004 decision 2). A failure
-     here is `:undecryptable`: neither side can read the row and an operator
-     has to decide what that means.
+  3. **Load through the source** (`from:`, ADR-0004 decision 2), and, where
+     the field declared one, apply `validate:` to what it loaded. A failure
+     of either is `:undecryptable`: the row cannot be read in a way anything
+     trusts, and an operator has to decide what that means.
   4. **Dump through the target**, under the row's own tenant.
   5. **Compare and swap** (decision 4): the update is conditional on the
      target column still holding the exact bytes step 2 read. Zero rows
@@ -41,6 +42,23 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   rows per field instead of paging the table (`Keyset.sample_query/6`, which
   records why the sample is random rather than the first `n` in key order),
   and records no cursor: a random draw has no "how far it got" to report.
+
+  ## What an unauthenticated source changes here
+
+  A field that declared `source_authenticated: false` (ADR-0004 decision 3)
+  has its migratable rows counted `:migratable_unverified` instead - the same
+  work, a different word in the evidence, because no authentication tag ever
+  confirmed those bytes. The class is a property of the field rather than of
+  the row, so it is decided once per pass and applied wherever a row would
+  otherwise be counted `:migratable`, the concurrent-write arm included.
+
+  `validate:` is the host's own check on the loaded plaintext, run before the
+  value is re-encrypted (decision 3b) and in every mode, because a
+  verification that skipped it would call a row migratable that a write would
+  refuse. It runs against the loaded value and never sees the report: a
+  rejection is `:undecryptable` with the reason `:validate_rejected`, and a
+  raise from it is `{:raised, Module}` like any other, so neither arm can put
+  a plaintext anywhere.
 
   ## The batch is the transaction, and a halt discards it
 
@@ -67,7 +85,16 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   alias Encryptor.Ecto.Migrator.RowTenant
   alias Encryptor.Ecto.Migrator.Source
 
-  @typedoc "Everything one field's pass needs, resolved once before it starts."
+  @typedoc """
+  Everything one field's pass needs, resolved once before it starts.
+
+  `:validate` is typed by what it may *return* rather than by what it is
+  contracted to return. The contract is
+  `t:Encryptor.Ecto.Migration.field_spec/0`'s `(term() -> boolean())`; this is
+  a function the host wrote, arriving through a compiled plan, and a pass that
+  declared the contract here would be asserting a fact about someone else's
+  code that nothing checked. `validate/2` checks it instead.
+  """
   @type t :: %__MODULE__{
           repo: module(),
           plan: module(),
@@ -80,6 +107,8 @@ defmodule Encryptor.Ecto.Migrator.Pass do
           tenant: Encryptor.Ecto.Migrator.Plan.tenant(),
           tenant_column: atom() | nil,
           from_source: Source.resolved(),
+          source_authenticated: boolean(),
+          validate: (term() -> term()) | nil,
           to: module(),
           to_arity: 1 | 3,
           to_params: term(),
@@ -107,6 +136,8 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     :tenant,
     :tenant_column,
     :from_source,
+    :source_authenticated,
+    :validate,
     :to,
     :to_arity,
     :to_params,
@@ -327,6 +358,13 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     end)
   end
 
+  # ADR-0002 proposed amendment 2: which of the two migratable classes this
+  # field's rows are counted under. A property of the field, so it is the same
+  # answer for every row of the pass.
+  @spec migratable(t()) :: Report.class()
+  defp migratable(%__MODULE__{source_authenticated: false}), do: :migratable_unverified
+  defp migratable(_pass), do: :migratable
+
   @spec row_tenant([term()]) :: term()
   defp row_tenant([tenant]), do: tenant
   defp row_tenant([]), do: nil
@@ -363,19 +401,54 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   @spec migrate(t(), Report.t(), term(), binary(), binary() | nil, term()) ::
           {Report.t(), :ok | :halt}
   defp migrate(%__MODULE__{mode: :verify} = pass, report, id, source_value, _target, tenant) do
-    case read_source(pass, source_value, tenant) do
-      {:ok, _loaded} -> {Report.count(report, :migratable), :ok}
+    case load_source(pass, source_value, tenant) do
+      {:ok, _loaded} -> {Report.count(report, migratable(pass)), :ok}
       {:error, reason} -> fail(pass, report, id, reason)
     end
   end
 
   defp migrate(pass, report, id, source_value, target_value, tenant) do
-    with {:ok, loaded} <- read_source(pass, source_value, tenant),
+    with {:ok, loaded} <- load_source(pass, source_value, tenant),
          {:ok, bytes} <- write_target(pass, loaded) do
       swap(pass, report, id, target_value, bytes)
     else
       {:error, reason} -> fail(pass, report, id, reason)
     end
+  end
+
+  # The read and the host's check are one step: nothing downstream should have
+  # to remember to validate, and a value that fails the check is not a value
+  # this pass has read successfully.
+  @spec load_source(t(), binary(), term()) :: {:ok, term()} | {:error, term()}
+  defp load_source(pass, value, tenant) do
+    with {:ok, loaded} <- read_source(pass, value, tenant),
+         :ok <- validate(pass, loaded) do
+      {:ok, loaded}
+    end
+  end
+
+  # ADR-0004 decision 3b. The loaded value goes to the host's function and
+  # nowhere else: the reason carries `:validate_rejected` or the raising
+  # module's name, never what was rejected (ADR-0002 decision 11).
+  #
+  # A return that is neither `true` nor `false` is a failure rather than a
+  # truthy pass, for the same reason `write_target/2` refuses an off-contract
+  # dump: decision 3b's contract is `(term() -> boolean())`, and a host check
+  # that answered `{:error, :no_hash_column}` would otherwise read as "valid"
+  # and launder the row it was written to catch. Matching also keeps the
+  # rejected value out of the reason, which an `if` over an arbitrary term
+  # makes easy to lose.
+  @spec validate(t(), term()) :: :ok | {:error, term()}
+  defp validate(%__MODULE__{validate: nil}, _loaded), do: :ok
+
+  defp validate(%__MODULE__{validate: fun}, loaded) do
+    case fun.(loaded) do
+      true -> :ok
+      false -> {:error, :validate_rejected}
+      _off_contract -> {:error, :validate_off_contract}
+    end
+  rescue
+    exception -> {:error, {:raised, exception.__struct__}}
   end
 
   @spec read_source(t(), binary(), term()) :: {:ok, term()} | {:error, term()}
@@ -422,14 +495,14 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # -- the write ------------------------------------------------------------
 
   @spec swap(t(), Report.t(), term(), binary() | nil, binary()) :: {Report.t(), :ok | :halt}
-  defp swap(%__MODULE__{mode: :dry_run}, report, _id, _previous, _bytes),
-    do: {Report.count(report, :migratable), :ok}
+  defp swap(%__MODULE__{mode: :dry_run} = pass, report, _id, _previous, _bytes),
+    do: {Report.count(report, migratable(pass)), :ok}
 
   defp swap(pass, report, id, previous, bytes) do
     query = Keyset.swap_query(pass.source, pass.key, id, pass.target_column, previous)
 
     case pass.repo.update_all(query, [set: [{pass.target_column, bytes}]], query_opts(pass)) do
-      {1, _returned} -> {Report.count(report, :migratable), :ok}
+      {1, _returned} -> {Report.count(report, migratable(pass)), :ok}
       {0, _returned} -> concurrent(pass, report, id)
     end
   end
@@ -440,7 +513,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # write, not about the row's state.
   @spec concurrent(t(), Report.t(), term()) :: {Report.t(), :ok | :halt}
   defp concurrent(pass, report, id) do
-    report = Report.count(report, :migratable)
+    report = Report.count(report, migratable(pass))
 
     if reprobe(pass, id) == :already_target do
       {Report.count_concurrent(report), :ok}

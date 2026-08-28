@@ -141,6 +141,68 @@ defmodule Encryptor.Ecto.Migrator.Source do
   end
 
   @doc """
+  Whether a `from:` module is provably one of this package's own vault-backed
+  types.
+
+  This is the whole of what ADR-0004's proposed amendment of 2026-08-28 (Q2)
+  lets a plan stay silent about. A field whose `from:` answers `true` here has
+  its authentication proven by the package that wrote the bytes, so it needs
+  no `source_authenticated:` declaration; every other `from:` is the host's own
+  legacy reader, this package cannot tell an AEAD cipher from a stream cipher
+  by looking (decision 1), and `Encryptor.Ecto.Migration` asks at `mix
+  compile`.
+
+  Proven by the params `Encryptor.Ecto.Binary.init/2` freezes - six keys,
+  `:vault` and `:legacy` among them - rather than by the
+  `__encryptor_ecto__/1` marker `Encryptor.Ecto.Declarations` uses. The marker
+  is defined by `Encryptor.Ecto.Binary`'s `__using__` alone, so a type written
+  with `use Encryptor.Ecto.String` or `use Encryptor.Ecto.Map` does not carry
+  it while its `init/1` delegates to exactly that function; recognising the
+  frozen shape covers all three, and widening the marker would change which
+  fields `Declarations.check_unique!/1` sees, which is ADR-0001's contract
+  rather than this record's.
+
+  Nothing is inferred from a module's name, its dependencies, or the shape of
+  its bytes, and the answer is `false` for everything this predicate cannot
+  answer positively - including an `init/1` that raises, which a foreign
+  parameterized type's may well do when handed a schema and a field it has
+  never seen. False is the safe answer: it asks the host to declare.
+
+      iex> alias Encryptor.Ecto.Migrator.Source
+      iex> Source.vault_backed?(Source.Plaintext, schema: My.Schema, field: :notes)
+      false
+  """
+  @spec vault_backed?(module(), field_opts()) :: boolean()
+  def vault_backed?(module, field_opts) when is_atom(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :init, 1) and
+      frozen_params?(init_params(module, field_opts))
+  end
+
+  # The declared context of one field, or `nil` from a module that will not
+  # produce one. A `from:` module is the host's own code and this call is a
+  # question about it, so a raise here is an answer - `false` - rather than a
+  # failure: `Encryptor.Ecto.Binary.init/2` itself raises for a field whose
+  # table or column cannot be resolved, and a plan is not the place to
+  # discover that about a type it is only reading with.
+  @spec init_params(module(), field_opts()) :: term()
+  defp init_params(module, field_opts) do
+    module.init(
+      schema: Keyword.get(field_opts, :schema),
+      field: Keyword.get(field_opts, :field)
+    )
+  rescue
+    _exception -> nil
+  end
+
+  @our_params [:vault, :tenant, :context, :table, :column, :legacy]
+
+  @spec frozen_params?(term()) :: boolean()
+  defp frozen_params?(params) when is_map(params),
+    do: Enum.all?(@our_params, &Map.has_key?(params, &1))
+
+  defp frozen_params?(_params), do: false
+
+  @doc """
   Calls a resolved source for one row, and unwraps a deferred decryption.
 
   The params the resolution fixed are merged over the migrator's per-field

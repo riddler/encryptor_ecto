@@ -16,6 +16,7 @@ defmodule Encryptor.Ecto.Migrator.Report do
   | `:null` | The column is `NULL`; nothing to do |
   | `:already_target` | The probe succeeded; the row is in the target state |
   | `:migratable` | The probe failed and the `from` load succeeded |
+  | `:migratable_unverified` | The same, for a field whose `from:` cipher does not authenticate (ADR-0004 decision 3) |
   | `:undecryptable` | Neither side loads; it needs an operator decision |
 
   `concurrent` is counted separately rather than as a class: a row the
@@ -26,11 +27,19 @@ defmodule Encryptor.Ecto.Migrator.Report do
 
   The classes live in one list (`classes/0`), every counter is initialised
   from it, and nothing in this module or in the engine pattern-matches on the
-  full set. ADR-0002 proposed amendment 2 adds a fifth class,
-  `:migratable_unverified`, for a field whose legacy cipher does not
-  authenticate; `ece-4mg` implements it, and doing so is meant to be an entry
-  in that list plus the code that decides when to use it. This module is
-  arranged so that it is.
+  full set. ADR-0002 proposed amendment 2's fifth class,
+  `:migratable_unverified`, arrived exactly that way: an entry in that list,
+  plus the one line in `Encryptor.Ecto.Migrator.Pass` that decides when a
+  migratable row is counted under it. A sixth would be the same, and this
+  module stays arranged so that it is.
+
+  `:migratable_unverified` is counted in place of `:migratable` for every row
+  of a field that declared `source_authenticated: false`, in a dry run, a
+  write and a verification alike - the probe failed and the `from` load
+  succeeded, but nothing authenticated the bytes it read, and no later pass
+  ever will. `validate:` does not upgrade it: a host's own check on the
+  plaintext is the strongest control available (ADR-0004 decision 3c) and it
+  is still not an authentication tag.
 
   ## Nothing here carries a value
 
@@ -51,7 +60,8 @@ defmodule Encryptor.Ecto.Migrator.Report do
   @failure_limit 100
 
   @typedoc "How a row was classified (ADR-0002 decision 7)."
-  @type class :: :null | :already_target | :migratable | :undecryptable
+  @type class ::
+          :null | :already_target | :migratable | :migratable_unverified | :undecryptable
 
   @typedoc """
   One row that could not be read from either side.
@@ -97,10 +107,10 @@ defmodule Encryptor.Ecto.Migrator.Report do
   Every class a row can be given, in the order a report prints them.
 
       iex> Encryptor.Ecto.Migrator.Report.classes()
-      [:null, :already_target, :migratable, :undecryptable]
+      [:null, :already_target, :migratable, :migratable_unverified, :undecryptable]
   """
   @spec classes() :: [class()]
-  def classes, do: [:null, :already_target, :migratable, :undecryptable]
+  def classes, do: [:null, :already_target, :migratable, :migratable_unverified, :undecryptable]
 
   @doc """
   How many failures a report holds before it stops holding them.
@@ -204,12 +214,11 @@ defmodule Encryptor.Ecto.Migrator.Report do
 
   Written as "every class except those two is zero" rather than as a match on
   the classes that are allowed to be non-zero, so that a class added later
-  counts against a verification by default. A fifth class that had to be
-  listed here to be noticed - ADR-0002 proposed amendment 2's
-  `:migratable_unverified`, which `ece-4mg` adds - would otherwise arrive as
-  a verification that passes while rows nothing authenticated sit in the
-  table, which is the exact claim decision 3a exists to stop the evidence
-  making.
+  counts against a verification by default. ADR-0002 proposed amendment 2's
+  `:migratable_unverified` is the class that property was written for: had it
+  needed listing here to be noticed, it would have arrived as a verification
+  that passes while rows nothing authenticated sit in the table, which is the
+  exact claim ADR-0004 decision 3a exists to stop the evidence making.
 
   The `ok?/1` conjunct is deliberately redundant: `record_failure/2` counts
   every failure `:undecryptable` as well, so the class check already catches
@@ -222,6 +231,8 @@ defmodule Encryptor.Ecto.Migrator.Report do
       iex> Report.verified?(Report.count(Report.new(:verify), :already_target))
       true
       iex> Report.verified?(Report.count(Report.new(:verify), :migratable))
+      false
+      iex> Report.verified?(Report.count(Report.new(:verify), :migratable_unverified))
       false
   """
   @spec verified?(t()) :: boolean()
