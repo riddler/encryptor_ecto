@@ -80,6 +80,46 @@ defmodule Encryptor.Ecto.Migration do
   binary one, and the DDL either side of the backfill is the host's own
   migration. Both columns are checked against the schema; which one is wider
   is not this package's business.
+
+  ## What the legacy cipher does not prove
+
+  A legacy stream cipher has no authentication tag, so a failed decrypt is not
+  a signal: the bytes decrypt to *something*, and the migrator would
+  re-encrypt that something into authenticated storage, permanently, and
+  report it as a success (ADR-0004 decision 3). Two field options exist for
+  that:
+
+    * `source_authenticated: false` acknowledges it. The report then counts
+      that field's rows `:migratable_unverified` rather than `:migratable`, in
+      a dry run and in a verification alike, so no evidence claims
+      verification that never happened; and the pass refuses to run in
+      `--mode write` for that field unless `validate:` is declared with it.
+    * `validate:` is a host-supplied `(term() -> boolean())` applied to the
+      loaded plaintext before it is re-encrypted (decision 3b) - a tax
+      identifier is nine digits, a serialized map parses, a kept legacy hash
+      column recomputes (decision 3c). A row it rejects is `:undecryptable`,
+      handled like any other failure. There is no built-in generic validator:
+      this package cannot know what a valid value looks like, and a
+      printable?/UTF-8? check would be reassurance rather than a control.
+
+  ### Silence is allowed only where authentication is provable
+
+  ADR-0004's proposed amendment of 2026-08-28 answers Q2. A field whose
+  `from:` is one of this package's own vault-backed types needs no
+  declaration, because the package that wrote those bytes authenticates them
+  and `Encryptor.Ecto.Migrator.Source.vault_backed?/2` can prove it - that is
+  the context-change case above, where `from:` and `to:` name the same module
+  with different params. Every other `from:` is the host's own legacy reader:
+  a cloak cipher module, a legacy `load/1`, an unknown `Source`. This
+  package's correctness obligation on that format is nil (decision 1) and it
+  cannot tell an AEAD cipher from a stream cipher by looking, so it asks - at
+  `mix compile`, where the question is cheap - and such a field must declare
+  `source_authenticated:` explicitly, `true` or `false`. `true` is not a
+  capability this package checks; it is the host asserting that someone looked
+  at the legacy cipher, in a line a reviewer sees in the diff.
+
+  A host upgrading across this change sees its plan stop compiling, with a
+  message naming the field and saying what to write.
   """
 
   alias Encryptor.Ecto.Migrator.Plan
@@ -95,12 +135,20 @@ defmodule Encryptor.Ecto.Migration do
   while the plan compiled, kept here because ADR-0004 decision 2 fixes that
   resolution as a compile-time step and re-deriving it at run time would put
   the decision back where the record took it from.
+
+  `:source_authenticated` and `:validate` are ADR-0004 decision 3, and
+  `:source_authenticated` is always present in the compiled spec even where
+  the plan did not write it: an undeclared field is `true` only because the
+  compile-time check proved it (see "What the legacy cipher does not prove"),
+  so the engine reads one key rather than deciding provability again per row.
   """
   @type field_spec :: [
           from: module(),
           to: module(),
           into: atom() | nil,
-          source: Source.resolved()
+          source: Source.resolved(),
+          source_authenticated: boolean(),
+          validate: (term() -> boolean()) | nil
         ]
 
   @typedoc "Where a compile-time failure came from, for the `CompileError`."
@@ -114,9 +162,9 @@ defmodule Encryptor.Ecto.Migration do
   @use_options [:repo]
 
   # Host-written field options, in the order they are documented. Adding one
-  # is meant to be this list plus a clause of `validate_option!/4` and nothing
-  # else - `ece-4mg` adds `source_authenticated:` and `validate:` here.
-  @field_options [:from, :to, :into]
+  # is meant to be this list plus a validating clause and nothing else, which
+  # is how `source_authenticated:` and `validate:` arrived.
+  @field_options [:from, :to, :into, :source_authenticated, :validate]
 
   # The macros below call back into this module through `unquote(__MODULE__)`.
   # The generated code runs inside the host's plan module, which has aliased
@@ -189,7 +237,12 @@ defmodule Encryptor.Ecto.Migration do
   end
 
   @doc """
-  Declares one field to rewrite: `from:`, `to:`, and optionally `into:`.
+  Declares one field to rewrite: `from:`, `to:`, and optionally `into:`,
+  `source_authenticated:` and `validate:`.
+
+  `source_authenticated:` is required rather than optional wherever the
+  `from:` type is not one of this package's own - see "What the legacy cipher
+  does not prove".
   """
   defmacro field(name, opts) do
     meta = meta(__CALLER__)
@@ -346,7 +399,9 @@ defmodule Encryptor.Ecto.Migration do
       from: from,
       to: assert_target!(to, schema, name, meta),
       into: validate_into!(Keyword.get(opts, :into), schema, meta),
-      source: Source.resolve!(from, source_opts)
+      source: Source.resolve!(from, source_opts),
+      source_authenticated: source_authenticated!(opts, from, source_opts, meta),
+      validate: validate_fun!(Keyword.get(opts, :validate), schema, name, meta)
     ]
 
     put_open(plan_module, %{rewrite | fields: [{name, spec} | rewrite.fields]})
@@ -373,6 +428,47 @@ defmodule Encryptor.Ecto.Migration do
   end
 
   defp validate_into!(other, _schema, meta), do: raise_at!(meta, not_a_column_message(other))
+
+  # ADR-0004 decision 3 and its proposed amendment of 2026-08-28 (Q2). Silence
+  # compiles to `true` exactly where `Source.vault_backed?/2` proves it, and is
+  # a `CompileError` naming the field everywhere else. The proof runs only when
+  # the plan said nothing: a field that declared `true` has already answered
+  # the question, and re-deriving it would let this package's own opinion
+  # override the host's assertion.
+  @spec source_authenticated!(keyword(), module(), Source.field_opts(), meta()) :: boolean()
+  defp source_authenticated!(opts, from, source_opts, meta) do
+    case Keyword.fetch(opts, :source_authenticated) do
+      {:ok, declared} when is_boolean(declared) ->
+        declared
+
+      {:ok, other} ->
+        raise_at!(meta, not_an_acknowledgement_message(source_opts, other))
+
+      :error ->
+        Source.vault_backed?(from, source_opts) or
+          raise_at!(meta, undeclared_source_message(source_opts, from))
+    end
+  end
+
+  # A validator is escaped into the compiled plan, so it has to be a remote
+  # capture: `&MyApp.Encryption.Checks.tax_id?/1` survives into the plan
+  # struct, while an anonymous function or a local capture does not exist by
+  # the time the migrator runs. Refused here with that sentence rather than
+  # left to `Macro.escape/1`, whose message is about quoting and not about
+  # migrations.
+  @spec validate_fun!(term(), module(), atom(), meta()) :: (term() -> boolean()) | nil
+  defp validate_fun!(nil, _schema, _name, _meta), do: nil
+
+  defp validate_fun!(fun, schema, name, meta) when is_function(fun, 1) do
+    if Function.info(fun, :type) == {:type, :external} do
+      fun
+    else
+      raise_at!(meta, local_validator_message(schema, name))
+    end
+  end
+
+  defp validate_fun!(other, schema, name, meta),
+    do: raise_at!(meta, not_a_validator_message(schema, name, other))
 
   # The `to:` half of ADR-0002 decision 2's type check. A target is called for
   # both halves of the round trip, at one arity: a module exporting `load/3`
@@ -565,6 +661,45 @@ defmodule Encryptor.Ecto.Migration do
       "matching `load`/`dump` pair, at arity 3 (`Ecto.ParameterizedType`) or " <>
       "arity 1 (`Ecto.Type`). Unlike `from:`, which only has to read, a `to:` " <>
       "module is called for both halves of the round trip."
+  end
+
+  defp undeclared_source_message(source_opts, from) do
+    "#{field_at(source_opts)} declares no `source_authenticated:`, and its " <>
+      "`from:` type #{inspect(from)} is not one of this package's own " <>
+      "vault-backed types, so nothing here can prove that the bytes it reads " <>
+      "are authenticated. Write `source_authenticated: true` if someone has " <>
+      "checked that the legacy cipher authenticates - an AEAD cipher such as " <>
+      "AES-GCM does - or `source_authenticated: false` if it does not, or if " <>
+      "nobody knows. A stream cipher decrypts wrong bytes to something " <>
+      "rather than failing, and the migrator would re-encrypt that something " <>
+      "into authenticated storage and call it a success (ADR-0004 decision " <>
+      "3). Declaring `false` counts that field's rows " <>
+      "`:migratable_unverified` and needs a `validate:` before `--mode " <>
+      "write` will run it."
+  end
+
+  defp not_an_acknowledgement_message(source_opts, given) do
+    "#{field_at(source_opts)} declares `source_authenticated: #{inspect(given)}`. " <>
+      "It takes `true` or `false` and nothing else: it is an acknowledgement " <>
+      "about the legacy cipher, not a capability this package can measure."
+  end
+
+  defp not_a_validator_message(schema, name, given) do
+    "#{inspect(schema)}.#{name} declares `validate: #{inspect(given)}`, which " <>
+      "is not a one-argument function. `validate:` is the host's own check " <>
+      "on the loaded plaintext (ADR-0004 decision 3b), applied before the " <>
+      "value is re-encrypted: `validate: &MyApp.Encryption.Checks.tax_id?/1`."
+  end
+
+  defp local_validator_message(schema, name) do
+    "#{inspect(schema)}.#{name} declares a `validate:` function that is not a " <>
+      "remote capture. Name it as `&SomeModule.some_check/1`: the plan is a " <>
+      "compiled data structure, and an anonymous function or a local capture " <>
+      "cannot be carried into it."
+  end
+
+  defp field_at(source_opts) do
+    "#{inspect(Keyword.get(source_opts, :schema))}.#{Keyword.get(source_opts, :field)}"
   end
 
   defp not_options_message(where, given) do

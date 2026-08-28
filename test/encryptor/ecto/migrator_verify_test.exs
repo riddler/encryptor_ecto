@@ -230,6 +230,44 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
     id
   end
 
+  describe "an unauthenticated source (ADR-0004 decision 3a)" do
+    # Sabotage: made `migratable/1` answer `:migratable` in the `:verify` arm
+    # only - the acceptance test's own evidence said "migratable" about rows
+    # nothing authenticated, which is the report claiming a verification that
+    # never happened.
+    test "counts the acknowledged field's rows apart, and is not verified" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert {:error, report} = Migrator.verify(TestEnginePlans.Unverified)
+
+      assert report.counts.migratable_unverified == 1
+      assert report.counts.migratable == 0
+      refute Report.verified?(report)
+    end
+
+    # Sabotage: made the `:verify` arm skip `validate/2` - a row the host's
+    # own check rejects verified as merely migratable, so the acceptance test
+    # disagreed with the write the operator would run next.
+    test "a row the validator rejects is undecryptable here too" do
+      _id = insert_card(pan: legacy("41111111"))
+
+      assert {:error, report} = Migrator.verify(TestEnginePlans.Validated)
+
+      assert [%{reason: :validate_rejected}] = report.failures
+      assert report.counts.migratable_unverified == 0
+    end
+
+    # Sabotage: made `verify_options!/1` accept `mode:` - the read-only
+    # function grew the option whose refusal is the whole reason a plan with
+    # an unvalidated acknowledgement can still be inspected.
+    test "needs no mode, so an unwritable field can still be inspected" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert_raise ArgumentError, fn -> Migrator.run(TestEnginePlans.Unverified, mode: :write) end
+      assert {:error, _report} = Migrator.verify(TestEnginePlans.Unverified)
+    end
+  end
+
   defp insert_card_in_prefix(pan) do
     {1, [%{id: id}]} =
       TestRepo.insert_all("cards", [%{merchant_id: @merchant, pan: pan}],

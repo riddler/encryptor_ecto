@@ -349,7 +349,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
 
       assert {:ok, report} = Migrator.run(TestEnginePlans.Adoption, mode: :write)
 
-      assert report.counts.migratable == 1
+      assert report.counts.migratable_unverified == 1
       assert raw(:signups, id, :email) == "buyer@example.com"
       assert %TestSchemas.Signup{email_encrypted: "buyer@example.com"} = signup(id)
     end
@@ -437,6 +437,122 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   # -- fixtures -------------------------------------------------------------
 
   defp legacy(plaintext), do: "legacy:" <> String.reverse(plaintext)
+
+  describe "an unauthenticated source (ADR-0004 decision 3)" do
+    # Sabotage: made `migratable/1` answer `:migratable` for every field - the
+    # dry run's evidence read exactly like an authenticated source's, which is
+    # the false reassurance decision 3a exists to remove.
+    test "a dry run counts the acknowledged field apart from the rest" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Unverified, mode: :dry_run)
+
+      assert report.counts.migratable_unverified == 1
+      assert report.counts.migratable == 0
+    end
+
+    # Sabotage: made `writable!/4` return `:ok` for the `false`-without-
+    # `validate:` case - the pass rewrote rows whose plaintext nothing had
+    # authenticated and nothing had checked, permanently.
+    test "refuses --mode write without a validator, before reading a row" do
+      id = insert_card(pan: legacy(@pan))
+
+      message =
+        assert_raise ArgumentError, fn ->
+          Migrator.run(TestEnginePlans.Unverified, mode: :write)
+        end
+
+      assert Exception.message(message) =~ "Card.pan"
+      assert Exception.message(message) =~ "source_authenticated: false"
+      assert raw(:cards, id, :pan) == legacy(@pan)
+      assert checkpoints() == []
+    end
+
+    # Sabotage: made `writable!/4` run over the whole plan rather than the
+    # fields `passes!/3` had already narrowed - a run explicitly scoped away
+    # from the acknowledged field was refused for it anyway.
+    test "the refusal is about the fields in scope, not the whole plan" do
+      id = insert_card(pan: legacy(@pan), notes: legacy("chargeback opened"))
+
+      assert_raise ArgumentError, fn -> Migrator.run(TestEnginePlans.Mixed, mode: :write) end
+
+      assert {:ok, report} =
+               Migrator.run(TestEnginePlans.Mixed,
+                 mode: :write,
+                 only: [{TestSchemas.Card, [:notes]}]
+               )
+
+      assert report.counts.migratable == 1
+      assert report.counts.migratable_unverified == 0
+      assert raw(:cards, id, :pan) == legacy(@pan)
+    end
+
+    # Sabotage: made `migratable/1` a property of the run rather than of the
+    # field - one report could then only say one of the two words, and a plan
+    # with both kinds of field lost the distinction it exists to draw.
+    test "one report carries both migratable classes" do
+      _id = insert_card(pan: legacy(@pan), notes: legacy("chargeback opened"))
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Mixed, mode: :dry_run)
+
+      assert report.counts.migratable_unverified == 1
+      assert report.counts.migratable == 1
+    end
+
+    # Sabotage: made `writable!/4` refuse whenever `source_authenticated:` was
+    # `false` - a declared `validate:` bought nothing, and decision 3a's way
+    # through the refusal was closed.
+    test "a declared validator is what lets the write run" do
+      id = insert_card(pan: legacy(@pan))
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Validated, mode: :write)
+
+      assert report.counts.migratable_unverified == 1
+
+      Tenant.put(@merchant)
+      assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, id)
+    end
+
+    # Sabotage: made `load_source/3` ignore `validate/2`'s answer - the row
+    # the host's own check rejected was re-encrypted into the target column,
+    # which is the laundering decision 3 is written to prevent.
+    test "a row the validator rejects is undecryptable and is not written" do
+      id = insert_card(pan: legacy("41111111"))
+
+      assert {:error, report} = Migrator.run(TestEnginePlans.Validated, mode: :write)
+
+      assert [%{schema: TestSchemas.Card, field: :pan, reason: :validate_rejected}] =
+               report.failures
+
+      assert report.counts.undecryptable == 1
+      assert report.counts.migratable_unverified == 0
+      assert raw(:cards, id, :pan) == legacy("41111111")
+    end
+
+    # Sabotage: made `validate/2` answer `:ok` for any truthy return - a host
+    # check that failed with `{:error, :no_hash_column}` read as "valid", and
+    # the pass laundered exactly the rows it was declared to catch.
+    test "a validator that answers off contract fails the row" do
+      id = insert_card(pan: legacy(@pan))
+
+      assert {:error, report} =
+               Migrator.run(TestEnginePlans.OffContractValidator, mode: :write)
+
+      assert [%{reason: :validate_off_contract}] = report.failures
+      assert raw(:cards, id, :pan) == legacy(@pan)
+    end
+
+    # Sabotage: dropped `validate/2`'s rescue - the host's raising check took
+    # the pass down with an exception carrying whatever the validator put in
+    # it, which is the one place a plaintext could reach a log.
+    test "a validator that raises is reported as the module and nothing else" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert {:error, report} = Migrator.run(TestEnginePlans.RaisingValidator, mode: :write)
+
+      assert [%{reason: {:raised, ArgumentError}}] = report.failures
+    end
+  end
 
   defp insert_card(attrs) do
     row =
