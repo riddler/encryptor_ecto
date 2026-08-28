@@ -84,6 +84,85 @@ The capability claim is unaffected: computing `index_root` requires the
 tenant master key, so this remains the key-hierarchy claim the acceptance
 amendment softened it to, not a search-only capability.
 
+## Proposed amendment (2026-08-28): the salt is real, and it is an extract
+
+Status: **proposed**. Acceptance is the operator's. This section is additive
+and changes no decision above; it records where the shipped construction's
+*expression* differs from the 2026-08-27 pseudocode, and why the difference is
+an implementation of that pseudocode rather than a departure from it.
+
+Decision 2 and the D2 amendment both write `salt = <vault-configured,
+per-deployment>`, and assumption A10 asks the vault for one. At the time both
+were written the vault had no salt to give: `Encryptor.Kdf` was HKDF-*Expand*
+only, deliberately and on the record, and HKDF-Expand has no salt parameter.
+So `ece-d72` first shipped the nesting with the salt unexpressed and the gap
+flagged. The operator settled it on 2026-08-28:
+
+> I agree with the salt ruling - add the salt now via an upstream HKDF-Extract
+> amendment, shaped to A8's {ikm_selector, salt, info, length}
+
+`encryptor`'s ADR-0003 amendment A (proposed, 2026-08-28) is that upstream
+amendment. It adds `Encryptor.Kdf.extract/2`, the composed
+`salted_subkey/5`, a per-deployment `:derivation_salt` in vault
+configuration, and `Encryptor.Vault.derive/3` shaped to A8 exactly. A8, A10
+and A11 are therefore discharged, and this record's `ikm` line no longer has
+to be read as "whatever the caller happens to hold".
+
+**1. The salt sits at the extract of the key material, not as a second HKDF's
+salt.** The D2 amendment's pseudocode places the salt on the inner derivation,
+over `index_root`. The shipped construction places it one step earlier, at the
+extract of the tenant master key, and then performs both expansions unsalted:
+
+```
+PRK         = HKDF-Extract(salt: vault's :derivation_salt, ikm: key material)
+purpose_key = HKDF-Expand(PRK, "encryptor/v1/blind-index", 32)
+index_key   = HKDF-Expand(purpose_key, "encryptor_ecto/blind_index/v1|" <>
+                table <> "|" <> column <> "|" <> index_name <> "|" <>
+                Integer.to_string(version), 32)
+```
+
+Both readings are the same nesting with the same two domain separations in the
+same order, and both make every derived byte a function of the salt. The
+difference is which of the two HKDF halves the salt is spent on, and that is
+`encryptor`'s call rather than this record's: the key-derivation scheme is the
+vault's under this project's cross-repo seam, and amendment A decision 4 fixes
+the construction in full. Placing it at the extract is also the RFC's own
+shape - a salt is an extract input, and section 3.1 describes it as
+strengthening the extract step - so the shipped form is HKDF used as specified
+rather than a salt threaded into an expand that has no parameter for one.
+
+Nothing a host observes changes between the two readings except the bytes,
+and no bytes exist yet: no host has stored a blind index value, and amendment
+A's consequences section makes the same argument on its own side. This is the
+one moment the choice is free.
+
+**2. The derivation asks the vault and never receives key material.** Decision
+2's `ikm` line, and the D2 amendment's restatement of it, both name key
+material as an input to a derivation this package performs. It no longer is
+one. `Encryptor.Ecto.BlindIndex.Derivation` names a purpose, a selector, an
+`info` and a length; `Encryptor.Vault.derive/3` resolves the descriptor,
+derives inside its own call, and returns derived bytes. There is no argument
+on any function in this package that a tenant master key can be passed as.
+
+That is a strengthening of A8 and A11 rather than a change to any decision:
+decision 2 says what the derivation *is*, and this says who performs it. The
+capability position is unchanged - a component holding a vault that can derive
+an index key is a component that can also decrypt, which is what the A9
+resolution above already softened the search-only claim to.
+
+**3. A missing salt is a refusal, not a default.** A vault with no
+`:derivation_salt` configured answers `{:missing_config, [:derivation_salt]}`
+and derives nothing. This package passes that through unchanged rather than
+re-phrasing it, because it is a fact about a deployment's vault configuration
+and not about an index declaration.
+
+**4. Rotating `:derivation_salt` is a reindex.** The salt is effectively
+permanent from the first stored index value, exactly as a key rotation and a
+normalizer change are (decision 7, and the "every invalidating change is a
+reindex" consequence). `encryptor`'s amendment A flags the same thing for its
+runbook. It is recorded here because the operator who rotates the salt is
+reading this record's rotation section, not that one.
+
 ## Context
 
 ADR-0001 closed the door on querying encrypted columns and left one door open

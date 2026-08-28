@@ -40,6 +40,17 @@ buried in a description:
   Argon2id parameters readable as an opaque set, and derived key material held
   in a form that never reaches `Inspect` output.
 
+  Update, 2026-08-28: `enc-ix8` discharged A8, A10 and A11 upstream -
+  `Encryptor.Kdf.extract/2`, `salted_subkey/5`, a per-deployment
+  `:derivation_salt` in vault configuration, and `Encryptor.Vault.derive/3`
+  shaped to A8's `{ikm_selector, salt, info, length}`, all under `encryptor`'s
+  ADR-0003 amendment A (proposed). `ece-d72` was reworked onto that surface the
+  same day. A9 remains softened by the acceptance amendment - deriving an
+  index key still requires a vault that can decrypt - and A12 (Argon2id
+  parameters) is `ece-7tk`'s normalizers rather than this derivation's. A13 is
+  held on this path by the derivation rendering no key material anywhere, and
+  stays an obligation on every path that has not shipped yet.
+
 ## The shape of the graph
 
 Four arms, and they are genuinely different jobs rather than four slices of one.

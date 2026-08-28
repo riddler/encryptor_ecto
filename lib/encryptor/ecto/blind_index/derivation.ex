@@ -1,13 +1,15 @@
 defmodule Encryptor.Ecto.BlindIndex.Derivation do
   @moduledoc """
   The blind index's key derivation: ADR-0003 decisions 2 and 3a, as amended on
-  2026-08-27.
+  2026-08-27 and reworked onto the vault's salted derivation surface on
+  2026-08-28.
 
   A blind index value is `HMAC-SHA256(index_key, norm(plaintext))`
   (ADR-0003 decision 1). This module is where `index_key` comes from, and
-  nothing else: it computes no index values, reads no schema, and touches no
-  vault. `Encryptor.Ecto.BlindIndex` is the surface a host calls; this is the
-  derivation underneath it.
+  nothing else: it computes no index values and reads no schema. It performs
+  no cryptography of its own either - every byte comes back from
+  `Encryptor.Vault.derive/3`, and this module's job is to name the scope that
+  call derives under.
 
   ## The derivation
 
@@ -17,18 +19,32 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   2026-08-27 ruling settled how the two compose - *"compose by nesting - the
   index key is derived as a subkey under the upstream label, and d2's literal
   prefix becomes the info string inside that subkey derivation"* - and the
-  record's amendment section 2 writes it out:
+  operator's 2026-08-28 ruling put the salt decision 2 always asked for
+  underneath both:
 
-      index_root = HKDF-Expand(key_material, "encryptor/v1/blind-index", 32)
-      index_key  = HKDF-Expand(index_root, info, 32)
+  > I agree with the salt ruling - add the salt now via an upstream
+  > HKDF-Extract amendment, shaped to A8's `{ikm_selector, salt, info,
+  > length}`
 
-  Two expansions, each separating at its own layer. The outer label separates
-  the whole blind-index tree from every other use of a tenant's key material
-  and belongs to `encryptor`; `Encryptor.Kdf.derive_subkey/3` is the only
-  thing that writes it, so this package names the purpose `"blind-index"` and
-  never spells the namespace by hand. The inner `info` separates this
-  package's index derivation from anything else that might one day derive
-  under that tree, and belongs to this record:
+  enc-ADR-0003 amendment A implements that shape, and the whole construction
+  now lives in `Encryptor.Kdf.salted_subkey/5` behind
+  `Encryptor.Vault.derive/3`:
+
+      PRK         = HKDF-Extract(salt: vault's :derivation_salt, ikm: key material)
+      purpose_key = HKDF-Expand(PRK, "encryptor/v1/blind-index", 32)
+      index_key   = HKDF-Expand(purpose_key, info, 32)
+
+  Three steps, each separating at its own layer. The salt is the vault's
+  per-deployment `:derivation_salt` and is never this package's to supply -
+  that is what makes two deployments provisioned from the same tenant key
+  material derive unrelated index values, and it is why a restored backup or
+  a cloned staging environment cannot be joined against production on an
+  index column. The outer label separates the whole blind-index tree from
+  every other use of a tenant's key material and belongs to `encryptor`; this
+  package names the purpose `"blind-index"` and never spells the namespace by
+  hand. The inner `info` separates this package's index derivation from
+  anything else that might one day derive under that tree, and belongs to
+  this record:
 
       info = "encryptor_ecto/blind_index/v1|" <> table <> "|" <> column <>
              "|" <> index_name <> "|" <> Integer.to_string(version)
@@ -50,25 +66,37 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
       column to byte-identical values and rotate nothing while reporting that
       it had.
 
-  ## What this module does not decide
+  ## Key material never arrives here
 
-  **Where key material comes from.** `derive/2` takes it as an argument.
-  ADR-0003's assumption A8 - a vault-side derivation primitive that never
-  exports the input key material - is a design obligation on `encryptor` that
-  is not discharged at the pinned dependency: `Encryptor.Kdf` expands from
-  key material a caller already holds, and the vault exposes no way to obtain
-  a tenant's. `selector!/3` answers *which* scope's material a call needs;
-  fetching it is the seam this bead leaves open, and no contract for it is
-  invented here.
+  This module never sees, receives, holds, or returns the key material an
+  index key is derived from. That is ADR-0003's assumptions A8 and A11, and
+  as of enc-ADR-0003 amendment A the vault discharges them: `derive/3`
+  resolves the descriptor inside `Encryptor.Vault.Derive`, derives there, and
+  hands back derived bytes only. There is no argument on any function in this
+  module that a tenant master key could be passed as, which is the strongest
+  form the property can take - a rule that cannot be broken by a call site
+  beats a rule a call site is asked to follow.
 
-  **The salt.** Decision 2 and the amendment both write
-  `salt = <vault-configured, per-deployment>`, and assumption A10 asks the
-  vault for one. `Encryptor.Kdf` implements HKDF-*Expand* only, deliberately
-  and on the record - both accepted records say `HKDF-Expand`, every input is
-  already a uniformly random 256-bit key, and RFC 5869 section 3.3 names
-  exactly that case - and HKDF-Expand has no salt parameter. So the salt has
-  no expression here. Adding one later changes every derived key and is
-  therefore an ADR amendment and a reindex, not a refactor.
+  The consequence, recorded rather than glossed: a component that can derive
+  an index key is a component holding a vault that can also decrypt. Amendment
+  A's consequences section says so plainly, and the independently wrapped
+  index keys of ADR-0003's A9 resolution remain the upgrade path if a genuine
+  search-only consumer materializes.
+
+  ## The seam this module chose, and why
+
+  `derive/3` calls `Encryptor.Vault.derive/3` itself rather than returning a
+  scope for a caller to derive with. The salt sits at the *extract* step, over
+  key material the vault refuses to export, so there is no arrangement in
+  which this package composes the construction from parts: either the vault
+  performs the whole derivation or the derivation is wrong. Everything except
+  the one line that makes the call is pure - `info/1`, `derive_opts/2`,
+  `outer_label/0`, and every validation - so the constants stay reviewable
+  and testable without a vault, and only the composed result needs one.
+
+  What is deliberately *not* here is where the vault module and the operation
+  come from on a real write path. That is `put_index/3`'s, and it belongs to
+  the surface bead rather than to this one.
 
   ## Scope
 
@@ -93,6 +121,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   alias Encryptor.Ecto.MissingTenantError
   alias Encryptor.Ecto.TenantContext
   alias Encryptor.Kdf
+  alias Encryptor.Vault
 
   # enc-ADR-0003 decision 7's reserved purpose. `Encryptor.Kdf.label/1` writes
   # the "encryptor/v1/" namespace; naming the purpose here is what keeps the
@@ -251,35 +280,61 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   def outer_label, do: Kdf.label(@outer_purpose)
 
   @doc """
-  Derives the 32-byte index key for one identity from a scope's key material.
+  The `Encryptor.Vault.derive/3` options one identity derives under.
 
-  The nesting of the D2 ruling, in two calls: `Encryptor.Kdf.derive_subkey/3`
-  for the outer label, `Encryptor.Kdf.expand/3` for this record's `info`.
-
-      iex> alias Encryptor.Ecto.BlindIndex.Derivation
-      iex> Derivation.new!(table: "payments", column: "card_number",
-      ...>   index_name: "card_number_index")
-      ...> |> Derivation.derive(:binary.copy(<<0x0B>>, 32))
-      ...> |> Base.encode16(case: :lower)
-      "5915d062aaf8433e7ac4fa18caf50ee3f27148e86079bd0f42bc00f94ef89eb1"
-
-  Key material is checked here rather than one call down, so the failure names
-  the declaration rather than a length constraint, and so the check cannot be
-  skipped by a future call path:
+  Public for the same reason `info/1` is: this is A8's scope, minus the one
+  element that is never the caller's. The salt does not appear because the
+  vault supplies it from its own `:derivation_salt` and refuses a caller's
+  (enc-ADR-0003 amendment A decision 3) - an option list that could carry a
+  salt is an option list a call site could get wrong.
 
       iex> alias Encryptor.Ecto.BlindIndex.Derivation
       iex> Derivation.new!(table: "payments", column: "card_number",
       ...>   index_name: "card_number_index")
-      ...> |> Derivation.derive(:binary.copy(<<0x0B>>, 16))
-      ** (Encryptor.Ecto.BlindIndex.DerivationError) a blind index key could not be derived (table: "payments", column: "card_number", context keys: [], tenant: nil, reason: {:invalid, :key_material, :shorter_than_32_bytes}, index name: "card_number_index", index version: 1)
+      ...> |> Derivation.derive_opts({:tenant, "merchant_7f3"})
+      [
+        info: "encryptor_ecto/blind_index/v1|payments|card_number|card_number_index|1",
+        length: 32,
+        key: "merchant_7f3"
+      ]
+
+  A `scope: :global` index names no key, so a single-key vault's `:default`
+  selector applies (decision 3c):
+
+      iex> alias Encryptor.Ecto.BlindIndex.Derivation
+      iex> Derivation.new!(table: "signups", column: "email",
+      ...>   index_name: "email_index", scope: :global)
+      ...> |> Derivation.derive_opts(:global)
+      [info: "encryptor_ecto/blind_index/v1|signups|email|email_index|1", length: 32]
   """
-  @spec derive(t(), binary()) :: binary()
-  def derive(%__MODULE__{} = derivation, key_material) do
-    validate_key_material!(derivation, key_material)
+  @spec derive_opts(t(), selector()) :: keyword()
+  def derive_opts(%__MODULE__{} = derivation, selector) do
+    [info: info(derivation), length: @key_bytes] ++ key_opt(derivation, selector)
+  end
 
-    key_material
-    |> Kdf.derive_subkey(@outer_purpose, @key_bytes)
-    |> Kdf.expand(info(derivation), @key_bytes)
+  @doc """
+  Derives the 32-byte index key for one identity, through `vault`.
+
+  The whole construction is the vault's - `Encryptor.Vault.derive/3` extracts
+  under the deployment salt, expands under the reserved `"blind-index"`
+  purpose, and expands again under this record's `info`. This function names
+  the purpose and the scope and returns what comes back:
+
+      selector = Derivation.selector!(derivation, params, :dump)
+      {:ok, index_key} = Derivation.derive(Payments.Vault, derivation, selector)
+
+  The result is the vault's tagged tuple, unwrapped by nothing here. A vault
+  with no `:derivation_salt` configured answers
+  `{:missing_config, [:derivation_salt]}`, a `%Encryptor.Key.Kms{}` descriptor
+  answers `{:invalid_key_descriptor, :not_derivable}`, and both are the
+  vault's to phrase because both are facts about the vault's configuration
+  rather than about this index's declaration. Translating them into a
+  `#{inspect(__MODULE__)}Error` would put this package's words on a
+  misconfiguration it cannot see.
+  """
+  @spec derive(module(), t(), selector()) :: {:ok, binary()} | {:error, Encryptor.Error.t()}
+  def derive(vault, %__MODULE__{} = derivation, selector) when is_atom(vault) do
+    Vault.derive(vault, @outer_purpose, derive_opts(derivation, selector))
   end
 
   @doc """
@@ -396,18 +451,23 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
     end
   end
 
-  @spec validate_key_material!(t(), term()) :: :ok
-  defp validate_key_material!(derivation, key_material) when is_binary(key_material) do
-    if byte_size(key_material) < @key_bytes do
-      refuse!(derivation, {:invalid, :key_material, :shorter_than_32_bytes})
-    end
+  # The selector half of A8's `ikm_selector`, mapped onto the vault's `:key`
+  # option. A `:global` index names no key, so the vault's own `:default`
+  # applies; a `:tenant` index names the tenant `selector!/3` resolved.
+  #
+  # A selector this clause does not recognise is refused here rather than
+  # passed on, because the vault would answer `{:invalid_selector, term}`
+  # naming a value this package constructed - and the value is a tenant
+  # identifier, which is the one thing in this path a host may consider
+  # sensitive.
+  @spec key_opt(t(), term()) :: keyword()
+  defp key_opt(_derivation, {:tenant, tenant}) when is_binary(tenant) and tenant != "",
+    do: [key: tenant]
 
-    :ok
-  end
+  defp key_opt(_derivation, :global), do: []
 
-  defp validate_key_material!(derivation, _key_material) do
-    refuse!(derivation, {:invalid, :key_material, :not_a_binary})
-  end
+  defp key_opt(derivation, _selector),
+    do: refuse!(derivation, {:invalid, :selector, :not_a_selector})
 
   # Only binaries reach the exception's identifying fields. A component that
   # failed validation may be any term the caller passed, and the family's

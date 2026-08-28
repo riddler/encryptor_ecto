@@ -79,7 +79,7 @@ defmodule Encryptor.Ecto.MixProject do
       # `encrypt/2`. The pin moves to a version requirement at the vault's
       # first real release; until then this is the only dependency form that
       # names the code the types are written against.
-      {:encryptor, github: "riddler/encryptor", ref: "ece9647a5b2fdeb4176e349d717bafa2db0e3080"},
+      {:encryptor, github: "riddler/encryptor", ref: "da7a9f238009af42ed451b6a6fc78fe2cbe03960"},
 
       # The serializer `Encryptor.Ecto.Map` defaults to (ADR-0001 decision 8).
       # A direct dependency rather than a transitive one: the vault happens to
