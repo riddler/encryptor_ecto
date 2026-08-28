@@ -31,7 +31,9 @@ defmodule Encryptor.Ecto.TestRepo do
 
   @migrations [
     {0, Encryptor.Ecto.TestMigration},
-    {1, Encryptor.Ecto.TestMigrationTextAndMap}
+    {1, Encryptor.Ecto.TestMigrationTextAndMap},
+    {2, Encryptor.Ecto.TestMigrationSignups},
+    {3, Encryptor.Ecto.TestMigrationMigrator}
   ]
 
   @doc """

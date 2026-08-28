@@ -47,6 +47,81 @@ columns, and makes the name overridable. Decision 6's table row for
 `mix encryptor.ecto.gen.migration` is otherwise unchanged: it still writes one
 Ecto migration file into the host's tree and still runs no DDL itself.
 
+## Proposed amendment (2026-08-28): Q2 is answered
+
+Status: **proposed**. Acceptance is the operator's, and the decision text
+below is unchanged except where this amendment says so. Recorded on `ece-b25`,
+which implements the engine; the compile-time enforcement of the rule is
+`ece-4mg`'s, and only this record's text lands with the engine.
+
+Unlike the two amendments above, this one carries an operator ruling. The
+operator's words, of 2026-08-28:
+
+> dispatch ece-b25 with the amendment folded in (like you recommended) and
+> then continue with the rest of that lane
+
+The recommendation those words adopt by reference, restated here as the
+adopted text:
+
+> silence is allowed only where authentication is provable from the `from:`
+> type - a field whose `from:` resolves to one of this package's own
+> vault-backed types needs no declaration; a field whose `from:` is anything
+> else (legacy `load/1` or `load/3` function, unknown `Source`
+> implementation, cloak cipher module) must declare `source_authenticated:`
+> explicitly (`true` or `false`), and the plan fails at `mix compile` if it
+> does not; declaring `false` triggers decision 3a's existing rule (refuse
+> `--mode write` without `validate:`).
+
+**What this changes.** Q2 asked whether a documentation warning is enough or
+whether the plan macro should require an explicit declaration so that silence
+is never the unsafe answer. The answer is the second, narrowed: silence is
+safe exactly where this package can *prove* the source authenticates, which is
+where the `from:` module is one of its own vault-backed types - the
+context-change case of ADR-0002 decision 3, where `from:` and `to:` name the
+same module with different params. Everywhere else the `from:` module is the
+host's own legacy reader, this package's correctness obligation on the legacy
+format is nil (decision 1), and it cannot tell an AEAD cipher from a stream
+cipher by looking. So it asks, at `mix compile`, where the question is cheap.
+
+The declaration remains an acknowledgement rather than a capability flag: a
+host writing `source_authenticated: true` is asserting that someone checked
+the legacy cipher, and that assertion is now in the diff where a reviewer sees
+it.
+
+**Decision 3d's worked example changes.** As written, 3d says a
+`Cloak.Ciphers.AES.GCM` host "declares nothing, gets the ordinary
+classification, and reads decision 3 as background". Under this amendment that
+host declares `source_authenticated: true` on every legacy field - its
+`from:` modules are cloak type modules, which are not this package's
+vault-backed types, so the plan does not compile without the declaration. It
+still gets the ordinary classification, because the declaration is `true`.
+What it no longer gets is silence, and the reviewable assertion that someone
+checked the legacy cipher is what replaces it. 3d as amended:
+
+> **3d.** None of this applies to an AEAD legacy cipher, which is the common
+> case: a `Cloak.Ciphers.AES.GCM` host declares
+> `source_authenticated: true` per legacy field - the reviewable assertion
+> that someone checked the legacy cipher authenticates - gets the ordinary
+> classification, and reads the rest of decision 3 as background.
+
+**What it does not change.** Decision 3a's two behaviours for
+`source_authenticated: false` are untouched: the report distinguishes
+`:migratable_unverified` (ADR-0002 proposed amendment 2) and `--mode write` is
+refused without `validate:`. No `Source` callback is added, for the reason Q2
+itself gives - an `Ecto.Type`-shaped source exports no such fact, and a
+callback the legacy modules cannot implement is not a contract. Nothing is
+inferred from a module's name, a dependency, or the shape of its bytes.
+
+**Consequence for the implementers.** `ece-4mg` adds `source_authenticated:`
+and `validate:` to `Encryptor.Ecto.Migration`'s field options, and adds the
+compile-time requirement: a field whose resolved `from:` is not one of this
+package's vault-backed types and that declares no `source_authenticated:` is a
+`CompileError` naming the schema and the field. `ece-b25` ships the engine
+without any of that machinery, with its report classification built so that
+adding the fifth class is additive. A host upgrading across this change sees
+its plan stop compiling with a message telling it exactly what to write, which
+is the one place in this design where that is cheap.
+
 ## Context
 
 ADR-0001 argues that this package's type surface should be `cloak_ecto`'s
@@ -751,6 +826,16 @@ sense of verification. Whether a documentation warning is enough, or whether
 the plan macro should require an explicit `source_authenticated: true` on
 every field so that silence is never the unsafe answer, is open. Owner: this
 repo, before implementation.
+
+*Answered 2026-08-28 (`ece-b25`), recorded as the proposed amendment above -
+status proposed, and unlike Q3 and Q4 this one carries an operator ruling
+behind it. The answer is the second candidate, narrowed: silence is allowed
+only where authentication is provable from the `from:` type, which is where
+`from:` resolves to one of this package's own vault-backed types. Every other
+`from:` - a legacy `Ecto.Type`, an unknown `Source`, a cloak cipher module -
+must declare `source_authenticated:` explicitly, and the plan fails at
+`mix compile` if it does not. Decision 3d's worked example changes with it.
+The enforcement is `ece-4mg`'s.*
 
 **Q3. What the migrator does with a schema whose primary key it cannot order.**
 ADR-0002's Q6 already holds this open for the founding implementation. It

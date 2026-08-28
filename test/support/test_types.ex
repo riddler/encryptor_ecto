@@ -390,6 +390,100 @@ defmodule Encryptor.Ecto.TestSchemas do
       field(:variant, :string)
       field(:email, :string)
       field(:email_encrypted, Encryptor.Ecto.TestTypes.HolderName)
+      field(:variant_notes, Encryptor.Ecto.TestTypes.GlobalName)
+    end
+  end
+
+  defmodule Reference do
+    @moduledoc """
+    A schema keyed by a UUID, which keyset pagination orders day one.
+
+    ADR-0002 proposed amendment 4: a `:binary_id` key orders correctly and
+    scatters over the index, which is a cost in read locality rather than a
+    correctness problem. No table backs it - the pagination decision is made
+    from the schema before a query is built.
+    """
+
+    use Ecto.Schema
+
+    @type t :: %__MODULE__{}
+
+    @primary_key {:id, :binary_id, autogenerate: true}
+
+    schema "reference_codes" do
+      field(:value, Encryptor.Ecto.TestTypes.Pan)
+    end
+  end
+
+  defmodule Composite do
+    @moduledoc """
+    A schema with a composite primary key: documented-unsupported, and refused
+    with a clear error rather than paged over one column of it.
+    """
+
+    use Ecto.Schema
+
+    @type t :: %__MODULE__{}
+
+    @primary_key false
+
+    schema "composite_rows" do
+      field(:merchant_id, :string, primary_key: true)
+      field(:sequence, :integer, primary_key: true)
+      field(:pan, Encryptor.Ecto.TestTypes.Pan)
+    end
+  end
+
+  defmodule Unkeyed do
+    @moduledoc """
+    A schema with no primary key at all, which the migrator has nothing to
+    page over and refuses by name.
+    """
+
+    use Ecto.Schema
+
+    @type t :: %__MODULE__{}
+
+    @primary_key false
+
+    schema "unkeyed_rows" do
+      field(:pan, Encryptor.Ecto.TestTypes.Pan)
+    end
+  end
+
+  defmodule Raw do
+    @moduledoc """
+    A schema keyed by a `:binary` column, the other half of the day-one
+    ruling: a key that is bytes rather than a UUID still orders as one `>`
+    comparison.
+    """
+
+    use Ecto.Schema
+
+    @type t :: %__MODULE__{}
+
+    @primary_key {:id, :binary, autogenerate: false}
+
+    schema "raw_rows" do
+      field(:pan, Encryptor.Ecto.TestTypes.Pan)
+    end
+  end
+
+  defmodule Coded do
+    @moduledoc """
+    A schema keyed by a string, which is neither an integer nor a binary type
+    and is therefore refused: text ordering depends on collation, and the
+    ruling is integer and binary primary keys day one.
+    """
+
+    use Ecto.Schema
+
+    @type t :: %__MODULE__{}
+
+    @primary_key {:code, :string, autogenerate: false}
+
+    schema "coded_rows" do
+      field(:pan, Encryptor.Ecto.TestTypes.Pan)
     end
   end
 end

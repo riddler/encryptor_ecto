@@ -25,7 +25,7 @@ defmodule Encryptor.Ecto.TestRepoTest do
           """
           SELECT column_name, data_type
             FROM information_schema.columns
-           WHERE table_name = 'cards'
+           WHERE table_name = 'cards' AND table_schema = 'public'
            ORDER BY column_name
           """,
           []
