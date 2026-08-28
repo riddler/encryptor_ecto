@@ -276,19 +276,34 @@ defmodule Encryptor.Ecto.Binary do
       [vault: Payments.Vault]
   """
   @spec validate_declaration!(module(), keyword()) :: keyword()
-  def validate_declaration!(module, opts) do
+  def validate_declaration!(module, opts),
+    do: validate_declaration!(module, opts, __MODULE__, [])
+
+  @doc """
+  The same check, on behalf of a type built over this one.
+
+  `Encryptor.Ecto.String` and `Encryptor.Ecto.Map` share this option set rather
+  than re-implementing it, so a closed set stays closed in one place.
+  `declared_by` is the macro the host actually wrote, so the message names the
+  module a reader has to go and look up; `extra_options` is what that type adds
+  to the set (`:json`, for `Map`, and nothing for `String`).
+  """
+  @spec validate_declaration!(module(), keyword(), module(), [atom()]) :: keyword()
+  def validate_declaration!(module, opts, declared_by, extra_options) do
     if not Keyword.keyword?(opts) do
       raise ArgumentError,
-            "#{inspect(module)}: use Encryptor.Ecto.Binary expects a keyword list of options"
+            "#{inspect(module)}: use #{inspect(declared_by)} expects a keyword list of options"
     end
 
-    case Keyword.keys(opts) -- @known_options do
+    known = @known_options ++ extra_options
+
+    case Keyword.keys(opts) -- known do
       [] -> :ok
-      unknown -> raise ArgumentError, unknown_options_message(module, unknown)
+      unknown -> raise ArgumentError, unknown_options_message(module, unknown, declared_by, known)
     end
 
     if not Keyword.has_key?(opts, :vault) do
-      raise ArgumentError, missing_vault_message(module)
+      raise ArgumentError, missing_vault_message(module, declared_by)
     end
 
     opts
@@ -512,6 +527,21 @@ defmodule Encryptor.Ecto.Binary do
   defp vault_opts(params, tenant),
     do: [key: tenant, encryption_context: encryption_context(params)]
 
+  @doc """
+  The encryption-context key *names* a declaration composes, sorted.
+
+  Public because a type built over this one can fail on the plaintext side of
+  the vault call - `Encryptor.Ecto.Map`'s serializer does - and has to fill in
+  the same identifying fields on its own exception without recomposing the
+  context, which is the one thing that must not drift between the two.
+
+      iex> Encryptor.Ecto.Binary.context_keys(%{context: %{"purpose" => "pii"},
+      ...>   table: "cards", column: "pan"})
+      ["column", "purpose", "table"]
+  """
+  @spec context_keys(params()) :: [String.t()]
+  def context_keys(params), do: params |> encryption_context() |> Map.keys() |> Enum.sort()
+
   @spec encryption_context(params()) :: %{optional(String.t()) => String.t()}
   defp encryption_context(params) do
     Map.merge(params.context, %{"table" => params.table, "column" => params.column})
@@ -524,7 +554,7 @@ defmodule Encryptor.Ecto.Binary do
     [
       table: params.table,
       column: params.column,
-      context_keys: params |> encryption_context() |> Map.keys() |> Enum.sort(),
+      context_keys: context_keys(params),
       tenant: tenant_for_report(tenant),
       reason: reason
     ]
@@ -646,22 +676,22 @@ defmodule Encryptor.Ecto.Binary do
     context
   end
 
-  defp unknown_options_message(module, unknown) do
+  defp unknown_options_message(module, unknown, declared_by, known) do
     """
     #{inspect(module)}: unknown option#{if length(unknown) == 1, do: "", else: "s"} \
-    #{inspect(unknown)} for use Encryptor.Ecto.Binary.
+    #{inspect(unknown)} for use #{inspect(declared_by)}.
 
     The option set is closed (ADR-0001 decision 3), because every option that \
     could weaken the encryption context is one nobody gets. It is: \
-    #{inspect(@known_options)}.
+    #{inspect(known)}.
     """
   end
 
-  defp missing_vault_message(module) do
+  defp missing_vault_message(module, declared_by) do
     """
-    #{inspect(module)}: use Encryptor.Ecto.Binary requires a :vault.
+    #{inspect(module)}: use #{inspect(declared_by)} requires a :vault.
 
-        use Encryptor.Ecto.Binary, vault: Payments.Vault
+        use #{inspect(declared_by)}, vault: Payments.Vault
 
     There is no application-environment fallback, by decision: a field whose \
     vault is configured somewhere else is a field whose key nobody can find by \

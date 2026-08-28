@@ -106,6 +106,119 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary, vault: Encryptor.Ecto.TestVaults.Unstarted
   end
+
+  defmodule HolderName do
+    @moduledoc "A text field: `Encryptor.Ecto.String`'s ordinary case."
+
+    use Encryptor.Ecto.String, vault: Encryptor.Ecto.TestVaults.Merchant
+  end
+
+  defmodule GlobalName do
+    @moduledoc "A text field with no tenant, to show String carries Binary's whole option set."
+
+    use Encryptor.Ecto.String,
+      vault: Encryptor.Ecto.TestVaults.App,
+      tenant: :none
+  end
+
+  defmodule Metadata do
+    @moduledoc "A map field on the default serializer."
+
+    use Encryptor.Ecto.Map, vault: Encryptor.Ecto.TestVaults.Merchant
+  end
+
+  defmodule Sorted do
+    @moduledoc "A map field naming its own serializer rather than taking the default."
+
+    use Encryptor.Ecto.Map,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      json: Encryptor.Ecto.TestSerializers.Sorted
+  end
+
+  defmodule Unserializable do
+    @moduledoc "A map field whose serializer raises in both directions."
+
+    use Encryptor.Ecto.Map,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      json: Encryptor.Ecto.TestSerializers.Failing
+  end
+
+  defmodule Listy do
+    @moduledoc "A map field whose serializer decodes to something that is not a map."
+
+    use Encryptor.Ecto.Map,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      json: Encryptor.Ecto.TestSerializers.Listy
+  end
+end
+
+defmodule Encryptor.Ecto.TestSerializers do
+  @moduledoc """
+  Serializer modules for `Encryptor.Ecto.Map`, one per arm of decision 8's
+  contract: a working alternative to the default, one that raises, and one that
+  parses into something other than a map.
+
+  None of them renders the value it was given. A serializer failure is the
+  point in this package where a plaintext is closest to hand, and a fixture
+  that printed one would leak it into exactly the failure report the type's own
+  code is careful not to write.
+  """
+
+  defmodule Sorted do
+    @moduledoc "A working serializer that is demonstrably not the default."
+
+    @doc """
+    Encodes with the keys in sorted order, so its output is byte-for-byte
+    distinguishable from the default's on a map whose key order is not sorted.
+    """
+    @spec encode!(term()) :: String.t()
+    def encode!(term) do
+      pairs =
+        term
+        |> Enum.sort()
+        |> Enum.map_join(",", fn {key, value} ->
+          Jason.encode!(to_string(key)) <> ":" <> Jason.encode!(value)
+        end)
+
+      "{" <> pairs <> "}"
+    end
+
+    @doc "Decodes exactly as the default does."
+    @spec decode!(binary()) :: term()
+    def decode!(binary), do: Jason.decode!(binary)
+  end
+
+  defmodule Failing do
+    @moduledoc "A serializer that raises in both directions."
+
+    @doc "Always raises, without rendering the term."
+    @spec encode!(term()) :: no_return()
+    def encode!(_term), do: raise(RuntimeError, "the serializer declined")
+
+    @doc "Always raises, without rendering the bytes."
+    @spec decode!(binary()) :: no_return()
+    def decode!(_binary), do: raise(RuntimeError, "the serializer declined")
+  end
+
+  defmodule Listy do
+    @moduledoc "A serializer whose decode answers with a list rather than a map."
+
+    @doc "Encodes the way the default does."
+    @spec encode!(term()) :: String.t()
+    def encode!(term), do: Jason.encode!(term)
+
+    @doc "Answers with a list whatever it was given."
+    @spec decode!(binary()) :: list()
+    def decode!(_binary), do: ["not", "a", "map"]
+  end
+
+  defmodule Halfway do
+    @moduledoc "A module exporting only half the serializer contract."
+
+    @doc "The only half this module has."
+    @spec encode!(term()) :: String.t()
+    def encode!(term), do: Jason.encode!(term)
+  end
 end
 
 defmodule Encryptor.Ecto.TestResolvers do
@@ -168,6 +281,8 @@ defmodule Encryptor.Ecto.TestSchemas do
       field(:merchant_id, :string)
       field(:pan, Encryptor.Ecto.TestTypes.Pan)
       field(:notes, Encryptor.Ecto.TestTypes.Notes)
+      field(:holder_name, Encryptor.Ecto.TestTypes.HolderName)
+      field(:metadata, Encryptor.Ecto.TestTypes.Metadata)
     end
   end
 end
