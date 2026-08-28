@@ -136,6 +136,7 @@ defmodule Encryptor.Ecto.Map do
           context: %{optional(String.t()) => String.t()},
           table: String.t(),
           column: String.t(),
+          legacy: module() | nil,
           json: module()
         }
 
@@ -273,13 +274,20 @@ defmodule Encryptor.Ecto.Map do
   `nil` passes through. A decrypt failure is `Encryptor.Ecto.Binary`'s to
   raise; a payload that decrypts and then fails to parse, or that parses into
   something other than a map, is `Encryptor.Ecto.SerializationError`.
+
+  A value that came back through the migration window's `:legacy` module is
+  **not** deserialized: the legacy type is a map type too, and its `load/1`
+  has already returned the map. This is why the call below asks
+  `Encryptor.Ecto.Binary` which arm answered rather than taking the value.
   """
   @spec load(term(), function(), params()) :: {:ok, map() | nil}
   def load(nil, _loader, _params), do: {:ok, nil}
 
-  def load(value, loader, params) when is_binary(value) do
-    {:ok, plaintext} = Binary.load(value, loader, binary_params(params))
-    {:ok, decode!(plaintext, params)}
+  def load(value, _loader, params) when is_binary(value) do
+    case Binary.load_arm(value, binary_params(params)) do
+      {:primary, plaintext} -> {:ok, decode!(plaintext, params)}
+      {:legacy, loaded} -> {:ok, legacy_map!(loaded, params)}
+    end
   end
 
   # Anything else is not a stored value at all, and `Binary.load/3`'s own
@@ -328,6 +336,18 @@ defmodule Encryptor.Ecto.Map do
         raise SerializationError, detail(params, :decode, reason)
     end
   end
+
+  # No serializer ran, and this is still the family's "the value came back in
+  # a shape this type cannot return" arm - the same one `{:not_a_map, tag}`
+  # already occupies for a serializer that parsed successfully into a list.
+  # The reason is tagged distinctly so that an operator reading it knows which
+  # reader produced the value, and the shape tag rather than the value for the
+  # reason `shape_tag/1` gives.
+  @spec legacy_map!(term(), params()) :: map()
+  defp legacy_map!(loaded, _params) when is_map(loaded) and not is_struct(loaded), do: loaded
+
+  defp legacy_map!(loaded, params),
+    do: raise(SerializationError, detail(params, :decode, {:legacy_not_a_map, shape_tag(loaded)}))
 
   # The serializer's contract is `encode!/1` and `decode!/1` - it raises rather
   # than returning a result - so this is where a raise becomes the `{:ok, v} |

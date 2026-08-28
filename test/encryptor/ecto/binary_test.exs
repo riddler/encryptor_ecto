@@ -9,6 +9,7 @@ defmodule Encryptor.Ecto.BinaryTest do
   alias Encryptor.Ecto.MissingContextError
   alias Encryptor.Ecto.MissingTenantError
   alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.TestLegacy
   alias Encryptor.Ecto.TestSchemas.Card
   alias Encryptor.Ecto.TestTypes
   alias Encryptor.Ecto.TestVaults
@@ -83,11 +84,16 @@ defmodule Encryptor.Ecto.BinaryTest do
       end
     end
 
-    # sabotage: the :legacy check in init/2 removed, red.
-    test "refuses :legacy rather than accepting it and doing nothing" do
-      assert_raise ArgumentError, ~r/:legacy option .* not implemented yet \(ece-e8k\)/s, fn ->
-        Binary.init([vault: TestVaults.App, legacy: SomeOldType], schema: Card, field: :pan)
-      end
+    # sabotage: init/2 freezing :legacy as nil rather than the validated
+    # module, red. The load arm the option opens is
+    # `Encryptor.Ecto.LegacyTest`'s subject; what belongs here is that the
+    # closed set contains it and that the declaration keeps it.
+    test "accepts :legacy, and freezes the module it names" do
+      assert %{legacy: TestLegacy.Binary} =
+               Binary.init([vault: TestVaults.App, legacy: TestLegacy.Binary],
+                 schema: Card,
+                 field: :pan
+               )
     end
   end
 
@@ -515,8 +521,8 @@ defmodule Encryptor.Ecto.BinaryTest do
 
     # sabotage: describe_field/1's {nil, field} arm -> "an encrypted field", red.
     test "name the field alone when there is no schema to name" do
-      assert_raise ArgumentError, ~r/^:pan: the :legacy option/, fn ->
-        Binary.init([vault: TestVaults.App, legacy: SomeOldType], field: :pan)
+      assert_raise ArgumentError, ~r/^:pan: could not derive the declared table/, fn ->
+        Binary.init([vault: TestVaults.App], field: :pan)
       end
     end
   end

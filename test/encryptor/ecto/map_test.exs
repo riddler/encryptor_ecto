@@ -105,7 +105,7 @@ defmodule Encryptor.Ecto.MapTest do
       assert %{table: "cards", column: "metadata", tenant: :scope, context: %{}} =
                params(TestTypes.Metadata)
 
-      assert_raise ArgumentError, ~r/:legacy option/, fn ->
+      assert_raise ArgumentError, ~r/the :legacy type .* could not be loaded/, fn ->
         Encryptor.Ecto.Map.init(
           [vault: TestVaults.Merchant, legacy: SomeOldType],
           schema: Card,

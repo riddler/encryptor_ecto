@@ -150,6 +150,94 @@ defmodule Encryptor.Ecto.TestTypes do
       vault: Encryptor.Ecto.TestVaults.Merchant,
       json: Encryptor.Ecto.TestSerializers.Listy
   end
+
+  # -- the migration window -------------------------------------------------
+  #
+  # One declaration per arm of ADR-0004 decision 4: the fallback that answers,
+  # the deferred answer, the two ways a legacy module can fail, and the two
+  # misconfigurations that must never reach it at all.
+
+  defmodule PanLegacy do
+    @moduledoc "A field in the mixed window, with a legacy reader that works."
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      legacy: Encryptor.Ecto.TestLegacy.Binary
+  end
+
+  defmodule PanLegacyDeferred do
+    @moduledoc "A field whose legacy reader defers the decryption into a closure."
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      legacy: Encryptor.Ecto.TestLegacy.Deferred
+  end
+
+  defmodule PanLegacyRaising do
+    @moduledoc "A field whose legacy reader raises, with the bytes in its message."
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      legacy: Encryptor.Ecto.TestLegacy.Raising
+  end
+
+  defmodule PanLegacyOffContract do
+    @moduledoc "A field whose legacy reader answers outside `Ecto.Type`'s contract."
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      legacy: Encryptor.Ecto.TestLegacy.OffContract
+  end
+
+  defmodule RefusingLegacy do
+    @moduledoc """
+    A legacy-window field whose tenant never resolves.
+
+    The subject of decision 4a's first prohibition: the legacy reader could
+    answer these bytes, and must not be asked.
+    """
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      tenant: Encryptor.Ecto.TestResolvers.Refusing,
+      legacy: Encryptor.Ecto.TestLegacy.Anything
+  end
+
+  defmodule StrictLegacy do
+    @moduledoc """
+    A legacy-window field on the vault that requires a context key this
+    package never supplies - decision 4a's second prohibition.
+    """
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Strict,
+      tenant: :none,
+      legacy: Encryptor.Ecto.TestLegacy.Anything
+  end
+
+  defmodule HolderNameLegacy do
+    @moduledoc "A text field in the mixed window."
+
+    use Encryptor.Ecto.String,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      legacy: Encryptor.Ecto.TestLegacy.Binary
+  end
+
+  defmodule MetadataLegacy do
+    @moduledoc "A map field in the mixed window, whose legacy reader returns a map."
+
+    use Encryptor.Ecto.Map,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      legacy: Encryptor.Ecto.TestLegacy.Map
+  end
+
+  defmodule MetadataLegacyListy do
+    @moduledoc "A map field whose legacy reader answers with something that is not a map."
+
+    use Encryptor.Ecto.Map,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      legacy: Encryptor.Ecto.TestLegacy.MapListy
+  end
 end
 
 defmodule Encryptor.Ecto.TestSerializers do

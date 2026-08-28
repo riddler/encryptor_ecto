@@ -28,7 +28,7 @@ defmodule Encryptor.Ecto.Binary do
   | `:vault` | yes | The `Encryptor.Vault` module this type encrypts through |
   | `:tenant` | no | `:scope` (default), `:none`, or a module implementing `Encryptor.Ecto.TenantContext` (see "A global field" below) |
   | `:context` | no | Static extra context pairs merged into every operation |
-  | `:legacy` | no | The migration window's legacy type (not yet implemented - see below) |
+  | `:legacy` | no | The migration window's legacy type: load through it when the primary load fails (see "The migration window" below) |
   | `:table`, `:column` | no | Overrides for the frozen declared context values, writable at the `use` or at the field |
 
   An unknown option raises while the host module compiles, and there is no
@@ -165,12 +165,103 @@ defmodule Encryptor.Ecto.Binary do
   plaintext rather than stored bytes - otherwise every write would mark every
   encrypted field changed (decision 9).
 
-  ## What this module does not do yet
+  ## The migration window: `:legacy`
 
-  `:legacy` is part of the option set the record fixes, and its load arm is a
-  separate bead. Rather than accept the option and silently do nothing with
-  it - leaving a host believing it has a migration window it does not - a
-  declaration that names `:legacy` raises at `init/1` saying so.
+  `legacy:` names the type module the host was reading this column with
+  before - a `cloak_ecto` type, a hand-rolled one - so that a column holding
+  both formats at once is readable for as long as the migration takes
+  (ADR-0001 acceptance amendment 4, ADR-0004 decision 4).
+
+      defmodule Payments.Encrypted.Binary do
+        use Encryptor.Ecto.Binary,
+          vault: Payments.Vault,
+          legacy: Payments.Cloak.Encrypted.Binary
+      end
+
+  ### Order, and what triggers the fallback
+
+  The primary load is attempted **first, always**. The legacy load is
+  attempted **only** when the vault refuses the stored bytes - the failure
+  that would otherwise raise `Encryptor.Ecto.DecryptError`. It is not
+  attempted for `Encryptor.Ecto.MissingTenantError` or
+  `Encryptor.Ecto.MissingContextError`: those are host misconfiguration, they
+  are loud on purpose, and a fallback that answered them with a successful
+  legacy read would convert a configuration bug into a silent year of
+  un-migrated rows (decision 4a).
+
+  The order is also what makes the window cheap. It costs one failed decrypt
+  per legacy row and nothing at all per migrated row, and the population of
+  legacy rows only shrinks.
+
+  ### Which error survives
+
+  If both loads fail, the exception raised is the **primary**
+  `Encryptor.Ecto.DecryptError`. The legacy attempt's reason travels in that
+  exception's non-contractual `:engine` field, redacted like everything else
+  in it, and must never be matched for control flow (decision 4b). Raising the
+  legacy error would report a self-expiring compatibility shim as the cause of
+  what is usually a genuine integrity event.
+
+  ### Nothing writes through legacy, ever
+
+  `dump/3` has no legacy arm and never will (decision 4c). A value read
+  through the legacy path and written back is written in the new format, which
+  is what makes ordinary application traffic migrate rows on its own during
+  the window.
+
+  ### What the legacy module has to be
+
+  A module exporting `load/1` and returning `{:ok, value} | :error` - the
+  `Ecto.Type` shape, which is what every `cloak_ecto` type and every
+  hand-rolled type already is. It is checked at the declaration rather than on
+  the first legacy row, the way `Encryptor.Ecto.Map` checks its `:json`.
+
+  A legacy scheme behind something else - an `Ecto.ParameterizedType`, a
+  sidecar service - is reachable by writing a one-function module around it,
+  and that is the supported route: this type constructs no params for a
+  foreign type and has no plan to construct them from. The migrator's `from:`
+  accepts more shapes than this option does, because ADR-0002 decision 3 has
+  it construct both sides' params itself and this type does not.
+
+  A zero-arity function returned by the legacy module is invoked once and its
+  result is the value, because deferred decryption is a real convention among
+  legacy types (`cloak_ecto`'s `closure: true`) and a field that held the
+  function rather than the value would be a defect. This mirrors the rule
+  ADR-0004 decision 2 states for the migrator's `Source` contract.
+
+  Whatever the legacy module returns is the field's value as-is: this type
+  does not re-check it, and for `Encryptor.Ecto.Map` that means the legacy
+  module returns the map rather than bytes to deserialize.
+
+  ### The window is a security downgrade, and it is meant to end
+
+  While `legacy:` is set, a row that has not been rewritten yet is read under
+  the legacy scheme's rules: for a `cloak_ecto` host, with no encryption
+  context binding it to its row and no per-tenant key separation. No
+  *migrated* row is weakened; the guarantee is per-row until the rewrite
+  finishes (decision 5). Dropping `legacy:` is the last step of the runbook,
+  not a thing to remember.
+
+  Every load that falls through to the legacy path emits
+
+      :telemetry.execute([:encryptor_ecto, :legacy_load], %{count: 1},
+        %{table: "cards", column: "pan"})
+
+  and the metadata set is closed at those two keys: no value, no bytes, no
+  reason, no tenant. Widening it is a security review rather than a feature
+  (decision 5). The pair is table and column precisely because the window is
+  per-field: a host with twelve encrypted columns finishes eleven and still
+  has one legacy reader open.
+
+  **The counter is a convenience, not proof.** ADR-0004's Q4 names the reason
+  and this documentation is the answer to it: a counter that has read zero for
+  a retention period is evidence about *traffic*, not about *rows*, so a table
+  with a cold partition nobody reads reports zero while still holding legacy
+  bytes. `Encryptor.Ecto.Migrator.verify/2` over `sample: :all` is the primary
+  signal, and it is what a host drops `legacy:` on. Only the failed decrypt
+  that preceded a successful legacy read is counted - a load that failed
+  through *both* paths raises, which is louder than a counter and is not a
+  legacy row in the sense the window is about.
   """
 
   alias Encryptor.Ecto.DecryptError
@@ -203,8 +294,17 @@ defmodule Encryptor.Ecto.Binary do
           tenant: :scope | :none | module(),
           context: %{optional(String.t()) => String.t()},
           table: String.t(),
-          column: String.t()
+          column: String.t(),
+          legacy: module() | nil
         }
+
+  @typedoc """
+  Which of the two readers answered a load.
+
+  `:primary` is the vault; `:legacy` is the module named by `:legacy`, and the
+  value it returned is that module's, unchecked by this one.
+  """
+  @type load_arm :: :primary | :legacy
 
   @known_options [:vault, :tenant, :context, :legacy, :table, :column]
 
@@ -321,20 +421,23 @@ defmodule Encryptor.Ecto.Binary do
 
   Raises when the table or the column cannot be resolved and was not supplied.
   A context-less encrypt is never performed (decision 4).
+
+  A `:legacy` module is resolved here too, and refused here if it cannot read
+  bytes: a declaration that names a legacy type which turns out not to export
+  `load/1` is a migration window the host believes it has and does not, and
+  the first row is the wrong place to find that out.
   """
   @spec init(keyword(), keyword()) :: params()
   def init(declared, field_opts) do
-    if Keyword.has_key?(declared, :legacy) do
-      raise ArgumentError, legacy_message(field_opts)
-    end
-
-    %{
+    params = %{
       vault: Keyword.fetch!(declared, :vault),
       tenant: validated_tenant(declared),
       context: validated_context(declared),
       table: declared_value(declared, :table, field_opts, &derive_table/1),
       column: declared_value(declared, :column, field_opts, &derive_column/1)
     }
+
+    Map.put(params, :legacy, validated_legacy!(declared, params))
   end
 
   @doc """
@@ -403,26 +506,46 @@ defmodule Encryptor.Ecto.Binary do
   `nil` passes through; everything else goes back to the vault unchanged, in
   the same context the write composed. There is no `:error` arm here either:
   a decrypt failure is an integrity event, not a validation error.
+
+  Where the declaration named `:legacy`, a vault refusal falls through to that
+  module rather than raising - see the moduledoc for the order, the trigger,
+  and which error survives when both fail.
   """
-  @spec load(term(), function(), params()) :: {:ok, binary() | nil}
+  @spec load(term(), function(), params()) :: {:ok, term()}
   def load(nil, _loader, _params), do: {:ok, nil}
 
   def load(value, _loader, params) when is_binary(value) do
+    {_arm, loaded} = load_arm(value, params)
+    {:ok, loaded}
+  end
+
+  def load(value, _loader, params), do: refuse_non_binary!(params, :load, value)
+
+  @doc """
+  The same load, saying which of the two readers answered it.
+
+  Public because a type built over this one can have work to do on the value
+  that only makes sense for one arm - `Encryptor.Ecto.Map` deserializes the
+  vault's plaintext and must *not* deserialize what a legacy module already
+  returned as a map. Every other caller wants `load/3`.
+
+  Raises exactly what `load/3` raises, for exactly the same conditions.
+  """
+  @spec load_arm(binary(), params()) :: {load_arm(), term()}
+  def load_arm(value, params) when is_binary(value) do
     tenant = resolve_tenant!(params, :load)
 
     case params.vault.decrypt(value, vault_opts(params, tenant)) do
       {:ok, plaintext} ->
-        {:ok, plaintext}
+        {:primary, plaintext}
 
       {:error, %Error{reason: {:missing_required_context_keys, keys}} = error} ->
         raise MissingContextError, common(params, tenant, error.reason) ++ [missing_keys: keys]
 
       {:error, %Error{} = error} ->
-        raise DecryptError, common(params, tenant, error.reason) ++ [engine: error.engine]
+        legacy_arm_or_raise!(value, params, tenant, error)
     end
   end
-
-  def load(value, _loader, params), do: refuse_non_binary!(params, :load, value)
 
   @doc """
   Compares plaintext, never stored bytes.
@@ -563,6 +686,83 @@ defmodule Encryptor.Ecto.Binary do
   defp tenant_for_report(:none), do: :none
   defp tenant_for_report(tenant), do: tenant
 
+  # -- the migration window -------------------------------------------------
+
+  # ADR-0004 decision 4a: the fallback hangs off the vault's refusal of the
+  # stored bytes and nothing else. `MissingTenantError` never reaches here at
+  # all (it is raised before the vault is called) and `MissingContextError`
+  # has its own arm above, which is what keeps a host misconfiguration from
+  # being answered by a successful legacy read.
+  @spec legacy_arm_or_raise!(binary(), params(), String.t() | :none, Error.t()) ::
+          {:legacy, term()}
+  defp legacy_arm_or_raise!(_value, %{legacy: nil} = params, tenant, error) do
+    raise DecryptError, common(params, tenant, error.reason) ++ [engine: error.engine]
+  end
+
+  defp legacy_arm_or_raise!(value, params, tenant, error) do
+    case legacy_load(params.legacy, value) do
+      {:ok, loaded} ->
+        emit_legacy_load(params)
+        {:legacy, loaded}
+
+      # Decision 4b: the primary error is the one raised. The legacy reason
+      # rides in `:engine`, which is not a contract and is redacted like every
+      # other field - a compatibility shim reported as the cause of an
+      # integrity event would send an operator to the wrong investigation.
+      {:error, reason} ->
+        raise DecryptError,
+              common(params, tenant, error.reason) ++
+                [engine: {:legacy_load_also_failed, error.engine, reason}]
+    end
+  end
+
+  # The legacy module is the host's own working reader, so its contract is
+  # `Ecto.Type`'s rather than this package's, and the `{:ok, v} | {:error, e}`
+  # the rest of the package speaks is composed here. Nothing is swallowed: the
+  # only caller raises on every `:error`, and it raises from outside this
+  # rescue so a failing legacy module's stacktrace is not carried into the
+  # exception a host sees.
+  #
+  # The rescued exception is reduced to its *module*. A legacy type's own
+  # error struct is free to carry the ciphertext it choked on or the plaintext
+  # it half-produced, and folding its message in would put either into a
+  # failure report through the back door ADR-0001 decision 6 closes at the
+  # front.
+  @spec legacy_load(module(), binary()) :: {:ok, term()} | {:error, term()}
+  defp legacy_load(module, value) do
+    case module.load(value) do
+      {:ok, loaded} -> {:ok, unwrap_deferred(loaded)}
+      :error -> {:error, {:legacy_declined, module}}
+      _off_contract -> {:error, {:legacy_off_contract, module}}
+    end
+  rescue
+    exception -> {:error, {:legacy_raised, module, exception.__struct__}}
+  end
+
+  # Deferred decryption is a real convention among legacy types - cloak's
+  # `closure: true` returns a zero-arity function from `load/1` rather than the
+  # plaintext - and a field left holding the function rather than the value
+  # would be a defect this layer introduced. ADR-0004 decision 2 states the
+  # unwrap as a generic rule about a pre-migration reader; it is the same
+  # reader here. The value is invoked once and never rendered.
+  @spec unwrap_deferred(term()) :: term()
+  defp unwrap_deferred(loaded) when is_function(loaded, 0), do: loaded.()
+  defp unwrap_deferred(loaded), do: loaded
+
+  # ADR-0004 decision 5, and its metadata set is closed at these two keys. No
+  # value, no bytes, no reason, no tenant: widening this map is a security
+  # review rather than a feature. Emitted only where a legacy read *answered*,
+  # because the event exists to count rows still in the old format and a load
+  # that failed both ways raises instead.
+  @spec emit_legacy_load(params()) :: :ok
+  defp emit_legacy_load(params) do
+    :telemetry.execute(
+      [:encryptor_ecto, :legacy_load],
+      %{count: 1},
+      %{table: params.table, column: params.column}
+    )
+  end
+
   # -- declaration-time derivation ------------------------------------------
 
   # A pin is read from the field first and from the `use` second, because a
@@ -659,6 +859,38 @@ defmodule Encryptor.Ecto.Binary do
     end
   end
 
+  # Checked at the declaration rather than at the first legacy row, the way
+  # `Encryptor.Ecto.Map` checks its `:json`: a legacy module that cannot read
+  # bytes is a compile-time mistake wherever it is discovered, and the row
+  # that discovers it at runtime is one nobody can read.
+  #
+  # `Code.ensure_loaded?/1` before `function_exported?/2` for the reason given
+  # at every other use of the pair in this package: the bare export check
+  # answers false for a module that is merely not loaded yet, which under lazy
+  # loading is the ordinary case for a legacy type nothing has called.
+  @spec validated_legacy!(keyword(), map()) :: module() | nil
+  defp validated_legacy!(declared, params) do
+    case Keyword.get(declared, :legacy) do
+      nil ->
+        nil
+
+      module when is_atom(module) ->
+        cond do
+          not Code.ensure_loaded?(module) ->
+            raise ArgumentError, legacy_message(params, module, "could not be loaded")
+
+          not function_exported?(module, :load, 1) ->
+            raise ArgumentError, legacy_message(params, module, "does not export load/1")
+
+          true ->
+            module
+        end
+
+      other ->
+        raise ArgumentError, legacy_message(params, other, "is not a module")
+    end
+  end
+
   @spec validated_context(keyword()) :: %{optional(String.t()) => String.t()}
   defp validated_context(declared) do
     context = Keyword.get(declared, :context, %{})
@@ -699,14 +931,20 @@ defmodule Encryptor.Ecto.Binary do
     """
   end
 
-  defp legacy_message(field_opts) do
+  # Named by the declared table and column, the way every other message here
+  # names a field: by the time this check runs they are frozen.
+  defp legacy_message(params, module, complaint) do
     """
-    #{describe_field(field_opts)}: the :legacy option is part of the option \
-    set but its load arm is not implemented yet (ece-e8k).
+    #{params.table}.#{params.column}: the :legacy type #{inspect(module)} #{complaint}.
 
-    It is refused rather than accepted-and-ignored: a declaration that names \
-    a legacy type and gets no legacy load is a migration window a host \
-    believes it has and does not.
+    It must be a module exporting load/1 and returning {:ok, value} or :error \
+    - the Ecto.Type shape, which is what a cloak_ecto type and a hand-rolled \
+    one already are (ADR-0004 decision 4). A legacy scheme behind anything \
+    else is reached by writing a one-function module around it.
+
+    The check runs at the declaration rather than at the first legacy row, \
+    because a declaration that names a legacy type and gets no legacy load is \
+    a migration window a host believes it has and does not.
     """
   end
 

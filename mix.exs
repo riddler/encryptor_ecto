@@ -90,6 +90,14 @@ defmodule Encryptor.Ecto.MixProject do
       # serializer names it and this one goes unused.
       {:jason, "~> 1.4"},
 
+      # The migration window's `[:encryptor_ecto, :legacy_load]` event
+      # (ADR-0004 decision 5). A direct dependency for the same reason Jason
+      # above is one: `ecto` happens to pull `telemetry` in today, and a call
+      # that works only because somebody else's dependency tree supplies the
+      # module is a call that breaks on an upstream change nobody here
+      # reviews.
+      {:telemetry, "~> 1.0"},
+
       # Dev / test
       #
       # `ecto_sql` and `postgrex` are test-only. The library's runtime
