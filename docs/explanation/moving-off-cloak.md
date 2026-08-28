@@ -155,7 +155,11 @@ from a guessable space, and the columns hosts most want to look up by - email
 address, phone number, tax identifier, postal code - are exactly the guessable
 spaces. This is why ADR-0004 decision 9 rules that such a column is **replaced,
 not supplemented**: adding a keyed index beside an unkeyed one fixes nothing
-while the unkeyed one remains.
+while the unkeyed one remains. A keyed legacy column - `Cloak.Ecto.HMAC` or
+`PBKDF2` - is a different case with a different urgency, and no legacy column at
+all is a third. Which one you are in, and in what order the columns are added,
+backfilled and dropped, is
+[step 7 of the how-to guide](../guides/migrate-from-cloak.md#step-7-replace-the-legacy-lookup-column).
 
 What replaces it is a keyed index. The stored value is an HMAC over a declared
 normalization of the plaintext, under a key derived per field and - by default,
