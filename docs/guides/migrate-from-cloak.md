@@ -48,7 +48,7 @@ migrations from a build machine.
 | 4 | Dry run. Resolve every `:undecryptable` row and every `:migratable_unverified` count | Nothing written |
 | 5 | Write. **Point of no return** | A reverse plan (below) or a restore |
 | 6 | Verify over the whole scope. Exit 0 is the acceptance test | n/a |
-| 7 | Replace the legacy lookup column, if you have one | Dropping the new columns; the old one is gone |
+| 7 | Replace the legacy lookup column. Not optional if it is unkeyed | Dropping the new columns; the old one is gone |
 | 8 | One named commit: `legacy:` gone, the legacy library gone, the plan deleted | Reverting the commit |
 
 The table says the point of no return is step 5, and in bulk it is. In practice
@@ -385,12 +385,79 @@ the primary signal that the mixed window has closed and step 8 is due.
 
 ## Step 7. Replace the legacy lookup column
 
-Do this only if you have a deterministic sibling column that serves exact-match
-lookups. It is replaced, not supplemented: adding a keyed index beside an unkeyed
-one fixes nothing while the unkeyed one remains.
+Cloak's answer to exact-match lookup on an encrypted column is a deterministic
+sibling column, so a host that needed lookups arrives here with one. It is
+**replaced, not supplemented**: adding a keyed index beside an unkeyed one fixes
+nothing while the unkeyed one remains.
 
-The order is fixed, and both of the tempting alternatives are wrong in a way that
-is invisible at the time:
+Start by finding out which of three cases you are in, because it decides whether
+this step is optional and what its last action is. Read the type module named on
+the sibling field in your cloak-era schema.
+
+### Which case you are in
+
+| Sibling column | What a dump discloses | What you do |
+|---|---|---|
+| `Cloak.Ecto.SHA256` - unsalted, unkeyed | Every value whose plaintext is guessable, to anyone holding the dump and no key at all | **Drop it. Not optional**, whether or not you adopt an index |
+| `Cloak.Ecto.HMAC` or `Cloak.Ecto.PBKDF2` - keyed, one global key | Nothing without the key; with the key, equality across every tenant and every table sharing that key | Replace it with a declared index, then drop it |
+| None | - | Adopt an index or do not, freely |
+
+This is ADR-0004 decision 9. The three are not variations on one disposition,
+and treating them as one is how the unkeyed column survives a migration whose
+whole purpose included removing it.
+
+**`Cloak.Ecto.SHA256` is a fingerprint with no key in it.** Anyone holding a
+dump - a backup, a replica, a stolen snapshot, a support export - recomputes
+`sha256(value)` for every candidate value they care to guess and matches it
+against the column, with no key material and no access to your application. The
+columns hosts most want to look up on are email addresses, phone numbers and
+tax identifiers, which are exactly the guessable spaces. This is the unkeyed
+folk pattern `Encryptor.Ecto.BlindIndex`'s *Security properties* names as the
+thing a keyed index exists to replace: its second table row, "the dump, and a
+guess at a plaintext they think is present", is the property this column does
+not have. Encrypting the value column and leaving this one beside it means the
+ciphertext is doing nothing for any guessable value.
+
+So the drop is unconditional. If you decide not to adopt a blind index at all,
+you still drop the column, and you lose that lookup - which is the honest price
+of a disclosure you were paying for it all along.
+
+**A keyed `Cloak.Ecto.HMAC` or `Cloak.Ecto.PBKDF2` column is a real blind
+index**, and a dump alone tells an attacker nothing about the values in it. What
+it lacks is the domain separation ADR-0003 decision 2 builds into the HKDF
+`info` string. It is derived from one key configured for the deployment, so:
+
+- two tenants storing the same value produce identical bytes, which is exactly
+  the `scope: :global` column of the *Security properties* table - equality
+  structure across the whole table rather than within a tenant;
+- two columns holding the same value produce identical bytes, so a dump can be
+  joined across every table configured with that key - a `signups.email_hash`
+  against a `contacts.email_hash` - which a per-column `info` string makes
+  structurally impossible;
+- a staging database restored from a production backup keys the same way, since
+  there is no per-deployment `:derivation_salt` under the construction;
+- and it does not shred with a tenant's key. Destroy a tenant's vault key
+  material and this column still answers "does this tenant have a row with
+  value X" for anyone holding the legacy key, which is the last row of that
+  table and the reason `scope: :global` has to be written out loud.
+
+Replacing it is therefore worth doing even though it is not the emergency the
+unkeyed case is. Lookups keep working through the legacy column while the new
+one backfills, so the switchover has no gap in it.
+
+**No sibling column** means you are choosing, not repairing, and the choice has
+its own cost - a blind index is a leakage decision paid per column and
+permanently. Reserve one for high-cardinality exact-match keys. In the example
+host, `signups.email` earns an index and the A/B `variant` column does not: a
+two-value column publishes its own distribution to anyone counting rows per
+distinct index value, with no key at all. `Encryptor.Ecto.BlindIndex`'s *What
+this does not defend against* is the full statement, and an index on a
+low-cardinality column is a defect there rather than a tradeoff.
+
+### The order, which is fixed
+
+Both of the tempting alternatives are wrong in a way that is invisible at the
+time:
 
 1. Add the new index column in your own migration, and declare it on the schema.
 
@@ -407,18 +474,128 @@ is invisible at the time:
    end
    ```
 
+   The column is yours - this package writes no migrations and adds no fields.
+   It is a nullable `:binary`, 32 bytes at the default `:bits`, and it is added
+   beside the legacy one rather than over it:
+
+   ```elixir
+   defmodule MyApp.Repo.Migrations.AddSignupEmailIndex do
+     use Ecto.Migration
+
+     def change do
+       alter table(:signups) do
+         add :email_index, :binary
+       end
+
+       create index(:signups, [:merchant_id, :email_index])
+     end
+   end
+   ```
+
+   On Postgres that is:
+
+   ```sql
+   ALTER TABLE "signups" ADD COLUMN "email_index" bytea;
+   CREATE INDEX "signups_merchant_id_email_index_index"
+       ON "signups" ("merchant_id", "email_index");
+   ```
+
+   The database index is on `(merchant_id, email_index)` rather than on the
+   index column alone, because every lookup is already inside a tenant.
+
+   Leave the legacy column in place in this migration. It is still serving
+   lookups in the keyed case, and it is still the validator in both.
+
 2. Write the index from your changesets with
    `Encryptor.Ecto.BlindIndex.put_index/3`, and read it with `where_eq/3`. Both
    compute through one place, so a write and a read cannot disagree about
    normalization or width.
 
+   ```elixir
+   def changeset(signup, attrs) do
+     signup
+     |> cast(attrs, [:email, :variant])
+     |> put_index(:email, :email_index)
+   end
+
+   def by_email(email) do
+     MyApp.Signup |> where_eq(:email, email) |> MyApp.Repo.one()
+   end
+   ```
+
+   Keep writing the legacy column in this deploy too, from the same changeset.
+   That is what makes the switchover gapless, and it is the state step 4 ends.
+   On a truncated index (`bits: 64`, `128` or `192`) the read helper is
+   `where_eq_candidates/3` instead and it returns a set you filter after
+   decrypting - the name is the contract, so a call site cannot forget.
+
+   Audit every other write path while you are here. Encryption lives in the
+   type and cannot be forgotten; the index lives in the call site and can. A
+   bulk insert, an admin script or a second changeset function that skips
+   `put_index/3` produces a row whose lookup silently misses.
+
 3. Backfill the index column, batched and in tenant scope, **after** the
    ciphertext rewrite of step 5 is verified. Two backfills at once make one
    report, and a failure in either stops being attributable to one of them.
 
-4. Drop the legacy column **in the same migration that stops writing it**, and
-   not before: while step 4's `validate:` was recomputing it, it was the best
-   integrity check available on an unauthenticated source.
+   The backfill is a decrypt-and-recompute pass over your own rows, so it needs
+   the tenant scope the index derivation reads. There is no way around the
+   decrypt: the index is computed from plaintext and nothing in the stored
+   ciphertext can be transformed into one.
+
+4. Switch reads over, and only then drop the legacy column - **in the same
+   migration that stops writing it**, and not before.
+
+   Not before, because while step 4's `validate:` was recomputing it, it was the
+   best integrity check available on an unauthenticated source. Not later,
+   because a column nobody writes but nothing dropped is a column that goes
+   stale silently while still disclosing everything it disclosed before.
+
+   ```elixir
+   defmodule MyApp.Repo.Migrations.DropSignupEmailHash do
+     use Ecto.Migration
+
+     def change do
+       alter table(:signups) do
+         remove :email_hash, :binary
+       end
+     end
+   end
+   ```
+
+   ```sql
+   ALTER TABLE "signups" DROP COLUMN "email_hash";
+   ```
+
+   Before you run it, confirm the new column is fully backfilled. This is SQL
+   over your own tables, it needs no key, and it is the check that catches a
+   backfill that skipped a tenant:
+
+   ```sql
+   -- rows with a value but no index: must be zero before the drop
+   SELECT count(*) AS unindexed
+   FROM "signups"
+   WHERE "email" IS NOT NULL
+     AND "email_index" IS NULL;
+
+   -- and per tenant, which is where a partial backfill actually shows up
+   SELECT "merchant_id",
+          count(*) FILTER (WHERE "email_index" IS NOT NULL) AS indexed,
+          count(*) FILTER (WHERE "email" IS NOT NULL) AS encrypted
+   FROM "signups"
+   GROUP BY 1
+   HAVING count(*) FILTER (WHERE "email_index" IS NOT NULL)
+        < count(*) FILTER (WHERE "email" IS NOT NULL);
+   ```
+
+   The second query returning no rows is the precondition. A tenant listed
+   there is a tenant whose lookups break the moment the legacy column is gone.
+
+   In the unkeyed case there is nothing to preserve and no reason to wait past
+   step 6's exit 0: if you are not adopting an index, this migration is the
+   whole of step 7. In the keyed case, the legacy key outlives the column
+   unless you remove it - it is cloak configuration, and step 8 is where it
+   goes with the rest of the legacy vault.
 
 **Expected:** lookups return the same rows they did through the legacy column,
 for values that normalize the same way.
@@ -444,18 +621,20 @@ Four facts about this column decide when you can do it, rather than how:
   Argon2id surface. Do not plan around it.
 
 **A dump taken before the drop still contains the old column.** That is a fact
-about your backups, and this package cannot fix it.
+about your backups, and this package cannot fix it. It is worth saying plainly
+in the unkeyed case: every backup taken while `email_hash` existed still
+discloses every guessable email address in it, to whoever can read that backup,
+forever. Dropping the column stops the disclosure growing; it does not undo it.
+Whether that means re-taking your backup set, shortening its retention, or
+accepting it, is your call and your retention policy's, not this package's.
 
-### Choosing the disposition of the legacy column
-
-Which of the three cases you are in - an unsalted, unkeyed `Cloak.Ecto.SHA256`
-column that **must** be dropped; a keyed `Cloak.Ecto.HMAC` or `PBKDF2` column
-that is replaced; or no legacy column at all, where adopting an index is a free
-choice - is ADR-0004 decision 9, and its table is the short form. The fuller
-treatment of the three cases, and what each one discloses, belongs beside this
-step; until it lands, read
-[ADR-0004 decision 9](../adr/0004-migration-from-cloak.md) and
-[ADR-0003](../adr/0003-blind-index.md)'s security-properties table.
+The full leakage table - what an attacker learns from a `scope: :tenant` index
+and from a `scope: :global` one, holding a dump, a guess, one tenant's key, or a
+retained dump after a shred - is `Encryptor.Ecto.BlindIndex`'s *Security
+properties*, at the declaration where a reviewer meets it. The records behind
+this step are [ADR-0004 decision 9](../adr/0004-migration-from-cloak.md) for the
+three dispositions and the ordering rule, and
+[ADR-0003](../adr/0003-blind-index.md) for the construction.
 
 ## Step 8. Close the window in one named commit
 
