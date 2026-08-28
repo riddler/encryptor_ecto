@@ -35,10 +35,13 @@
 - A write-side computation asks the field's tenant strategy with `:dump` and a
   read-side computation asks with `:load`, matching what the encrypted field
   itself would be doing at the same moment.
-- `:bits` and `:slow` are still carried rather than applied: a declaration
-  written with `bits: 64` stores a full-width value until decision 6's option
-  half lands. `where_eq/3`'s refusal reads the declared width and nothing
-  computes with it.
+- `:bits` and `:slow` are carried rather than applied *by these helpers*:
+  `where_eq/3`'s refusal reads the declared width and no helper computes with
+  it. `:bits` is applied one layer down, in
+  `Encryptor.Ecto.BlindIndex.Value` - see this release's `ece-6a6` entry, which
+  landed after this one and supersedes its original claim that a declaration
+  written with `bits: 64` stores a full-width value. `:slow` remains carried
+  and unapplied.
 - A tenant *key* rotation is not ADR-0003 decision 7's rotation. Only the
   current encryption key is consulted upstream, so rotating a tenant's key
   changes every index key under it without any declaration changing, and

@@ -137,6 +137,43 @@ defmodule Encryptor.Ecto.TestSchemas.Wizard do
   end
 end
 
+defmodule Encryptor.Ecto.TestSchemas.Variant do
+  @moduledoc """
+  A signup wizard's A/B variant assignment, indexed at every width ADR-0003
+  decision 6 offers.
+
+  `Customer` covers the two ends - the `256` default and a `64` - which is
+  what the option's golden vectors are pinned against. This schema exists so
+  the arithmetic is asserted across the whole set rather than at its ends,
+  where `div(bits, 8)` and any number of wrong formulas agree.
+
+  Declaration order is the assertion's order, so the four indexes are declared
+  widest first.
+  """
+
+  use Ecto.Schema
+
+  import Encryptor.Ecto.BlindIndex
+
+  alias Encryptor.Ecto.TestTypes
+
+  @type t :: %__MODULE__{}
+
+  schema "variants" do
+    field(:assignment, TestTypes.HolderName)
+
+    field(:assignment_index, :binary)
+    field(:assignment_192_index, :binary)
+    field(:assignment_128_index, :binary)
+    field(:assignment_64_index, :binary)
+
+    blind_index(:assignment, :assignment_index)
+    blind_index(:assignment, :assignment_192_index, bits: 192)
+    blind_index(:assignment, :assignment_128_index, bits: 128)
+    blind_index(:assignment, :assignment_64_index, bits: 64)
+  end
+end
+
 defmodule Encryptor.Ecto.TestSchemas.Capture do
   @moduledoc """
   A field whose tenant resolver answers differently for a write than for a

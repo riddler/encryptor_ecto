@@ -35,13 +35,43 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
 
   ## Width
 
-  The value is the full 32 bytes of `HMAC-SHA256`. A declaration carrying
-  `bits: 64` is carried, not applied: what `:bits` and `:slow` *do* to a
-  computed value is ADR-0003 decision 6's option half, and it is not
-  implemented here. Both are read only where the record already says they are
-  read - `where_eq/3` refuses a truncated index by name - so nothing in this
-  module has to change when the option half lands, and a declaration written
-  today with `bits: 64` stores a full-width value in the meantime.
+  The value is the leading `bits / 8` bytes of `HMAC-SHA256`, where `bits` is
+  the declaration's - the full 32 at the `bits: 256` default, and 8, 16 or 24
+  under `64`, `128` or `192`. That is ADR-0003 decision 6's `:bits`, and three
+  things about how it is applied are load-bearing:
+
+    * **The output is truncated, never the key.** The index key stays the full
+      32 bytes `Encryptor.Ecto.BlindIndex.Derivation` derives, and `:bits`
+      never reaches the derivation - it is not in the HKDF `info` string, and
+      a `bits` change therefore does not change which key an index derives.
+      Truncating the key instead would weaken the HMAC itself, which is not
+      what decision 6 asks for: the record calls `:bits` a *collision* knob,
+      and collisions are a property of the stored value's width.
+    * **The leading bytes, not the trailing ones.** RFC 2104 section 5 defines
+      HMAC truncation as "the leftmost t bits", and NIST SP 800-107 section
+      5.3.1 says the same for truncating any approved hash output. Either end
+      is equally sound over HMAC-SHA256, so this is a convention rather than a
+      security choice - but it is a constant a host's stored bytes depend on
+      forever, so it is written down here rather than left to the reader of
+      `binary_part/3`.
+    * **One place, so the two sides agree.** Truncation happens here, after
+      the HMAC and inside the single function every surface computes through,
+      so a `put_index/3` write and a `where_eq_candidates/3` read cannot store
+      and pin different widths. It is decision 5's promise applied to decision
+      6, and it is why `:bits` is read at no call site.
+
+  A `bits` change therefore invalidates the column exactly as decision 7 says
+  it does - the stored value changes even though the key does not - and the
+  two-column dance is the migration, with the new width declared under its own
+  `index_name` or `:version`.
+
+  `:slow` is the other half of decision 6 and is **not** applied here. It is
+  accepted and carried by the declaration and does nothing to a computed
+  value. Decision 6 puts Argon2id's parameters in "the vault's configuration
+  rather than this package's", and the vault exposes no Argon2id surface to
+  read them from; inventing one here would be this package choosing a
+  cryptographic parameter set, which this repo's conventions call a defect
+  even when the choice is a good one. See `ece-6a6`'s notes.
 
   ## Redaction
 
@@ -71,6 +101,9 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   `Encryptor.Ecto.BlindIndex.Declaration`'s moduledoc records that mapping and
   why it is this package's to make.
 
+  The result is `byte_width/1` bytes wide - the declaration's `:bits`, applied
+  to the HMAC output as the moduledoc's *Width* section describes.
+
   Raises `Encryptor.Ecto.MissingTenantError` when a `scope: :tenant` index is
   computed outside tenant scope, and
   `Encryptor.Ecto.BlindIndex.NormalizationError` when the declared normalizer
@@ -87,8 +120,33 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
     normalized = Declaration.normalize!(declaration, value)
 
     case Derivation.derive(params.vault, derivation, selector) do
-      {:ok, index_key} -> :crypto.mac(:hmac, :sha256, index_key, normalized)
-      {:error, error} -> raise error
+      {:ok, index_key} ->
+        :hmac
+        |> :crypto.mac(:sha256, index_key, normalized)
+        |> binary_part(0, byte_width(declaration))
+
+      {:error, error} ->
+        raise error
     end
   end
+
+  @doc """
+  The stored width of one declaration's index value, in bytes.
+
+  Public because it is what a host sizes its index column against, and because
+  it is the arithmetic the operator's crypto read checks rather than infers
+  from a `div/2` buried in a pipeline.
+
+      iex> Encryptor.Ecto.BlindIndex.Declaration.fetch!(
+      ...>   Encryptor.Ecto.TestSchemas.Customer, :email, :email_index)
+      ...> |> Encryptor.Ecto.BlindIndex.Value.byte_width()
+      32
+
+      iex> Encryptor.Ecto.BlindIndex.Declaration.fetch!(
+      ...>   Encryptor.Ecto.TestSchemas.Customer, :email, :email_short_index)
+      ...> |> Encryptor.Ecto.BlindIndex.Value.byte_width()
+      8
+  """
+  @spec byte_width(Declaration.t()) :: pos_integer()
+  def byte_width(%Declaration{bits: bits}), do: div(bits, 8)
 end

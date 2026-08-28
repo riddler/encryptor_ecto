@@ -149,6 +149,24 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
       assert {:ok, value} = Changeset.fetch_change(changeset, :email_index)
       assert byte_size(value) == 32
     end
+
+    # sabotage: truncate inside `equality/3` rather than inside
+    # `Value.compute!/3`, red - the write side stores 32 bytes into a column
+    # the read side pins 8 bytes against, and `where_eq_candidates/3` matches
+    # nothing. Decision 5 calls that the single worst failure this feature can
+    # have, and it is exactly what one truncation site prevents.
+    test "a truncated index is written at its declared width, and the read side agrees" do
+      Tenant.put(@merchant)
+
+      changeset =
+        %Wizard{}
+        |> Changeset.cast(%{email: "bob@x.com"}, [:email])
+        |> BlindIndex.put_index(:email, :email_index)
+
+      assert {:ok, written} = Changeset.fetch_change(changeset, :email_index)
+      assert byte_size(written) == 8
+      assert pinned(BlindIndex.where_eq_candidates(Wizard, :email, "bob@x.com")) == [written]
+    end
   end
 
   describe "put_index/3 refuses what it cannot compute" do
@@ -376,6 +394,16 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
       assert_raise MissingTenantError, fn ->
         BlindIndex.where_eq_candidates(Customer, :phone, "5550100")
       end
+    end
+
+    # sabotage: truncate inside `equality/3` rather than inside
+    # `Value.compute!/3`, green here and red on the put_index arm below - which
+    # is why both sides are asserted rather than only the read one.
+    test "where_eq_candidates pins the truncated width" do
+      Tenant.put(@merchant)
+
+      assert [pinned_value] = pinned(BlindIndex.where_eq_candidates(Wizard, :email, "bob@x.com"))
+      assert byte_size(pinned_value) == 8
     end
   end
 

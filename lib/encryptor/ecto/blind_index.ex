@@ -49,11 +49,21 @@ defmodule Encryptor.Ecto.BlindIndex do
   directional and that changing it invalidates every stored value in the
   column.
 
-  `:bits` and `:slow` are accepted, checked and carried here; what they *do*
-  to a computed value is decision 6's option half and is not implemented yet.
-  A declaration written today with `bits: 64` therefore stores a full-width
-  value until that lands, which is why nothing reads `:bits` at a call site in
-  the meantime.
+  `:bits` narrows the **stored value**, never the key: the index key stays the
+  full 32 bytes the derivation produces and `:bits` never reaches the HKDF
+  `info` string, so a width change stores different bytes under the same key.
+  The truncation is applied in `Encryptor.Ecto.BlindIndex.Value`, inside the
+  one function every surface here computes through, which is what makes a
+  write and a read agree on the width without either call site reading the
+  option. `Encryptor.Ecto.BlindIndex.Value`'s *Width* section documents which
+  end is kept and why. A width change invalidates the column exactly as a
+  normalizer change does (decision 7).
+
+  `:slow` is accepted, checked and carried here, and does nothing to a
+  computed value. Decision 6 puts Argon2id's parameters in "the vault's
+  configuration rather than this package's" and the vault exposes no Argon2id
+  surface, so the option half that would read them is not implemented; see
+  `Encryptor.Ecto.BlindIndex.Value`'s *Width* section.
 
   ## Two indexes over one field
 
@@ -203,10 +213,11 @@ defmodule Encryptor.Ecto.BlindIndex do
   @registered :encryptor_ecto_blind_index_registered
   @accumulated :encryptor_ecto_blind_indexes
 
-  # Decision 6's `:bits` default, and the only width `where_eq/3` accepts. The
-  # option half of decision 6 - what a narrower width does to a computed value
-  # - is not implemented here; this constant is only what tells the two read
-  # helpers apart, which the record already says they are told apart by.
+  # Decision 6's `:bits` default, and the only width `where_eq/3` accepts.
+  # What a narrower width *does* to a computed value belongs to
+  # `Encryptor.Ecto.BlindIndex.Value`, which is the one place it is applied;
+  # here the constant only tells the two read helpers apart, which the record
+  # already says they are told apart by.
   @full_width 256
 
   @doc """
