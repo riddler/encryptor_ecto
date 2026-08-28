@@ -28,6 +28,20 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   A dry run does every one of those except the swap, which is what makes it an
   exact rehearsal including the decrypt and the encrypt cost (decision 7).
 
+  ## The third mode reads and stops
+
+  `mode: :verify` (decision 10) does steps 1 to 3 and stops there. It does not
+  dump, because the encrypt would produce bytes nothing writes, and the
+  classification does not need them: decision 7 defines `:migratable` as the
+  probe failing and the `from` load succeeding, which step 3 has already
+  settled. It never opens a transaction and never records a checkpoint, for
+  the same reason a dry run does not.
+
+  A verification also visits differently. `sample: n` reads one random `n`
+  rows per field instead of paging the table (`Keyset.sample_query/6`, which
+  records why the sample is random rather than the first `n` in key order),
+  and records no cursor: a random draw has no "how far it got" to report.
+
   ## The batch is the transaction, and a halt discards it
 
   Each batch is one transaction and the checkpoint row is written inside it,
@@ -69,8 +83,9 @@ defmodule Encryptor.Ecto.Migrator.Pass do
           to: module(),
           to_arity: 1 | 3,
           to_params: term(),
-          mode: Encryptor.Ecto.Migrator.mode(),
+          mode: Encryptor.Ecto.Migrator.pass_mode(),
           batch_size: pos_integer(),
+          sample: pos_integer() | :all,
           on_error: :halt | :continue,
           prefix: String.t() | nil,
           checkpoint: :table | :none,
@@ -97,6 +112,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     :to_params,
     :mode,
     :batch_size,
+    :sample,
     :on_error,
     :prefix,
     :checkpoint,
@@ -114,6 +130,19 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   stopped the pass under `on_error: :halt`.
   """
   @spec run(t(), Report.t(), term()) :: {Report.t(), :ok | :halt}
+  def run(%__MODULE__{sample: size} = pass, report, _cursor) when is_integer(size) do
+    case read_sample(pass, size) do
+      [] ->
+        {report, :ok}
+
+      rows ->
+        {report, status} = rows(pass, report, rows)
+        _ignored = pass.progress.(report)
+
+        {report, status}
+    end
+  end
+
   def run(%__MODULE__{} = pass, report, cursor) do
     case read_batch(pass, cursor) do
       [] ->
@@ -186,6 +215,20 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     |> pass.repo.all(query_opts(pass))
   end
 
+  @spec read_sample(t(), pos_integer()) :: [list()]
+  defp read_sample(pass, size) do
+    pass.source
+    |> Keyset.sample_query(
+      pass.key,
+      pass.source_column,
+      pass.target_column,
+      pass.tenant_column,
+      size
+    )
+    |> filter_tenants(pass)
+    |> pass.repo.all(query_opts(pass))
+  end
+
   @spec filter_tenants(Ecto.Query.t(), t()) :: Ecto.Query.t()
   defp filter_tenants(query, %__MODULE__{tenant_column: nil}), do: query
 
@@ -199,9 +242,10 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   # A dry run reads and computes but never opens a transaction and never
   # records a cursor: a rehearsal that wrote a checkpoint would let the real
-  # run resume past rows it never wrote.
+  # run resume past rows it never wrote. A verification is read-only for the
+  # stronger reason that it is read-only, and takes the same arm.
   @spec batch(t(), Report.t(), [list()]) :: {Report.t(), :ok | :halt, term()}
-  defp batch(%__MODULE__{mode: :dry_run} = pass, report, rows) do
+  defp batch(%__MODULE__{mode: mode} = pass, report, rows) when mode in [:dry_run, :verify] do
     {report, status} = rows(pass, report, rows)
     {report, status, last_id(rows)}
   end
@@ -311,8 +355,20 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   defp load_target(%__MODULE__{to_arity: 3} = pass, bytes),
     do: pass.to.load(bytes, &Ecto.Type.load/2, pass.to_params)
 
+  # A verification stops at the source load. Decision 7's `:migratable` is
+  # "the probe failed and the `from` load succeeded", so the class is already
+  # decided here; dumping as well would spend the encrypt to learn nothing and
+  # would let a `to:` module's dump failure be reported as a row neither side
+  # can read, which is not what `:undecryptable` means.
   @spec migrate(t(), Report.t(), term(), binary(), binary() | nil, term()) ::
           {Report.t(), :ok | :halt}
+  defp migrate(%__MODULE__{mode: :verify} = pass, report, id, source_value, _target, tenant) do
+    case read_source(pass, source_value, tenant) do
+      {:ok, _loaded} -> {Report.count(report, :migratable), :ok}
+      {:error, reason} -> fail(pass, report, id, reason)
+    end
+  end
+
   defp migrate(pass, report, id, source_value, target_value, tenant) do
     with {:ok, loaded} <- read_source(pass, source_value, tenant),
          {:ok, bytes} <- write_target(pass, loaded) do

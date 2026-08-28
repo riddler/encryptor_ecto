@@ -71,7 +71,7 @@ defmodule Encryptor.Ecto.Migrator.Report do
   @type cursor_key :: {module(), atom(), String.t() | nil}
 
   @type t :: %__MODULE__{
-          mode: Migrator.mode(),
+          mode: Migrator.pass_mode(),
           counts: %{class() => non_neg_integer()},
           concurrent: non_neg_integer(),
           failures: [failure()],
@@ -119,7 +119,7 @@ defmodule Encryptor.Ecto.Migrator.Report do
   a map with no `:undecryptable` key has to know the class exists to notice it
   is missing.
   """
-  @spec new(Migrator.mode()) :: t()
+  @spec new(Migrator.pass_mode()) :: t()
   def new(mode) do
     %__MODULE__{
       mode: mode,
@@ -191,4 +191,44 @@ defmodule Encryptor.Ecto.Migrator.Report do
   @spec ok?(t()) :: boolean()
   def ok?(%__MODULE__{failure_count: 0}), do: true
   def ok?(%__MODULE__{}), do: false
+
+  @doc """
+  Whether every row a verification saw was `:already_target` or `:null`.
+
+  This is `Encryptor.Ecto.Migrator.verify/2`'s arm and
+  `mix encryptor.ecto.verify`'s exit code, and it is a **stricter** question
+  than `ok?/1`: a pass that found a thousand readable legacy rows and failed
+  on none of them is a successful dry run and a failed verification (ADR-0002
+  decision 10). It is also ADR-0004 decision 5's primary signal that the mixed
+  window has closed and that dropping `legacy:` is due.
+
+  Written as "every class except those two is zero" rather than as a match on
+  the classes that are allowed to be non-zero, so that a class added later
+  counts against a verification by default. A fifth class that had to be
+  listed here to be noticed - ADR-0002 proposed amendment 2's
+  `:migratable_unverified`, which `ece-4mg` adds - would otherwise arrive as
+  a verification that passes while rows nothing authenticated sit in the
+  table, which is the exact claim decision 3a exists to stop the evidence
+  making.
+
+  The `ok?/1` conjunct is deliberately redundant: `record_failure/2` counts
+  every failure `:undecryptable` as well, so the class check already catches
+  one. It is written out because decision 10's exit code is about both - "no
+  failures" and "every row in the target state" - and a reader who has to
+  derive the first from the second has to hold `record_failure/2` in their
+  head to know this function is right.
+
+      iex> alias Encryptor.Ecto.Migrator.Report
+      iex> Report.verified?(Report.count(Report.new(:verify), :already_target))
+      true
+      iex> Report.verified?(Report.count(Report.new(:verify), :migratable))
+      false
+  """
+  @spec verified?(t()) :: boolean()
+  def verified?(%__MODULE__{} = report) do
+    ok?(report) and
+      report.counts
+      |> Map.drop([:null, :already_target])
+      |> Enum.all?(fn {_class, count} -> count == 0 end)
+  end
 end

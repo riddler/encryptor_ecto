@@ -97,5 +97,39 @@ defmodule Encryptor.Ecto.Migrator.ReportTest do
     end
   end
 
+  describe "verified?/1" do
+    # Sabotage: made `verified?/1` delegate to `ok?/1` - a report full of
+    # readable legacy rows and no failures verified green, which is the
+    # acceptance test passing over a migration that had not run.
+    test "a readable legacy row is ok and is not verified" do
+      report = Report.new(:verify) |> Report.count(:migratable) |> Report.finish()
+
+      assert Report.ok?(report)
+      refute Report.verified?(report)
+    end
+
+    # Sabotage: made `verified?/1` list the classes that count *against* a
+    # verification instead of dropping the two that do not - the fifth class
+    # `ece-4mg` adds then verified green by default, and the operator's
+    # evidence said "verified" about rows nothing authenticated. This is the
+    # additive property ADR-0002 proposed amendment 2 depends on.
+    test "a class the function has never heard of counts against it" do
+      report = Report.new(:verify) |> Report.count(:some_later_class) |> Report.finish()
+
+      refute Report.verified?(report)
+    end
+
+    # Sabotage: dropped the `ok?/1` conjunct *and* had the class check forgive
+    # `:undecryptable` - a table whose rows nobody can read verified green.
+    # Either half alone is inert, and deliberately so: `record_failure/2`
+    # counts the row `:undecryptable` as well, so both halves of decision 10's
+    # exit code catch this one independently.
+    test "a recorded failure is never verified" do
+      report = Report.new(:verify) |> Report.record_failure(failure(1)) |> Report.finish()
+
+      refute Report.verified?(report)
+    end
+  end
+
   defp failure(id), do: %{schema: Some.Schema, field: :pan, id: id, reason: :load_failed}
 end
