@@ -466,4 +466,62 @@ defmodule Encryptor.Ecto.BinaryTest do
       end
     end
   end
+
+  describe "the no-leak prohibition, on every exception this type raises" do
+    scope_tenant "merchant_7f3"
+
+    # sabotage: Encryptor.Ecto.Error.redact/1's binary clause returning the
+    # binary rather than its byte count, red.
+    test "a decrypt failure renders neither the stored bytes nor a plaintext" do
+      {:ok, ciphertext} = TestTypes.Pan.dump(@pan, nil, params(TestTypes.Pan))
+
+      error =
+        Tenant.wrap("merchant_a19", fn ->
+          assert_raise DecryptError, fn ->
+            TestTypes.Pan.load(ciphertext, nil, params(TestTypes.Pan))
+          end
+        end)
+
+      for rendered <- [Exception.message(error), inspect(error)] do
+        assert :binary.match(rendered, ciphertext) == :nomatch
+        refute rendered =~ @pan
+      end
+    end
+
+    # sabotage: common/3 passing the dumped value as :tenant, red.
+    test "an encrypt failure renders no plaintext" do
+      params = TestTypes.Unstarted.init(schema: Card, field: :pan)
+      error = assert_raise EncryptError, fn -> TestTypes.Unstarted.dump(@pan, nil, params) end
+
+      refute Exception.message(error) =~ @pan
+      refute inspect(error) =~ @pan
+    end
+
+    # sabotage: the same, on the MissingContextError arm, red.
+    test "a missing-context failure renders no plaintext" do
+      params = TestTypes.Strict.init(schema: Card, field: :pan)
+      error = assert_raise MissingContextError, fn -> TestTypes.Strict.dump(@pan, nil, params) end
+
+      refute Exception.message(error) =~ @pan
+      refute inspect(error) =~ @pan
+    end
+
+    # sabotage: common/3 dropping the context_keys entry, red.
+    test "every one of them names the table, the column and the context keys" do
+      params = TestTypes.Pinned.init(schema: Card, field: :pan)
+
+      error =
+        Tenant.wrap("merchant_a19", fn ->
+          {:ok, ciphertext} =
+            Tenant.wrap("merchant_7f3", fn -> TestTypes.Pinned.dump(@pan, nil, params) end)
+
+          assert_raise DecryptError, fn -> TestTypes.Pinned.load(ciphertext, nil, params) end
+        end)
+
+      message = Exception.message(error)
+      assert message =~ ~s(table: "cards")
+      assert message =~ ~s(column: "pan")
+      assert message =~ ~s(context keys: ["column", "purpose", "table"])
+    end
+  end
 end
