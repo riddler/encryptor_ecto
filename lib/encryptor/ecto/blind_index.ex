@@ -57,13 +57,209 @@ defmodule Encryptor.Ecto.BlindIndex do
   write and a read agree on the width without either call site reading the
   option. `Encryptor.Ecto.BlindIndex.Value`'s *Width* section documents which
   end is kept and why. A width change invalidates the column exactly as a
-  normalizer change does (decision 7).
+  normalizer change does (decision 7). What a narrower width actually buys,
+  and what it does not, is *Truncation and false positives* below.
 
-  `:slow` is accepted, checked and carried here, and does nothing to a
-  computed value. Decision 6 puts Argon2id's parameters in "the vault's
+  `:slow` is **declared but not available.** It is accepted, checked and
+  carried on the declaration, and it does nothing to a computed value: a
+  `slow: true` index and a `slow: false` index over the same plaintext store
+  the same bytes. Decision 6 puts Argon2id's parameters in "the vault's
   configuration rather than this package's" and the vault exposes no Argon2id
-  surface, so the option half that would read them is not implemented; see
+  surface, so the half of the option that would read them is not implemented.
+  Read it as a reserved option name rather than as a mitigation available
+  today - the low-entropy row of the table below has no defence in this
+  package until the vault grows one (`enc-dtv`). See
   `Encryptor.Ecto.BlindIndex.Value`'s *Width* section.
+
+  ## Security properties
+
+  Adding a blind index to a column is a schema decision with a leakage cost,
+  paid per column and permanently. ADR-0003's closing Consequences make this
+  table the thing a host reviews *before* declaring an index rather than
+  after, which is why it is here at the declaration rather than in a record
+  the host reads once.
+
+  Throughout, **equality structure** means: which rows in the column share a
+  value, and how many distinct values the column holds. It does not mean the
+  values themselves.
+
+  | An attacker holding | Learns from a `scope: :tenant` index | Learns from a `scope: :global` index |
+  |---|---|---|
+  | the dump, and no key material | equality structure within each tenant, and nothing across tenants | equality structure across the whole table, and across every table whose index derives under the same `info` components |
+  | the dump, and a guess at a plaintext they think is present | nothing: a candidate value cannot be computed without the index key | nothing: the same |
+  | the dump and one tenant's index key | which rows *in that tenant* hold any plaintext they can guess, and nothing about any other tenant | which rows anywhere hold any plaintext they can guess |
+  | the same, over a low-entropy column | full recovery of that column over the guessable space, at HMAC speed | the same, across every tenant at once |
+  | the dump and the encryption key | everything; the index adds nothing once the column itself is readable | the same |
+  | a retained dump, after the tenant's key material is destroyed | nothing: the column is unusable noise, because no candidate value can be computed to compare against it | equality structure **survives the shred**, and guessable values stay recoverable to anyone holding the index key |
+
+  Three rows are worth reading twice.
+
+  **The second row is the actual security claim**, and it is the one the
+  unkeyed folk pattern - `:crypto.hash(:sha256, String.downcase(value))` into
+  a `:binary` column - does not have. Against an unkeyed fingerprint, an
+  attacker with the dump alone recovers every value whose plaintext comes
+  from a guessable space, and the columns hosts most want to search on are
+  exactly the guessable spaces. Keying the fingerprint is the whole security
+  value of the feature.
+
+  **The fourth row is the one with no mitigation here.** Decision 6 offers
+  `:slow` for it, and `:slow` is inert (above). A column whose plaintext
+  space is small enough to enumerate is a column whose index key is worth
+  exactly as much as the column, to anyone who obtains it.
+
+  **The last row is why `scope: :global` has to be written out loud**, and
+  why declaring nothing on a `tenant: :none` field is a compile-time error
+  rather than a silent fallback. A tenant whose key material has been
+  destroyed still has its `:global` index columns answering equality
+  questions about its data, which is not a shred in any sense a compliance
+  conversation will accept.
+
+  One caveat applies to every row naming an index key. **Holding an index key
+  today means holding a vault that can also decrypt.** ADR-0003 assumption A9
+  hoped for a search-only capability and was resolved against at acceptance:
+  index keys are derived subkeys of the same key material the encryption keys
+  derive from, so a component that can compute an index value can also read
+  the column. What survives in full is the structural half - an index key is
+  never an encryption key (`Encryptor.Ecto.BlindIndex.Derivation` documents
+  the two-label nesting that makes that so), and the index shreds with the
+  tenant key. Independently wrapped per-tenant index keys are the recorded
+  upgrade path if a genuine search-only consumer ever materializes.
+
+  ### Per-tenant is the default, and it is what stops cross-tenant correlation
+
+  A `scope: :tenant` index keys off the tenant's own key material, resolved
+  through the field's declared tenant strategy. The behaviour the suite pins:
+  the same plaintext, in the same column, under two different tenants derives
+  under different keys and therefore stores unrelated bytes. Two tenants
+  sharing a customer are not visible as sharing one, to anyone reading the
+  dump or a backup.
+
+  Two further separations are pinned the same way, and both fall out of the
+  `info` string rather than out of discipline: two columns holding the same
+  plaintext produce unrelated index values, so a dump cannot be joined across
+  them; and two deployments provisioned from the same key material derive
+  unrelated keys, because the vault's per-deployment `:derivation_salt` sits
+  under the whole construction - a restored backup or a cloned staging
+  database cannot be joined against production on an index column.
+
+  ### Equality, and nothing else
+
+  An encrypted column is not otherwise queryable, and a blind index does not
+  change that: it restores exact match on one column and no other operation.
+  There is no `LIKE`, no prefix or substring search, no range, no ordering,
+  no `MIN`/`MAX`, no `BETWEEN`, and no operator argument that could be made
+  to generate one. Decision 9 makes that permanent rather than pending.
+
+  The equality is also over `norm(plaintext)`, never over plaintext. An index
+  hit is not proof of byte equality, and
+  `Encryptor.Ecto.BlindIndex.Normalizer` is where that is spelled out.
+
+  ### What this does not defend against
+
+  Two things, stated so that nobody assumes otherwise.
+
+  **Frequency analysis within a scope.** The index reveals which value is the
+  most common one in its scope, and for a skewed distribution the plaintext
+  is usually guessable from that alone. A country code, a plan name, or a
+  status-like string that someone indexed by mistake is readable off the
+  cardinality without any key at all. This is why the guidance is to reserve
+  indexes for **high-cardinality exact-match keys** - an email address, a
+  phone number, a tax identifier - and why an index on a low-cardinality
+  column is a defect rather than a tradeoff.
+
+  **A chosen-plaintext oracle.** An attacker who can both cause rows to be
+  written and observe the index column learns the index value of a plaintext
+  of their choosing. A public signup form over an indexed column is that
+  attacker. It is inherent to any deterministic index and cannot be designed
+  away here; what bounds it is the scope, since the oracle a `scope: :tenant`
+  index gives away is one tenant's, and the oracle a `scope: :global` index
+  gives away is everybody's. That is one more argument for the default.
+
+  A related consequence of decision 8: a `""` plaintext produces a real index
+  value over `norm("")`, which is a constant per key scope. A host indexing a
+  column where the empty string is common publishes that fact to anyone
+  reading cardinality.
+
+  ### Truncation and false positives
+
+  `:bits` is decision 6's collision knob. A `b`-bit index value means two
+  distinct normalized plaintexts collide with probability `2^-b`, so over a
+  scope holding `N` rows a lookup returns about `N / 2^b` spurious rows, and
+  over `D` distinct values the column holds about `D^2 / 2^(b+1)` colliding
+  pairs anywhere in it - one such pair expected at around `D = 2^((b+1)/2)`.
+
+  The record calls the rate "known" without stating it, so the numbers below
+  are that arithmetic rather than a citation:
+
+  | `:bits` | spurious rows per lookup, per row in scope | distinct values before one collision is expected |
+  |---|---|---|
+  | `64` | `5.4e-20` | about `6.1e9` |
+  | `128` | `2.9e-39` | about `2.6e19` |
+  | `192` | `1.6e-58` | about `1.1e29` |
+  | `256` | `8.6e-78` | about `4.8e38` |
+
+  Read them honestly: **at every width this package offers, a false positive
+  is not something a real table will see.** A 64-bit index would need on the
+  order of six billion distinct values in one scope before colliding even
+  once, so the blurring decision 6 describes is theoretical at these widths
+  and `:bits` is in practice a storage choice. The `256` row is HMAC-SHA256's
+  own collision probability and is the floor no width beats.
+
+  The obligation `where_eq_candidates/3` carries is still real, because the
+  rate is not zero and a host that assumes exactness has assumed something
+  the width does not promise. But a host choosing `:bits` to *obscure* its
+  equality structure should know it is buying almost nothing, and a host
+  choosing it for storage should know it is a reindex to undo.
+
+  ### Every invalidating change is a reindex
+
+  Five things change the bytes a column must hold, and each one requires
+  decision 7's two-column sequence over rows decrypted in tenant scope.
+  There is no in-place recomputation, because recomputing requires the
+  plaintext.
+
+  | Change | Why the stored bytes move |
+  |---|---|
+  | `:normalize` | the HMAC is taken over different bytes |
+  | `:bits` | the same value is stored at a different width |
+  | `:version` | it participates in the HKDF `info`, so the key changes |
+  | the vault's `:derivation_salt` | it sits at the extract under every derivation, so every index key changes |
+  | a tenant's key material rotating | the derivation consults the current key, so that tenant's index keys change without any declaration changing |
+
+  The last row is the one with no supported sequence today, and it is stated
+  as today's truth rather than as a promise. Decision 7's dance covers a
+  change to a *declaration*; a tenant key rotation changes no declaration,
+  and during the window between the rotation and a reindex of that tenant's
+  index columns, `where_eq/3` matches nothing and raises nothing.
+  `where_eq_candidates/3` does not help: it is the truncation surface, not a
+  multi-key candidate surface. A host rotating a tenant key must reindex that
+  tenant's index columns, and what this package should do about it is an open
+  question for the record rather than a default invented here.
+
+  Rotating `:derivation_salt` has the same shape and reaches further: it is a
+  full reindex of every index column in the deployment, for every tenant. The
+  salt is effectively permanent from the first stored index value.
+
+  ### The index can be forgotten, and nothing prevents it
+
+  This is the gap ADR-0003 names rather than hides, and it is the mirror
+  image of this package's central property. **Encryption cannot be forgotten,
+  because it lives in the type.** A field declared `MyApp.Encrypted.String`
+  encrypts on every write through every path, including one nobody
+  remembered. **Indexing can be forgotten, because it lives in the call
+  site.** `put_index/3` is a line in a changeset, so a second write path -
+  another changeset function, a bulk insert, an admin script, a data
+  backfill - produces a row whose index column is absent or stale, and whose
+  lookup then silently misses. The row exists and the query does not find it.
+
+  Making the index automatic would mean a `Repo` hook or a changeset macro
+  owning `cast/3`, which is a larger intrusion into a host than this package
+  is willing to make. So the mitigation ADR-0003 proposes is a test-support
+  assertion a host runs over its own write paths, and the honest statement is
+  that **nothing enforces it**: no such assertion ships here yet, the
+  compile-time checks cover declaration hygiene and say nothing about call
+  sites, and neither the compiler nor this package can see a write path it is
+  not in. A host adopting a blind index owns the audit of its own writers.
 
   ## Two indexes over one field
 
