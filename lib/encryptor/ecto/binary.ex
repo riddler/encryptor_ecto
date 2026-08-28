@@ -29,7 +29,7 @@ defmodule Encryptor.Ecto.Binary do
   | `:tenant` | no | `:scope` (default), `:none`, or a module implementing `Encryptor.Ecto.TenantContext` (see "A global field" below) |
   | `:context` | no | Static extra context pairs merged into every operation |
   | `:legacy` | no | The migration window's legacy type (not yet implemented - see below) |
-  | `:table`, `:column` | no | Overrides for the frozen declared context values |
+  | `:table`, `:column` | no | Overrides for the frozen declared context values, writable at the `use` or at the field |
 
   An unknown option raises while the host module compiles, and there is no
   `Application` environment fallback for `:vault`: the vault is named at the
@@ -50,6 +50,24 @@ defmodule Encryptor.Ecto.Binary do
   Schema prefixes are deliberately absent: a prefix is a deployment-time
   placement decision, and binding it would make a ciphertext un-restorable
   into a differently-prefixed database.
+
+  Because the values are frozen at declaration, renaming the physical table or
+  column costs nothing: pin the old strings with `:table` and `:column` and
+  stored rows stay readable.
+
+      schema "payment_cards" do
+        field :pan, Payments.Encrypted.Binary, table: "cards", column: "pan"
+      end
+
+  A pin written at the field wins over one written at the `use`, which wins
+  over the derivation. The field is where a pin usually belongs, because a
+  type module is shared by every field that names it while a pin is about one
+  column. Changing a *declared* value is the expensive direction - it
+  invalidates every row in the column and is a re-encryption migration. And
+  two fields must not share one declared pair, or each can decrypt the other's
+  bytes;
+  `Encryptor.Ecto.Declarations.check_unique!/1` is the start-time check that
+  says so, and where a host calls it.
 
   ## `nil`, and empty
 
@@ -207,6 +225,13 @@ defmodule Encryptor.Ecto.Binary do
       @behaviour Ecto.ParameterizedType
 
       @encryptor_ecto_declared unquote(impl).validate_declaration!(__MODULE__, unquote(opts))
+
+      # The marker `Encryptor.Ecto.Declarations` recognises this type by. A
+      # marker rather than the shape of the params, so that an unrelated
+      # parameterized type carrying `:table` and `:column` keys is never
+      # mistaken for an encrypted field.
+      @doc false
+      def __encryptor_ecto__(:impl), do: unquote(impl)
 
       @doc false
       @impl Ecto.ParameterizedType
@@ -510,15 +535,28 @@ defmodule Encryptor.Ecto.Binary do
 
   # -- declaration-time derivation ------------------------------------------
 
+  # A pin is read from the field first and from the `use` second, because a
+  # type module is shared by every field that names it and a pin is about one
+  # column. Pinning only at the `use` would mean a module per renamed column,
+  # which is the rename tax acceptance amendment 5 exists to remove - and it
+  # is the form `underivable_message/2` has always told hosts to write.
   @spec declared_value(keyword(), atom(), keyword(), (keyword() -> String.t() | nil)) ::
           String.t()
   defp declared_value(declared, key, field_opts, derive) do
-    case Keyword.get(declared, key) do
+    case pinned(field_opts, key) || pinned(declared, key) do
+      nil -> derive.(field_opts) || raise ArgumentError, underivable_message(key, field_opts)
+      value -> value
+    end
+  end
+
+  @spec pinned(keyword(), atom()) :: String.t() | nil
+  defp pinned(opts, key) do
+    case Keyword.get(opts, key) do
+      nil ->
+        nil
+
       value when is_binary(value) and value != "" ->
         value
-
-      nil ->
-        derive.(field_opts) || raise ArgumentError, underivable_message(key, field_opts)
 
       other ->
         raise ArgumentError,

@@ -23,6 +23,24 @@ defmodule Encryptor.Ecto.BinaryTest do
 
   defp params(type, field \\ :pan), do: type.init(schema: Card, field: field)
 
+  defmodule LiveRenamed do
+    @moduledoc """
+    The rename acceptance amendment 5 makes free: the physical table and
+    column moved, and the declared context the rows were written under is
+    pinned at the field.
+    """
+
+    use Ecto.Schema
+
+    schema "payment_cards" do
+      field(:pan, Encryptor.Ecto.TestTypes.Pan,
+        table: "cards",
+        column: "pan",
+        source: :pan_enc
+      )
+    end
+  end
+
   describe "the option set" do
     # sabotage: validate_declaration!/2's unknown-option case arm -> :ok, red.
     test "refuses an option outside the closed set, while the host compiles" do
@@ -102,6 +120,45 @@ defmodule Encryptor.Ecto.BinaryTest do
     # sabotage: source_of/1's function_exported? branch -> nil, red.
     test "reads the source off a schema module that has finished compiling" do
       assert %{table: "cards"} = TestTypes.Pan.init(schema: Card, field: :pan)
+    end
+
+    # sabotage: declared_value/4's pinned(field_opts, key) call deleted, red.
+    # The field is where a rename is pinned, because the type module is shared
+    # by every field that names it and the pin is about one column.
+    test "prefers a pin written at the field over the derivation" do
+      assert %{table: "cards", column: "pan"} =
+               TestTypes.Pan.init(
+                 schema: LiveRenamed,
+                 field: :pan,
+                 table: "cards",
+                 column: "pan"
+               )
+    end
+
+    # sabotage: declared_value/4's `||` operands swapped, red.
+    test "prefers a pin written at the field over one written at the use" do
+      assert %{table: "card_archive", column: "pan_2024"} =
+               TestTypes.Pinned.init(
+                 schema: Card,
+                 field: :pan,
+                 table: "card_archive",
+                 column: "pan_2024"
+               )
+    end
+
+    # sabotage: pinned/2's `other ->` arm returning the value, red.
+    test "refuses a pin at the field that is not a non-empty string" do
+      assert_raise ArgumentError, ~r/expected :column to be a non-empty string/, fn ->
+        TestTypes.Pan.init(schema: Card, field: :pan, column: "")
+      end
+    end
+
+    # sabotage: the whole field-level pin path removed from declared_value/4,
+    # red - Ecto carries the option into init/1, and a silently ignored pin is
+    # a rename a host believes it has made and has not.
+    test "carries a pin through the schema's own field declaration" do
+      assert {:parameterized, {_type, %{table: "cards", column: "pan"}}} =
+               LiveRenamed.__schema__(:type, :pan)
     end
   end
 
