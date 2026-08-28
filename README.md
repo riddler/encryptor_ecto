@@ -65,29 +65,20 @@ type, replaceable with any module exporting `encode!/1` and `decode!/1`), and
 ```elixir
 def deps do
   [
-    {:encryptor_ecto, "~> 0.1"}
+    {:encryptor_ecto, "== 0.2.0"}
   ]
 end
 ```
 
-**The current surface is not on Hex yet.** `encryptor_ecto` 0.1.0 and
-`encryptor` 0.1.0 are published, but both are name reservations that predate
-the API this README describes, and the 0.1.0 tarball resolves `encryptor` to
-the reserved vault package rather than to the vault this layer calls. To use
-what is documented here, pin both by git reference until the next release:
+Pin an exact version and read the changelog before upgrading: until 1.0.0,
+public APIs, storage formats, and derivation constants may change between
+releases. **Do not depend on the 0.1.0 versions** - `encryptor_ecto 0.1.0`
+and `encryptor 0.1.0` are name reservations that predate the API this README
+describes; 0.2.0 is the first release of either package that holds the
+implementation.
 
-```elixir
-def deps do
-  [
-    {:encryptor_ecto, github: "riddler/encryptor_ecto", ref: "<sha>"},
-    {:encryptor, github: "riddler/encryptor", ref: "<sha>", override: true}
-  ]
-end
-```
-
-`main` itself pins the vault by git ref for the same reason; the pin moves to a
-version requirement at the vault's first real release. Add the formatter import
-so the paren-free declaration macros are not rewritten:
+Add the formatter import so the paren-free declaration macros are not
+rewritten:
 
 ```elixir
 # .formatter.exs
