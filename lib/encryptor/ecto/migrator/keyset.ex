@@ -103,6 +103,33 @@ defmodule Encryptor.Ecto.Migrator.Keyset do
   end
 
   @doc """
+  One random sample of rows, in the same shape `batch_query/7` returns.
+
+  ADR-0002 decision 10's `sample:` option. The rows are drawn in **random**
+  order rather than as the first `size` rows in key order, and the reason is
+  the whole value of the option: key order is the order the pass writes in, so
+  a prefix of it is precisely the region a partial or resumed pass migrated
+  first. A sampled verification over that prefix would report every row
+  `:already_target` while the tail of the table was untouched - a verification
+  that is wrong in the one direction a verification must not be wrong in.
+
+  The cost is an ordering over the scope, which is why `sample:` is a drift
+  detector a host runs on a schedule and `sample: :all` - the keyset scan
+  `batch_query/7` performs - is the acceptance test at the end of a rotation
+  (ADR-0004 decision 8, step 6).
+
+  `random()` is spelled that way by PostgreSQL and SQLite; MySQL spells it
+  `rand()`. That is the same adapter assumption ADR-0002 decision 10's census
+  SQL already makes, and it is confined to this one clause.
+  """
+  @spec sample_query(String.t(), key(), atom(), atom(), atom() | nil, pos_integer()) ::
+          Ecto.Query.t()
+  def sample_query(source, {column, _type}, source_column, target_column, tenant_column, size) do
+    query = from(r in source, order_by: fragment("random()"), limit: ^size)
+    select_row(query, column, source_column, target_column, tenant_column)
+  end
+
+  @doc """
   The compare-and-swap update for one row (ADR-0002 decision 4).
 
   The update is conditional on the target column still holding the exact bytes

@@ -58,4 +58,34 @@ defmodule Encryptor.Ecto.Migrator.Plan do
 
   @enforce_keys [:repo, :rewrites]
   defstruct [:repo, :rewrites]
+
+  @doc """
+  The compiled plan a plan module carries, or an `ArgumentError` naming the DSL.
+
+  `caller` is the function to blame in the message - every entry point that
+  takes a plan module resolves it through here, and a message naming `run/2`
+  when the operator called `verify/2` sends them to the wrong docs.
+
+  Checked with `function_exported?/3` rather than by calling and rescuing: a
+  schema module handed to `run/2` by mistake would otherwise fail with an
+  `UndefinedFunctionError` that says nothing about plans.
+  """
+  @spec fetch!(module(), String.t()) :: t()
+  def fetch!(plan_module, caller) when is_atom(plan_module) do
+    if Code.ensure_loaded?(plan_module) and function_exported?(plan_module, :__plan__, 0) do
+      plan_module.__plan__()
+    else
+      raise ArgumentError, not_a_plan_message(plan_module, caller)
+    end
+  end
+
+  def fetch!(other, caller), do: raise(ArgumentError, not_a_plan_message(other, caller))
+
+  defp not_a_plan_message(given, caller) do
+    "#{caller} expects a plan module - one that " <>
+      "`use Encryptor.Ecto.Migration` - and was given #{inspect(given)}, " <>
+      "which exports no `__plan__/0`. The plan is the unit of work " <>
+      "(ADR-0002 decision 2); there is no path that takes a schema or a " <>
+      "list of fields instead."
+  end
 end

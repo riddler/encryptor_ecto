@@ -12,6 +12,13 @@ defmodule Encryptor.Ecto.Migrator do
       MyApp.Encryption.CloakMigration
       |> Encryptor.Ecto.Migrator.run(mode: :write, resume: true)
 
+  `verify/2` is the read-only half (decision 10): the same plan, the same
+  classification, no writes, and a non-zero arm for any row that is not
+  already in the target state.
+
+      MyApp.Encryption.CloakMigration
+      |> Encryptor.Ecto.Migrator.verify(sample: :all)
+
   The library function is the interface and the `mix` tasks (`ece-5qb`) are
   thin argument parsers over it, because a production host runs releases and a
   release has no Mix: a rotation reachable only from a developer's laptop
@@ -91,10 +98,13 @@ defmodule Encryptor.Ecto.Migrator do
 
   ## What lives elsewhere
 
-  `verify/2` and the SQL census are `ece-7fr`; the `mix` task family is
-  `ece-5qb`; `source_authenticated:` and `validate:` - and with them the
-  `:migratable_unverified` class - are `ece-4mg`. The report is built so that
-  adding that class is additive (`Encryptor.Ecto.Migrator.Report.classes/0`).
+  `Encryptor.Ecto.Migrator.Census` renders the SQL half of decision 10 - the
+  queries a DBA runs against the database with no application and no key.
+  The `mix` task family is `ece-5qb`. `source_authenticated:` and `validate:`
+  - and with them the `:migratable_unverified` class - are `ece-4mg`; the
+  report is built so that adding that class is additive
+  (`Encryptor.Ecto.Migrator.Report.classes/0`), and `Report.verified?/1`
+  counts it against a verification without being told about it.
   """
 
   alias Encryptor.Ecto.Migrator.Checkpoint
@@ -106,6 +116,27 @@ defmodule Encryptor.Ecto.Migrator do
 
   @typedoc "The mode a run performs. There is no default (decision 7)."
   @type mode :: :dry_run | :write
+
+  @typedoc """
+  Every mode a pass can be executed in, `verify/2`'s included.
+
+  Separate from `t:mode/0` because `t:mode/0` is `run/2`'s **option**, and
+  decision 7's "exactly one of two, with no default" is a statement about that
+  option. `:verify` is not a third thing an operator may ask `run/2` for; it
+  is the mode `verify/2` puts a pass in, and a `mode: :verify` reaching
+  `run/2` is an unknown mode there exactly as `:sideways` would be.
+  """
+  @type pass_mode :: mode() | :verify
+
+  @typedoc """
+  How much of the scope a verification reads (decision 10).
+
+  `:all` is the whole scope, visited with the same keyset pagination a run
+  uses. A positive integer is a random sample of that many rows per field.
+  """
+  @type sample :: pos_integer() | :all
+
+  @type verify_opts :: [sample: sample(), prefix: String.t() | nil]
 
   @type opts :: [
           mode: mode(),
@@ -122,8 +153,9 @@ defmodule Encryptor.Ecto.Migrator do
         ]
 
   @typep options :: %{
-           mode: mode(),
+           mode: pass_mode(),
            batch_size: pos_integer(),
+           sample: sample(),
            resume: boolean(),
            prefix: String.t() | nil,
            checkpoint: :table | :none,
@@ -149,6 +181,8 @@ defmodule Encryptor.Ecto.Migrator do
     :progress
   ]
 
+  @verify_options [:sample, :prefix]
+
   @doc """
   Runs a plan, in exactly one of the two modes.
 
@@ -159,7 +193,7 @@ defmodule Encryptor.Ecto.Migrator do
   """
   @spec run(module(), opts()) :: {:ok, Report.t()} | {:error, Report.t()}
   def run(plan_module, opts) do
-    plan = plan!(plan_module)
+    plan = Plan.fetch!(plan_module, "Encryptor.Ecto.Migrator.run/2")
     options = options!(opts)
     passes = passes!(plan_module, plan, options)
 
@@ -169,6 +203,77 @@ defmodule Encryptor.Ecto.Migrator do
     |> report(options)
     |> Report.finish()
     |> result()
+  end
+
+  @doc """
+  Classifies the plan's rows without writing anything (decision 10).
+
+  Returns `{:ok, report}` when **every** row it saw was `:already_target` or
+  `:null`, and `{:error, report}` otherwise. That is a stricter arm than
+  `run/2`'s: a readable legacy row is a perfectly good dry run and a failed
+  verification, because the question here is whether the rotation is finished
+  rather than whether it can proceed.
+
+      MyApp.Encryption.CloakMigration
+      |> Encryptor.Ecto.Migrator.verify(sample: :all)
+
+  Three jobs, one function. It is the acceptance test at the end of a rotation
+  (ADR-0004 decision 8, step 6); it is what a host runs on a schedule to
+  detect drift; and exiting zero over `sample: :all` is ADR-0004 decision 5's
+  primary signal that the mixed window has closed and that dropping `legacy:`
+  is due. The telemetry counter that decision names is a convenience beside
+  it - a counter at zero is evidence about traffic, and a cold partition
+  nobody reads reports zero while still holding legacy bytes.
+
+  ## Options
+
+  | Option | Default | |
+  |---|---|---|
+  | `:sample` | `:all` | `:all`, or a positive integer of rows per field |
+  | `:prefix` | `nil` | The schema prefix to visit; the repo's default when absent |
+
+  Deliberately no others. `--prefix` is here because a verification that
+  silently checked a different prefix than the pass wrote to would be worse
+  than no verification. The rest of `run/2`'s options are absent because the
+  contract in ADR-0002's amended typespec has exactly these two, and a
+  verification whose scope can be narrowed in six ways is a verification whose
+  green is hard to read.
+
+  ## What it does per row, and what it does not
+
+  The probe and the classification are the pass's, unchanged
+  (`Encryptor.Ecto.Migrator.Pass`), which is the point: a verification that
+  reimplemented "is this row in the target state?" would be a second answer to
+  the question the migrator already answers, free to drift from it. What the
+  verify mode skips is the dump - see that module's "The third mode reads and
+  stops".
+
+  A verification never halts on a row. It runs with `on_error: :continue`, so
+  a table with unreadable rows produces a count of them rather than a report
+  that stops at the first: an operator asking "is this finished?" is asking
+  about the whole scope, and a report that stopped at row one answers a
+  different question. It still exits non-zero - `Report.verified?/1` is about
+  what was found, not about how the pass ended.
+
+  It writes no checkpoint and reads none. A verification is not resumable and
+  has nothing to resume: it holds no lock, changes nothing, and can simply be
+  run again.
+  """
+  @spec verify(module(), verify_opts()) :: {:ok, Report.t()} | {:error, Report.t()}
+  def verify(plan_module, opts \\ []) do
+    plan = Plan.fetch!(plan_module, "Encryptor.Ecto.Migrator.verify/2")
+    options = verify_options!(opts)
+
+    plan_module
+    |> passes!(plan, options)
+    |> report(options)
+    |> Report.finish()
+    |> verify_result()
+  end
+
+  @spec verify_result(Report.t()) :: {:ok, Report.t()} | {:error, Report.t()}
+  defp verify_result(report) do
+    if Report.verified?(report), do: {:ok, report}, else: {:error, report}
   end
 
   @spec report([Pass.t()], options()) :: Report.t()
@@ -192,17 +297,6 @@ defmodule Encryptor.Ecto.Migrator do
   end
 
   # -- the plan -------------------------------------------------------------
-
-  @spec plan!(module()) :: Plan.t()
-  defp plan!(plan_module) when is_atom(plan_module) do
-    if Code.ensure_loaded?(plan_module) and function_exported?(plan_module, :__plan__, 0) do
-      plan_module.__plan__()
-    else
-      raise ArgumentError, not_a_plan_message(plan_module)
-    end
-  end
-
-  defp plan!(other), do: raise(ArgumentError, not_a_plan_message(other))
 
   @spec passes!(module(), Plan.t(), options()) :: [Pass.t()]
   defp passes!(plan_module, plan, options) do
@@ -248,6 +342,7 @@ defmodule Encryptor.Ecto.Migrator do
       to_params: params,
       mode: options.mode,
       batch_size: options.batch_size,
+      sample: options.sample,
       on_error: options.on_error,
       prefix: options.prefix,
       checkpoint: options.checkpoint,
@@ -353,6 +448,7 @@ defmodule Encryptor.Ecto.Migrator do
     options = %{
       mode: mode!(opts),
       batch_size: batch_size!(opts),
+      sample: :all,
       resume: boolean!(opts, :resume, false),
       prefix: prefix!(opts),
       checkpoint: one_of!(opts, :checkpoint, [:table, :none], :table),
@@ -369,6 +465,47 @@ defmodule Encryptor.Ecto.Migrator do
     end
 
     options
+  end
+
+  # A verification borrows the run's option map so that `pass!/5` stays one
+  # function: everything below `:sample` and `:prefix` is fixed here rather
+  # than offered, and each value is fixed for a reason the moduledoc gives.
+  @spec verify_options!(term()) :: options()
+  defp verify_options!(opts) do
+    opts = keyword!(opts)
+
+    case Keyword.keys(opts) -- @verify_options do
+      [] -> :ok
+      unknown -> raise ArgumentError, unknown_verify_options_message(unknown)
+    end
+
+    %{
+      mode: :verify,
+      batch_size: 500,
+      sample: sample!(opts),
+      resume: false,
+      prefix: prefix!(opts),
+      # Redundant with `Pass`'s read-only arm for `:verify`, and kept: the two
+      # say different things. That arm says a verification opens no
+      # transaction; this says a verification has no checkpoint, which is also
+      # why it needs no checkpoint table and runs no preflight for one.
+      checkpoint: :none,
+      checkpoint_table: Checkpoint.default_table(),
+      on_error: :continue,
+      only_tenants: nil,
+      except_tenants: [],
+      only: nil,
+      progress: fn _report -> :ok end
+    }
+  end
+
+  @spec sample!(keyword()) :: sample()
+  defp sample!(opts) do
+    case Keyword.get(opts, :sample, :all) do
+      :all -> :all
+      size when is_integer(size) and size > 0 -> size
+      other -> raise ArgumentError, bad_sample_message(other)
+    end
   end
 
   @spec keyword!(term()) :: keyword()
@@ -519,14 +656,6 @@ defmodule Encryptor.Ecto.Migrator do
 
   # -- the messages ---------------------------------------------------------
 
-  defp not_a_plan_message(given) do
-    "Encryptor.Ecto.Migrator.run/2 expects a plan module - one that " <>
-      "`use Encryptor.Ecto.Migration` - and was given #{inspect(given)}, " <>
-      "which exports no `__plan__/0`. The plan is the unit of work " <>
-      "(ADR-0002 decision 2); there is no path that takes a schema or a " <>
-      "list of fields instead."
-  end
-
   defp missing_mode_message do
     "Encryptor.Ecto.Migrator.run/2 requires `mode:`, and there is no default " <>
       "(ADR-0002 decision 7): `mode: :dry_run` rehearses the whole pass and " <>
@@ -549,6 +678,20 @@ defmodule Encryptor.Ecto.Migrator do
   defp unknown_options_message(unknown) do
     "Encryptor.Ecto.Migrator.run/2 was given unknown options " <>
       "#{inspect(unknown)}. Known options: #{inspect(@known_options)}."
+  end
+
+  defp unknown_verify_options_message(unknown) do
+    "Encryptor.Ecto.Migrator.verify/2 was given unknown options " <>
+      "#{inspect(unknown)}. Known options: #{inspect(@verify_options)}. A " <>
+      "verification is read-only and takes no mode, no checkpoint and no " <>
+      "resume (ADR-0002 decision 10); `run/2` is the function with the rest " <>
+      "of them."
+  end
+
+  defp bad_sample_message(given) do
+    "sample: expects :all or a positive integer of rows per field, got " <>
+      "#{inspect(given)}. `:all` visits the whole scope and is the acceptance " <>
+      "test; an integer draws that many rows at random and is the drift check."
   end
 
   defp only_message(given) do
