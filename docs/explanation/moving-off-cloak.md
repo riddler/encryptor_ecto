@@ -262,11 +262,11 @@ legacy modules have to still be in the tree.
   which is where they live so that they cannot drift from the code that parses
   them.
 - The records behind every claim on this page:
-  [ADR-0001](../adr/0001-vault-backed-ecto-types.md) for the types, the context
-  and tenant resolution; [ADR-0002](../adr/0002-migrator.md) for the migrator;
-  [ADR-0003](../adr/0003-blind-index.md) for the blind index and its
+  [ADR-0001](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0001-vault-backed-ecto-types.md) for the types, the context
+  and tenant resolution; [ADR-0002](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0002-migrator.md) for the migrator;
+  [ADR-0003](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0003-blind-index.md) for the blind index and its
   security-properties table; and
-  [ADR-0004](../adr/0004-migration-from-cloak.md) for the adoption itself.
+  [ADR-0004](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0004-migration-from-cloak.md) for the adoption itself.
 
 There is deliberately no tutorial for this migration, and
-[the documentation index](../README.md) says why.
+[the documentation index](https://github.com/riddler/encryptor_ecto/blob/main/docs/README.md) says why.

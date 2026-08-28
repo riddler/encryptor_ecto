@@ -50,7 +50,12 @@ defmodule Encryptor.Ecto.MixProject do
       main: "readme",
       extras: [
         "README.md",
-        "CHANGELOG.md"
+        "CHANGELOG.md",
+        "docs/explanation/moving-off-cloak.md",
+        "docs/guides/migrate-from-cloak.md"
+      ],
+      groups_for_extras: [
+        Guides: ~r{docs/}
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
     ]

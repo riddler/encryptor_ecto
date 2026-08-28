@@ -378,12 +378,12 @@ The pages under [`docs/`](https://github.com/riddler/encryptor_ecto/blob/main/do
 
 - [`docs/README.md`](https://github.com/riddler/encryptor_ecto/blob/main/docs/README.md) - the index, including why there is
   deliberately no tutorial.
-- [What changes when you move off cloak_ecto](https://github.com/riddler/encryptor_ecto/blob/main/docs/explanation/moving-off-cloak.md) -
+- [What changes when you move off cloak_ecto](docs/explanation/moving-off-cloak.md) -
   per-tenant keys where cloak had one, the encryption context and the
   substitution it forbids, fail-closed tenant scope and the boundary audit that
   is the real cost of adoption, crypto-shredding, why encrypted columns are not
   queryable, and what a blind index does and does not restore.
-- [How to migrate a host app off cloak_ecto](https://github.com/riddler/encryptor_ecto/blob/main/docs/guides/migrate-from-cloak.md) -
+- [How to migrate a host app off cloak_ecto](docs/guides/migrate-from-cloak.md) -
   the nine-step runbook, each step in both release `eval` and `mix` form, with
   the expected output, what to do when it differs, the disposition of a legacy
   lookup column, and where reversibility actually ends.
