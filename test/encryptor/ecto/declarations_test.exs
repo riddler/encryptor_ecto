@@ -123,8 +123,15 @@ defmodule Encryptor.Ecto.DeclarationsTest do
     end
 
     # sabotage: declarations_in/1's Enum.reject(&is_nil/1) deleted, red.
+    #
+    # `holder_name` is an `Encryptor.Ecto.String` field and `metadata` an
+    # `Encryptor.Ecto.Map` one: both freeze a declared context and both are
+    # substitutable with a colliding declaration, so both are declarations
+    # here. Only `merchant_id`, which this package does not encrypt, is passed
+    # over.
     test "passes over the fields that are not encrypted" do
-      assert Declarations.list(schemas: [Card]) |> Enum.map(& &1.field) == [:notes, :pan]
+      assert Declarations.list(schemas: [Card]) |> Enum.map(& &1.field) ==
+               [:holder_name, :metadata, :notes, :pan]
     end
 
     # sabotage: encrypted?/1 -> true, red. A foreign parameterized type whose
@@ -142,6 +149,8 @@ defmodule Encryptor.Ecto.DeclarationsTest do
         |> Enum.map(&{&1.table, &1.column, &1.schema})
 
       assert pairs == [
+               {"cards", "holder_name", Card},
+               {"cards", "metadata", Card},
                {"cards", "notes", Card},
                {"cards", "pan", Card},
                {"signup_attempts", "variant", Signup}
@@ -152,7 +161,7 @@ defmodule Encryptor.Ecto.DeclarationsTest do
     # application and one of its schemas gets the schema twice otherwise, and
     # a doubled declaration is not a collision.
     test "reports a schema named twice once" do
-      assert length(Declarations.list(schemas: [Card, Card])) == 2
+      assert length(Declarations.list(schemas: [Card, Card])) == 4
     end
 
     # sabotage: modules_of/1's {:ok, modules} arm -> [], red.

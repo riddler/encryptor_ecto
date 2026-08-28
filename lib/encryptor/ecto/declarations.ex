@@ -137,7 +137,7 @@ defmodule Encryptor.Ecto.Declarations do
 
       iex> Encryptor.Ecto.Declarations.list(schemas: [Encryptor.Ecto.TestSchemas.Card])
       ...> |> Enum.map(&{&1.table, &1.column})
-      [{"cards", "notes"}, {"cards", "pan"}]
+      [{"cards", "holder_name"}, {"cards", "metadata"}, {"cards", "notes"}, {"cards", "pan"}]
   """
   @spec list(scope()) :: [declaration()]
   def list(scope) do
@@ -234,7 +234,12 @@ defmodule Encryptor.Ecto.Declarations do
     end
   end
 
-  # The marker `use Encryptor.Ecto.Binary` defines on the host type module.
+  # The marker every one of this package's type macros defines on the host
+  # type module - `Encryptor.Ecto.Binary`, `Encryptor.Ecto.String` and
+  # `Encryptor.Ecto.Map` alike, because all three freeze a declared context
+  # and all three ride it as AAD, which is what makes two fields sharing a
+  # declared pair substitutable whatever their plaintext shape.
+  #
   # Recognising our own types by a marker rather than by the shape of their
   # params keeps an unrelated parameterized type that happens to carry
   # `:table` and `:column` keys out of the check, and out of its failure
