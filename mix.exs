@@ -77,14 +77,12 @@ defmodule Encryptor.Ecto.MixProject do
     [
       {:ecto, "~> 3.13"},
 
-      # The vault, as a git dependency pinned to a SHA on its main branch.
-      # `encryptor` 0.1.0 on Hex is a name reservation: it carries the
-      # package's moduledoc and none of the vault API this layer calls, so a
-      # version requirement resolves to something that does not export
-      # `encrypt/2`. The pin moves to a version requirement at the vault's
-      # first real release; until then this is the only dependency form that
-      # names the code the types are written against.
-      {:encryptor, github: "riddler/encryptor", ref: "da7a9f238009af42ed451b6a6fc78fe2cbe03960"},
+      # The vault, pinned exactly. Its stability notice reserves the right to
+      # change public APIs, storage formats, and derivation constants between
+      # any pre-1.0 releases, so a range here would let a host's deps.update
+      # change what stored rows mean; the pin widens when the vault's
+      # guarantees do.
+      {:encryptor, "== 0.2.0"},
 
       # The serializer `Encryptor.Ecto.Map` defaults to (ADR-0001 decision 8).
       # A direct dependency rather than a transitive one: the vault happens to
