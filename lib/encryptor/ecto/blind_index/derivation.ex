@@ -71,7 +71,8 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   This module never sees, receives, holds, or returns the key material an
   index key is derived from. That is ADR-0003's assumptions A8 and A11, and
   as of enc-ADR-0003 amendment A the vault discharges them: `derive/3`
-  resolves the descriptor inside `Encryptor.Vault.Derive`, derives there, and
+  resolves the descriptor inside the vault's derivation path
+  (`lib/encryptor/vault/derive.ex` in `encryptor`), derives there, and
   hands back derived bytes only. There is no argument on any function in this
   module that a tenant master key could be passed as, which is the strongest
   form the property can take - a rule that cannot be broken by a call site
