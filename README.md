@@ -30,7 +30,9 @@ ADR-0001, ADR-0002 and ADR-0003 each carry a *Proposed amendments
 text in each is unchanged.
 
 The implementation graph derived from them is
-[`docs/plans/260827-ece-wdm-c3-implementation-graph.md`](docs/plans/260827-ece-wdm-c3-implementation-graph.md).
+[`docs/plans/260827-ece-wdm-c3-implementation-graph.md`](docs/plans/260827-ece-wdm-c3-implementation-graph.md),
+and the documentation set they decide is indexed at
+[`docs/README.md`](docs/README.md).
 
 Everything below describes what the accepted records decide, not a shipped
 API. Nothing here is a compatibility promise until it exists and is released.
