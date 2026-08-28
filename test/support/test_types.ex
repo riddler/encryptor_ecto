@@ -373,4 +373,23 @@ defmodule Encryptor.Ecto.TestSchemas do
       field(:metadata, Encryptor.Ecto.TestTypes.Metadata)
     end
   end
+
+  defmodule Signup do
+    @moduledoc """
+    A signup wizard's row, mid-adoption: `email` is the plaintext column the
+    table has always had and `email_encrypted` is the binary one the host's
+    own DDL added for the backfill leg (ADR-0002 decision 8). Two columns for
+    one value is what makes the plan's `into:` expressible.
+    """
+
+    use Ecto.Schema
+
+    @type t :: %__MODULE__{}
+
+    schema "signups" do
+      field(:variant, :string)
+      field(:email, :string)
+      field(:email_encrypted, Encryptor.Ecto.TestTypes.HolderName)
+    end
+  end
 end
