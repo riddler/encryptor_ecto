@@ -58,6 +58,108 @@ defmodule Encryptor.Ecto.TestSchemas.Identity do
   end
 end
 
+defmodule Encryptor.Ecto.TestSchemas.Authorization do
+  @moduledoc """
+  Decision 7's rotation window, as a schema: two full-width indexes over one
+  field, distinguished only by their `:version` and their columns.
+
+  This is the shape `where_eq/3` cannot resolve and `where_eq/4` exists for -
+  during the window both versions are declared, both are written, and the
+  source field names neither.
+  """
+
+  use Ecto.Schema
+
+  import Encryptor.Ecto.BlindIndex
+
+  alias Encryptor.Ecto.TestTypes
+
+  @type t :: %__MODULE__{}
+
+  schema "authorizations" do
+    field(:merchant_id, :string)
+
+    field(:card_number, TestTypes.HolderName)
+    field(:card_number_index, :binary)
+    field(:card_number_v2_index, :binary)
+
+    blind_index(:card_number, :card_number_index, normalize: :digits)
+    blind_index(:card_number, :card_number_v2_index, normalize: :digits, version: 2)
+  end
+end
+
+defmodule Encryptor.Ecto.TestSchemas.SignupEmail do
+  @moduledoc """
+  A signup wizard's email, indexed on the vault that refuses to derive.
+
+  Everything up to the derivation succeeds here, which is what makes the
+  "a vault error is reported in the vault's words" arm observable.
+  """
+
+  use Ecto.Schema
+
+  import Encryptor.Ecto.BlindIndex
+
+  alias Encryptor.Ecto.TestTypes
+
+  @type t :: %__MODULE__{}
+
+  schema "signups" do
+    field(:email, TestTypes.UnsaltedName)
+    field(:email_index, :binary)
+
+    blind_index(:email, :email_index, scope: :global, normalize: :email)
+  end
+end
+
+defmodule Encryptor.Ecto.TestSchemas.Wizard do
+  @moduledoc """
+  A signup wizard's email under a single, truncated index.
+
+  One index on the field, so the three-argument helpers resolve it - which is
+  what makes `where_eq/3`'s refusal and `where_eq_candidates/3`'s acceptance
+  observable at the arity a host actually writes.
+  """
+
+  use Ecto.Schema
+
+  import Encryptor.Ecto.BlindIndex
+
+  alias Encryptor.Ecto.TestTypes
+
+  @type t :: %__MODULE__{}
+
+  schema "wizards" do
+    field(:email, TestTypes.HolderName)
+    field(:email_index, :binary)
+
+    blind_index(:email, :email_index, normalize: :email, bits: 64)
+  end
+end
+
+defmodule Encryptor.Ecto.TestSchemas.Capture do
+  @moduledoc """
+  A field whose tenant resolver answers differently for a write than for a
+  read, so that which `Encryptor.Ecto.TenantContext` operation an index
+  computation asks with is observable in the bytes.
+  """
+
+  use Ecto.Schema
+
+  import Encryptor.Ecto.BlindIndex
+
+  alias Encryptor.Ecto.TestTypes
+
+  @type t :: %__MODULE__{}
+
+  schema "captures" do
+    field(:reference, TestTypes.PerOperationName)
+    field(:reference_index, :binary)
+
+    blind_index(:reference, :reference_index, normalize: :trim)
+  end
+end
+
 defmodule Encryptor.Ecto.TestNormalizers do
   @moduledoc "Host normalizers, one per way a `{module, function}` can behave."
 

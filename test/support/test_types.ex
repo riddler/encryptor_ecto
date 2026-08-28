@@ -121,6 +121,27 @@ defmodule Encryptor.Ecto.TestTypes do
       tenant: :none
   end
 
+  defmodule UnsaltedName do
+    @moduledoc """
+    A text field on the vault that starts, encrypts, and refuses to derive.
+
+    The subject of the "a vault error is the vault's words" arm: an index over
+    this field can be declared and normalized, and only the derivation fails.
+    """
+
+    use Encryptor.Ecto.String,
+      vault: Encryptor.Ecto.TestVaults.Unsalted,
+      tenant: :none
+  end
+
+  defmodule PerOperationName do
+    @moduledoc "A text field whose resolver answers differently for reads and writes."
+
+    use Encryptor.Ecto.String,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      tenant: Encryptor.Ecto.TestResolvers.PerOperation
+  end
+
   defmodule Metadata do
     @moduledoc "A map field on the default serializer."
 
@@ -340,6 +361,23 @@ defmodule Encryptor.Ecto.TestResolvers do
     @doc "Never resolves."
     @impl Encryptor.Ecto.TenantContext
     def resolve(operation, _params), do: {:error, {:no_request_context, operation}}
+  end
+
+  defmodule PerOperation do
+    @moduledoc """
+    Answers a different merchant for a write than for a read.
+
+    ADR-0001 allows it - a reporting job with a `:load` tenant it does not have
+    on `:dump` is the record's own example - and it is what makes the blind
+    index's `:dump`/`:load` mapping observable rather than a comment.
+    """
+
+    @behaviour Encryptor.Ecto.TenantContext
+
+    @doc "One merchant on the write side, another on the read side."
+    @impl Encryptor.Ecto.TenantContext
+    def resolve(:dump, _params), do: {:ok, "merchant_7f3"}
+    def resolve(:load, _params), do: {:ok, "merchant_a19"}
   end
 
   defmodule OffContract do
