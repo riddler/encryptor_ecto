@@ -1,3 +1,14 @@
+# The vaults the type tests encrypt through are started for every arm,
+# database or not: they resolve offline from static material and have nothing
+# to do with Postgres.
+for vault <- [
+      Encryptor.Ecto.TestVaults.Merchant,
+      Encryptor.Ecto.TestVaults.App,
+      Encryptor.Ecto.TestVaults.Strict
+    ] do
+  {:ok, _pid} = vault.start_link()
+end
+
 case Encryptor.Ecto.TestDatabase.exunit_options() do
   {:ok, []} ->
     # The repository is started only on this arm. Starting it when nothing is
