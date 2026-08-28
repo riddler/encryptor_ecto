@@ -26,7 +26,7 @@ defmodule Encryptor.Ecto.Binary do
   | Option | Required | Meaning |
   |---|---|---|
   | `:vault` | yes | The `Encryptor.Vault` module this type encrypts through |
-  | `:tenant` | no | `:scope` (default), `:none`, or a module implementing `Encryptor.Ecto.TenantContext` |
+  | `:tenant` | no | `:scope` (default), `:none`, or a module implementing `Encryptor.Ecto.TenantContext` (see "A global field" below) |
   | `:context` | no | Static extra context pairs merged into every operation |
   | `:legacy` | no | The migration window's legacy type (not yet implemented - see below) |
   | `:table`, `:column` | no | Overrides for the frozen declared context values |
@@ -75,6 +75,7 @@ defmodule Encryptor.Ecto.Binary do
   | The vault returned an encrypt error | `Encryptor.Ecto.EncryptError` |
   | The vault returned a decrypt error, AAD mismatch included | `Encryptor.Ecto.DecryptError` |
   | The vault reports missing required context keys | `Encryptor.Ecto.MissingContextError` |
+  | A `tenant: :none` field names a `:tenant`-profile vault | `Encryptor.Ecto.VaultProfileError` |
 
   No exception message, and no `Inspect` of one, carries plaintext, ciphertext
   bytes or key material. That is structural rather than conventional: see
@@ -99,6 +100,46 @@ defmodule Encryptor.Ecto.Binary do
   `Encryptor.Ecto.DecryptError`, which is the anti-substitution property
   working rather than a missing-scope error.
 
+  ## A global field: `tenant: :none`, and what it costs
+
+  `tenant: :none` declares a field global. It is written at the field, in the
+  schema, where a reviewer sees it next to the column it applies to, and it
+  asks no resolver anything: nothing is read from `Encryptor.Ecto.Tenant`, and
+  a dump with no tenant in scope is the ordinary case rather than an error.
+
+  **A `:none` field's ciphertexts are not crypto-shreddable with a tenant
+  key.** The tenant key is omitted from the vault call entirely, so those
+  bytes belong to the vault's single key and nothing else. Destroying one
+  tenant's key leaves every one of them readable, and removing that tenant's
+  data from a `:none` column is an ordinary delete rather than a
+  key-destruction. That is the trade the option is *for* - a lookup table, a
+  pricing tier, a feature flag payload that no tenant owns - and it is stated
+  here rather than left to the record, because the option is declared at the
+  field and its consequence is a compliance one.
+
+      defmodule Payments.Encrypted.Global do
+        use Encryptor.Ecto.Binary, vault: Payments.AppVault, tenant: :none
+      end
+
+  ### A `:none` field must name a `:single`-profile vault
+
+  A `:tenant`-profile vault carries the tenant reference in its required
+  context set and refuses any operation without it, so "a tenant vault with
+  the pair omitted" is not a configuration that exists. A host with both kinds
+  of field runs two vaults: the per-tenant one its tenant-scoped fields point
+  at, and a second single-key one its global fields point at.
+
+  The rule is checked on the first `dump/3` or `load/3` of such a field, and
+  violating it raises `Encryptor.Ecto.VaultProfileError` naming the field, the
+  vault it named, and the profile that vault resolved to. It cannot be checked
+  while the declaration compiles: `:context_profile` is ordinary vault
+  configuration and arrives through layers - application environment,
+  `start_link/1` options, `init/1` - that do not exist at the compile time of
+  the vault module, let alone of a type module downstream of it. The
+  authoritative copy is the frozen `Encryptor.Vault.Config` the vault
+  publishes when it starts, and this type reads it from there rather than
+  keeping a second one.
+
   ## Not queryable, and this package will not pretend otherwise
 
   No equality lookup, no `LIKE`, no ordering, no unique index, no `ON CONFLICT`
@@ -119,7 +160,9 @@ defmodule Encryptor.Ecto.Binary do
   alias Encryptor.Ecto.MissingContextError
   alias Encryptor.Ecto.MissingTenantError
   alias Encryptor.Ecto.TenantContext
+  alias Encryptor.Ecto.VaultProfileError
   alias Encryptor.Error
+  alias Encryptor.Vault.Config
 
   @typedoc "The options `use Encryptor.Ecto.Binary` accepts."
   @type opts :: [
@@ -368,9 +411,12 @@ defmodule Encryptor.Ecto.Binary do
   # `tenant: :none` declares a field global and asks no resolver anything. The
   # rule that such a field must name a `:single`-profile vault is a check
   # against the vault's own start-time configuration rather than against this
-  # package's options, and it is ece-9p0's; nothing here weakens it.
+  # package's options, which is why it runs here rather than in `init/2`.
   @spec resolve_tenant!(params(), TenantContext.operation()) :: String.t() | :none
-  defp resolve_tenant!(%{tenant: :none}, _operation), do: :none
+  defp resolve_tenant!(%{tenant: :none} = params, _operation) do
+    assert_single_profile_vault!(params)
+    :none
+  end
 
   defp resolve_tenant!(params, operation) do
     resolver = resolver(params.tenant)
@@ -387,6 +433,35 @@ defmodule Encryptor.Ecto.Binary do
 
       _off_contract ->
         raise MissingTenantError, common(params, nil, {:resolver_off_contract, resolver})
+    end
+  end
+
+  # ADR-0001 decision 5e as tightened by acceptance amendment 3: a `:none`
+  # field must name a `:single`-profile vault. The profile is a start-time
+  # value - it arrives through configuration layers that do not exist when
+  # this module or the vault module is compiled - so the authoritative copy is
+  # the frozen struct the vault published at start, and the check is a
+  # `:persistent_term` read per call rather than anything memoized here.
+  #
+  # A vault that has not started has no frozen config and therefore no profile
+  # to check. That is deliberately not this exception's business: the very
+  # next line hands the value to the vault, whose own entry-point check
+  # reports `{:vault_not_started, _}` through `EncryptError`/`DecryptError`.
+  # Reporting a not-started vault as a profile defect would name the wrong
+  # thing to fix.
+  @spec assert_single_profile_vault!(params()) :: :ok
+  defp assert_single_profile_vault!(params) do
+    case Config.fetch(params.vault) do
+      {:ok, %{context_profile: :tenant = profile}} ->
+        raise VaultProfileError,
+              common(params, :none, {:tenant_profile_vault, params.vault}) ++
+                [vault: params.vault, profile: profile]
+
+      {:ok, _single_profile} ->
+        :ok
+
+      {:error, %Error{}} ->
+        :ok
     end
   end
 
