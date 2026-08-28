@@ -29,7 +29,10 @@ defmodule Encryptor.Ecto.TestRepo do
   alias Ecto.Adapters.SQL.Sandbox
   alias Ecto.Migrator
 
-  @migrations [{0, Encryptor.Ecto.TestMigration}]
+  @migrations [
+    {0, Encryptor.Ecto.TestMigration},
+    {1, Encryptor.Ecto.TestMigrationTextAndMap}
+  ]
 
   @doc """
   Creates the database if it is absent, starts the repository, migrates it,

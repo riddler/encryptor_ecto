@@ -15,8 +15,10 @@ defmodule Encryptor.Ecto.TestRepoTest do
   alias Ecto.Adapters.SQL
 
   describe "the migrated schema" do
-    # sabotage: TestMigration's :pan column type :binary -> :string, red.
-    test "gives both encrypted columns a bytea type" do
+    # sabotage: TestMigration's :pan column type :binary -> :string, red. Also
+    # red for TestMigrationTextAndMap's :metadata declared :map rather than
+    # :binary, which is the mistake ADR-0001 decision 2 exists to forbid.
+    test "gives every encrypted column a bytea type" do
       %{rows: rows} =
         SQL.query!(
           TestRepo,
@@ -30,8 +32,10 @@ defmodule Encryptor.Ecto.TestRepoTest do
         )
 
       assert [
+               ["holder_name", "bytea"],
                ["id", "bigint"],
                ["merchant_id", "character varying"],
+               ["metadata", "bytea"],
                ["notes", "bytea"],
                ["pan", "bytea"]
              ] = rows

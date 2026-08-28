@@ -81,12 +81,22 @@ defmodule Encryptor.Ecto.MixProject do
       # names the code the types are written against.
       {:encryptor, github: "riddler/encryptor", ref: "ece9647a5b2fdeb4176e349d717bafa2db0e3080"},
 
+      # The serializer `Encryptor.Ecto.Map` defaults to (ADR-0001 decision 8).
+      # A direct dependency rather than a transitive one: the vault happens to
+      # pull Jason in today, and a default that works only because somebody
+      # else's dependency tree supplies it is a default that breaks on an
+      # upstream change nobody here reviews. `:json` still takes any module
+      # exporting `encode!/1` and `decode!/1`, so a host with its own
+      # serializer names it and this one goes unused.
+      {:jason, "~> 1.4"},
+
       # Dev / test
       #
-      # `ecto_sql` and `postgrex` are test-only. The library depends on `ecto`
-      # and the vault and nothing else (the package's own claim, and the
-      # reason `Encryptor.Ecto.TestDatabase` probes Postgres with a bare TCP
-      # connect rather than a driver handshake). What they buy here is a real
+      # `ecto_sql` and `postgrex` are test-only. The library's runtime
+      # dependencies are `ecto`, the vault, and the JSON serializer above -
+      # which is what the README claims, and the reason
+      # `Encryptor.Ecto.TestDatabase` probes Postgres with a bare TCP connect
+      # rather than a driver handshake. What they buy here is a real
       # repository for the database-backed tests: an `Ecto.Type` that only
       # ever round-trips through a hand-called `dump/3` has not been shown to
       # survive the adapter's own dump and load path.
