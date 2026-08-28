@@ -1,5 +1,9 @@
 case Encryptor.Ecto.TestDatabase.exunit_options() do
   {:ok, []} ->
+    # The repository is started only on this arm. Starting it when nothing is
+    # listening would turn the legible skip below into a connection error at
+    # boot, which is the failure this whole arrangement exists to avoid.
+    :ok = Encryptor.Ecto.TestRepo.setup!()
     ExUnit.start()
 
   {:ok, options} ->
