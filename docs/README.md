@@ -21,16 +21,21 @@ Read at leisure, away from a terminal.
 
 ## How-to guides
 
-Task-shaped, for someone who already understands the target state. **Not written
-yet.** The migration runbook (`guides/migrate-from-cloak.md`) is fixed as
-ADR-0004 decision 8 and is the next page due.
+Task-shaped, for someone who already understands the target state.
+
+- [How to migrate a host app off cloak_ecto](guides/migrate-from-cloak.md) - the
+  migration runbook of ADR-0004 decision 8, step by step: the command for each
+  step in release `eval` and `mix` form, what its output should say, what to do
+  when it differs, and where reversibility actually ends.
 
 ## Reference
 
 No page here. The mix tasks' flag tables, exit codes and grammar are their own
 `@moduledoc`s, rendered by ExDoc, so that they live with the code that parses
-them and the two cannot drift (ADR-0004 decision 10). The tasks are not
-implemented yet; until they are, their grammar is ADR-0004 decision 6.
+them and the two cannot drift (ADR-0004 decision 10). Read them with
+`mix help encryptor.ecto.migrate`, `mix help encryptor.ecto.verify`,
+`mix help encryptor.ecto.gen.plan` and `mix help encryptor.ecto.gen.migration`;
+the grammar they implement is ADR-0004 decision 6.
 
 ## Tutorial
 
