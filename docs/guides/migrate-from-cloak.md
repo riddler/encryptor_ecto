@@ -632,9 +632,9 @@ The full leakage table - what an attacker learns from a `scope: :tenant` index
 and from a `scope: :global` one, holding a dump, a guess, one tenant's key, or a
 retained dump after a shred - is `Encryptor.Ecto.BlindIndex`'s *Security
 properties*, at the declaration where a reviewer meets it. The records behind
-this step are [ADR-0004 decision 9](../adr/0004-migration-from-cloak.md) for the
+this step are [ADR-0004 decision 9](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0004-migration-from-cloak.md) for the
 three dispositions and the ordering rule, and
-[ADR-0003](../adr/0003-blind-index.md) for the construction.
+[ADR-0003](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0003-blind-index.md) for the construction.
 
 ## Step 8. Close the window in one named commit
 
@@ -758,5 +758,5 @@ have become `NULL` and nothing should have become empty.
   the semantics behind every step here.
 - `mix help encryptor.ecto.migrate` and `mix help encryptor.ecto.verify` - the
   full flag tables and exit codes, which live with the code that parses them.
-- [ADR-0004](../adr/0004-migration-from-cloak.md) - the record this runbook
+- [ADR-0004](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0004-migration-from-cloak.md) - the record this runbook
   renders.
