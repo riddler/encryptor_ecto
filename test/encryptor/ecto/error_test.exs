@@ -7,6 +7,7 @@ defmodule Encryptor.Ecto.ErrorTest do
   alias Encryptor.Ecto.MissingContextError
   alias Encryptor.Ecto.MissingTenantError
   alias Encryptor.Ecto.SerializationError
+  alias Encryptor.Ecto.VaultProfileError
 
   doctest Encryptor.Ecto.Error
 
@@ -15,7 +16,8 @@ defmodule Encryptor.Ecto.ErrorTest do
     MissingContextError,
     EncryptError,
     DecryptError,
-    SerializationError
+    SerializationError,
+    VaultProfileError
   ]
 
   # A plaintext from the canonical card-processing example, and a key-shaped
@@ -165,6 +167,23 @@ defmodule Encryptor.Ecto.ErrorTest do
     test "reads as a host misconfiguration, not as an integrity event" do
       assert MissingContextError.headline() =~ "requires encryption-context keys"
       refute MissingContextError.headline() =~ "decrypt"
+    end
+  end
+
+  describe "VaultProfileError" do
+    # sabotage: drop the {"vault", ...} pair from extra_detail/1 -> red
+    test "names the vault it was pointed at and the profile that vault resolved to" do
+      message =
+        Exception.message(struct!(VaultProfileError, vault: MyApp.TenantVault, profile: :tenant))
+
+      assert message =~ "vault: MyApp.TenantVault"
+      assert message =~ "vault profile: :tenant"
+    end
+
+    # sabotage: change headline/0 to MissingContextError's wording -> red
+    test "says which vault to point the field at rather than reporting a mismatch" do
+      assert VaultProfileError.headline() =~ "point it at a :single-profile vault"
+      refute VaultProfileError.headline() =~ "requires encryption-context keys"
     end
   end
 

@@ -12,6 +12,7 @@ defmodule Encryptor.Ecto.BinaryTest do
   alias Encryptor.Ecto.TestSchemas.Card
   alias Encryptor.Ecto.TestTypes
   alias Encryptor.Ecto.TestVaults
+  alias Encryptor.Ecto.VaultProfileError
 
   doctest Encryptor.Ecto.Binary
 
@@ -303,6 +304,63 @@ defmodule Encryptor.Ecto.BinaryTest do
 
       assert {:ok, ciphertext} = TestTypes.Global.dump(@pan, nil, params)
       assert {:ok, @pan} = TestTypes.Global.load(ciphertext, nil, params)
+    end
+
+    # sabotage: assert_single_profile_vault!/1's raising arm -> :ok, red.
+    test "on a :tenant-profile vault is refused on dump, in its own words" do
+      params = TestTypes.Misprofiled.init(schema: Card, field: :pan)
+
+      error =
+        assert_raise VaultProfileError, fn ->
+          TestTypes.Misprofiled.dump(@pan, nil, params)
+        end
+
+      message = Exception.message(error)
+
+      assert message =~ "point it at a :single-profile vault"
+      assert message =~ ~s(table: "cards")
+      assert message =~ ~s(column: "pan")
+      assert message =~ "vault: Encryptor.Ecto.TestVaults.Merchant"
+      assert message =~ "vault profile: :tenant"
+    end
+
+    # The check sits in the shared tenant resolution rather than in dump/3, so
+    # a read of a row that should never have been written is refused the same
+    # way the write was.
+    #
+    # sabotage: assert_single_profile_vault!/1's raising arm -> :ok, red.
+    test "on a :tenant-profile vault is refused on load too" do
+      params = TestTypes.Misprofiled.init(schema: Card, field: :pan)
+
+      assert_raise VaultProfileError, fn ->
+        TestTypes.Misprofiled.load("whatever bytes", nil, params)
+      end
+    end
+
+    # A vault that never started published no configuration, so there is no
+    # profile to check and the not-started refusal is the vault's to make.
+    # Reporting it as a profile defect would name the wrong thing to fix.
+    #
+    # sabotage: the {:error, %Error{}} arm of assert_single_profile_vault!/1
+    # raising VaultProfileError, red.
+    test "defers to the vault when the vault never started" do
+      params = TestTypes.MisprofiledUnstarted.init(schema: Card, field: :pan)
+
+      error =
+        assert_raise EncryptError, fn ->
+          TestTypes.MisprofiledUnstarted.dump(@pan, nil, params)
+        end
+
+      assert Exception.message(error) =~ "vault_not_started"
+    end
+
+    # sabotage: resolve_tenant!/2's :none clause matching every params map, red.
+    test "leaves a tenant-scoped field on the same vault alone" do
+      Tenant.put("merchant_7f3")
+      params = params(TestTypes.Pan)
+
+      assert {:ok, ciphertext} = TestTypes.Pan.dump(@pan, nil, params)
+      assert {:ok, @pan} = TestTypes.Pan.load(ciphertext, nil, params)
     end
   end
 

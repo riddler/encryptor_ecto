@@ -28,6 +28,29 @@ defmodule Encryptor.Ecto.TestTypes do
       tenant: :none
   end
 
+  defmodule Misprofiled do
+    @moduledoc """
+    A global field pointed at the `:tenant`-profile vault - the pairing
+    ADR-0001 decision 5e forbids, and the subject of the rule's raise.
+    """
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      tenant: :none
+  end
+
+  defmodule MisprofiledUnstarted do
+    @moduledoc """
+    A global field on a vault that is never started, so the profile check has
+    no frozen configuration to read and must defer to the vault's own
+    not-started refusal.
+    """
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Unstarted,
+      tenant: :none
+  end
+
   defmodule Resolved do
     @moduledoc "A field whose tenant comes from a host resolver rather than the scope."
 
