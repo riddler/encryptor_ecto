@@ -85,6 +85,14 @@ defmodule Encryptor.Ecto.String do
 
       @encryptor_ecto_declared unquote(impl).validate_declaration!(__MODULE__, unquote(opts))
 
+      # The marker every encrypted field carries, for the reason
+      # `Encryptor.Ecto.Declarations` gives at its own use of it. A text field
+      # freezes a declared context and rides it as AAD exactly as a binary one
+      # does, so it is as substitutable with a colliding declaration as a
+      # binary field is - and as indexable.
+      @doc false
+      def __encryptor_ecto__(:impl), do: unquote(impl)
+
       @doc false
       @impl Ecto.ParameterizedType
       def init(field_opts),
