@@ -40,6 +40,12 @@ defmodule Encryptor.Ecto.String do
   bytes that were not written through this type are the migrator's problem
   (ADR-0002), not a new integrity event invented here.
 
+  The same holds for the migration window: a value that came back through
+  `:legacy` is returned as the legacy module produced it, unchecked. That
+  module is the host's own working reader for the column, and re-validating
+  its answer here would turn a readable legacy row into an exception during
+  the one window where the row is supposed to stay readable.
+
   ## Everything else
 
   `nil` is `NULL` and `""` is encrypted and round-trips as `""` (decision 7).
