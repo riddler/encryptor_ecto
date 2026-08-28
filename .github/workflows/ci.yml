@@ -92,10 +92,13 @@ jobs:
       # the PLT cache too.
       #
       # The key is derived from mix.lock, and mix.lock is the whole pin here
-      # even though one dependency is not a Hex package. `encryptor` is not
-      # published yet, so it enters as a git dependency pinned to a SHA (see
-      # mix.exs), and mix.lock records that SHA the same way it records a Hex
-      # checksum - re-pinning the vault moves mix.lock, which moves this key.
+      # even though one dependency is not a Hex package. `encryptor` has a
+      # 0.1.0 on Hex, but that release is a name reservation carrying none of
+      # the vault API this package calls, so the vault enters as a git
+      # dependency pinned to a SHA on its main branch (see mix.exs) and will
+      # keep doing so until the vault's first real release. mix.lock records
+      # that SHA the same way it records a Hex checksum - re-pinning the vault
+      # moves mix.lock, which moves this key.
       # deps/ is cached, so the vault's git clone is restored from the cache
       # rather than refetched on a hit; on a restore-keys fallback the
       # restored clone can be at the previously locked SHA, and the deps.get

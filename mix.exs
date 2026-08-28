@@ -71,9 +71,27 @@ defmodule Encryptor.Ecto.MixProject do
   defp deps do
     [
       {:ecto, "~> 3.13"},
-      {:encryptor, "~> 0.1"},
+
+      # The vault, as a git dependency pinned to a SHA on its main branch.
+      # `encryptor` 0.1.0 on Hex is a name reservation: it carries the
+      # package's moduledoc and none of the vault API this layer calls, so a
+      # version requirement resolves to something that does not export
+      # `encrypt/2`. The pin moves to a version requirement at the vault's
+      # first real release; until then this is the only dependency form that
+      # names the code the types are written against.
+      {:encryptor, github: "riddler/encryptor", ref: "ece9647a5b2fdeb4176e349d717bafa2db0e3080"},
 
       # Dev / test
+      #
+      # `ecto_sql` and `postgrex` are test-only. The library depends on `ecto`
+      # and the vault and nothing else (the package's own claim, and the
+      # reason `Encryptor.Ecto.TestDatabase` probes Postgres with a bare TCP
+      # connect rather than a driver handshake). What they buy here is a real
+      # repository for the database-backed tests: an `Ecto.Type` that only
+      # ever round-trips through a hand-called `dump/3` has not been shown to
+      # survive the adapter's own dump and load path.
+      {:ecto_sql, "~> 3.13", only: :test},
+      {:postgrex, "~> 0.21", only: :test},
       {:ex_quality, "~> 0.14", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
