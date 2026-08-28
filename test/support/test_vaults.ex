@@ -27,7 +27,16 @@ defmodule Encryptor.Ecto.TestVaults do
   @app :binary.copy(<<0x11>>, 32)
   @subkey :binary.copy(<<0x55>>, 32)
 
+  # enc-ADR-0003 amendment A decision 3: one per-deployment value, not secret
+  # but not compiled into a released artifact either, which is why it arrives
+  # through `init/1` beside the provider rather than through `use` options.
+  @derivation_salt :binary.copy(<<0x5A>>, 32)
+
   @merchants ["merchant_7f3", "merchant_a19"]
+
+  @doc "The per-deployment salt the blind index derives under."
+  @spec derivation_salt() :: binary()
+  def derivation_salt, do: @derivation_salt
 
   @doc "The material a merchant selector resolves to."
   @spec merchant_key(String.t()) :: binary()
@@ -93,7 +102,8 @@ defmodule Encryptor.Ecto.TestVaults do
       {:ok,
        Keyword.merge(config,
          provider: TestVaults.merchant_provider(),
-         reference_subkey: TestVaults.reference_subkey()
+         reference_subkey: TestVaults.reference_subkey(),
+         derivation_salt: TestVaults.derivation_salt()
        )}
     end
   end
@@ -117,7 +127,64 @@ defmodule Encryptor.Ecto.TestVaults do
 
     @doc "Layer 5: the key material a config file must not hold."
     def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: TestVaults.app_provider(),
+         derivation_salt: TestVaults.derivation_salt()
+       )}
+    end
+  end
+
+  defmodule Unsalted do
+    @moduledoc """
+    A vault with no `:derivation_salt`, so the refusal arm has a subject.
+
+    enc-ADR-0003 amendment A decision 3 makes the salt optional at start and
+    required at derivation, precisely so that an existing vault keeps starting.
+    This vault is what proves the second half: it starts, it encrypts, and it
+    refuses to derive.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :single,
+      algorithm_suite_id: 0x0478,
+      cache: false
+
+    alias Encryptor.Ecto.TestVaults
+
+    @doc "Layer 5: the provider, and deliberately no salt."
+    def init(config) do
       {:ok, Keyword.put(config, :provider, TestVaults.app_provider())}
+    end
+  end
+
+  defmodule OtherDeployment do
+    @moduledoc """
+    The `App` vault's key material under a second deployment's salt.
+
+    Amendment A's reason for salting the exported tree at all is that two
+    deployments provisioned from the same key material must derive unrelated
+    subkeys - a restored backup, a cloned staging environment. That claim is
+    only testable with two vaults differing in nothing but the salt, so this
+    is that vault.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :single,
+      algorithm_suite_id: 0x0478,
+      cache: false
+
+    alias Encryptor.Ecto.TestVaults
+
+    @doc "Layer 5: the same provider as `App`, under a different salt."
+    def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: TestVaults.app_provider(),
+         derivation_salt: :binary.copy(<<0x5B>>, 32)
+       )}
     end
   end
 

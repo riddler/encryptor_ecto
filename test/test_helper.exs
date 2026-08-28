@@ -4,7 +4,9 @@
 for vault <- [
       Encryptor.Ecto.TestVaults.Merchant,
       Encryptor.Ecto.TestVaults.App,
-      Encryptor.Ecto.TestVaults.Strict
+      Encryptor.Ecto.TestVaults.Strict,
+      Encryptor.Ecto.TestVaults.Unsalted,
+      Encryptor.Ecto.TestVaults.OtherDeployment
     ] do
   {:ok, _pid} = vault.start_link()
 end

@@ -6,12 +6,19 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationError do
   Every condition this exception reports is a *constant that is wrong in the
   source* rather than an event that happens to a correct program: a
   declaration with no table, an `index_name` carrying the info string's own
-  separator, a version that is not a positive integer, key material that is
-  too short to expand from. `Encryptor.Kdf` takes the same position for the
-  same reason and raises `ArgumentError` at its own boundary; this package
-  checks the arguments before that boundary so the failure names the
-  declaration the host wrote rather than a length constraint one call further
-  down.
+  separator, a version that is not a positive integer, a selector that is
+  neither a resolved tenant nor `:global`. `Encryptor.Kdf` takes the same
+  position for the same reason and raises `ArgumentError` at its own
+  boundary; this package checks the arguments before that boundary so the
+  failure names the declaration the host wrote rather than a constraint one
+  call further down.
+
+  What this exception deliberately does *not* report is anything the vault
+  answers. A vault with no `:derivation_salt`, or one whose descriptor cannot
+  be derived from, returns an `%Encryptor.Error{}` from
+  `Encryptor.Vault.derive/3` and it is passed through unchanged: those are
+  facts about a deployment's vault configuration, and re-phrasing them here
+  would put this package's words on a misconfiguration it cannot see.
 
   ## `:index_name` and `:version`
 
