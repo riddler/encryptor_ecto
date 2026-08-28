@@ -251,8 +251,9 @@ legacy modules have to still be in the tree.
 ## Reading on
 
 - The runbook, step by step, with the command for each step and what its output
-  should say: the how-to guide, `docs/guides/migrate-from-cloak.md`, which is
-  not written yet. Until it is, the sequence it renders is ADR-0004 decision 8.
+  should say: the how-to guide,
+  [migrate a host app off cloak_ecto](../guides/migrate-from-cloak.md), which
+  renders ADR-0004 decision 8.
 - The flags, the exit codes, and the grammar: the mix tasks' own documentation,
   which is where they live so that they cannot drift from the code that parses
   them.
