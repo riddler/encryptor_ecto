@@ -16,6 +16,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
   alias Encryptor.Ecto.KeyStore
   alias Encryptor.Ecto.TestKeyStore
   alias Encryptor.Error
+  alias Encryptor.Message
 
   @context %{"table" => "cards", "column" => "pan"}
 
@@ -37,6 +38,9 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       assert [v3.name, v2.name, v1.name] == ["t/#{ref}/v3", "t/#{ref}/v2", "t/#{ref}/v1"]
     end
 
+    # Sabotage: resolved every selector to one partition's rows. Both the name
+    # and the material comparisons below went red, which is the same mutation
+    # the acceptance property catches and the cheapest place to see it.
     test "never answers another tenant's versions" do
       TestKeyStore.provision!("merchant_7f3", 1)
       TestKeyStore.provision!("merchant_a19", 1)
@@ -45,7 +49,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       assert {:ok, [theirs]} = KeyStore.decryption_keys(TestKeyStore.state(), "merchant_a19")
 
       refute mine.name == theirs.name
-      refute mine.material == theirs.material
+      refute digest(mine) == digest(theirs)
     end
   end
 
@@ -126,15 +130,35 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
   describe "the acceptance property" do
     # `encryptor` ADR-0004's worked example, case 1: the bytes are moved into
-    # another partition's row and read in that partition's scope. The
-    # encrypted data key names the writing partition's key, so the reading
-    # partition's keyring cannot unwrap it, and the failure is authentication
-    # rather than a wrong plaintext.
+    # another partition's row and read in that partition's scope.
     #
-    # Sabotage: gave both partitions one provisioned key by resolving every
-    # selector to version 1 of the first. The substitution then *succeeded* -
-    # one tenant read another's column and got the plaintext back - and no
-    # other test in this suite went red.
+    # The record's example says the read fails as the engine's
+    # `{:key_name_mismatch, _}` - the reading partition's keyring cannot
+    # unwrap the data key. That is not where it lands. ADR-0004 decision 6's
+    # context comparison runs before the engine is handed a keyring
+    # (`Encryptor.Vault.Decrypt.call/4` composes the context and calls
+    # `agree/4` ahead of `engine_decrypt/4`), and on a `:tenant` vault
+    # `tenant_ref` is derived from `:key` by the vault itself, so the read is
+    # refused as `{:encryption_context_mismatch, "tenant_ref"}` with the
+    # keyring never consulted. Both are authentication failures and both are
+    # `:decrypt_failed` to a caller; which guard fires first is the vault's
+    # business and not this provider's. The stale detail in the record is
+    # raised in `encryptor` rather than worked around here.
+    #
+    # That guard alone would refuse the read even against a store handing
+    # every partition one shared key, so it does not on its own show that this
+    # provider separates keys. The second half of the test is what does: the
+    # message names the writing partition's key, and that name is not one the
+    # reading partition's candidate list contains.
+    #
+    # Sabotage: pinned the provider's selector-to-reference step to one
+    # partition's reference, so every partition resolved to that partition's
+    # rows - one shared key for the whole store. The `refute` below went red:
+    # the reading partition's candidate list then contained the very name the
+    # message was written under, which is the separation this store exists to
+    # provide. The `:decrypt_failed` assertion above stayed green under that
+    # same mutation, which is exactly why it is not the acceptance evidence on
+    # its own.
     test "a ciphertext moved across partitions fails authentication" do
       TestKeyStore.provision!("merchant_7f3", 1)
       TestKeyStore.provision!("merchant_a19", 1)
@@ -153,11 +177,26 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
                  encryption_context: @context
                )
 
-      assert {:error, %Error{reason: :decrypt_failed, operation: :decrypt}} =
+      assert {:error,
+              %Error{
+                reason: :decrypt_failed,
+                operation: :decrypt,
+                engine: {:encryption_context_mismatch, "tenant_ref"}
+              }} =
                TestKeyStore.Tenant.decrypt(ciphertext,
                  key: "merchant_a19",
                  encryption_context: @context
                )
+
+      assert {:ok, info} = Message.describe(ciphertext)
+      assert [%{key_name: written_under}] = info.encrypted_data_keys
+
+      state = TestKeyStore.state()
+      assert {:ok, [writer]} = KeyStore.decryption_keys(state, "merchant_7f3")
+      assert {:ok, readers} = KeyStore.decryption_keys(state, "merchant_a19")
+
+      assert written_under == writer.name
+      refute written_under in Enum.map(readers, & &1.name)
     end
 
     # The same substitution against a partition that has no key at all reports
@@ -204,6 +243,10 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
     ref
   end
+
+  # A digest rather than the bytes: a tenant master key is key-shaped, and a
+  # `refute` that fails prints both sides of what it compared.
+  defp digest(descriptor), do: :crypto.hash(:sha256, descriptor.material)
 
   defp tenant_ref(selector) do
     Encryptor.Envelope.tenant_ref(TestKeyStore.reference_subkey(), selector)
