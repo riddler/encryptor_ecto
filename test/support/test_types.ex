@@ -277,6 +277,65 @@ defmodule Encryptor.Ecto.TestTypes do
       vault: Encryptor.Ecto.TestVaults.Merchant,
       legacy: Encryptor.Ecto.TestLegacy.MapListy
   end
+
+  # -- the scalar types ------------------------------------------------------
+
+  # One declaration per scalar wrapper, on the tenant vault, plus the two arms
+  # that are not the ordinary case: a global field and a field in the migration
+  # window. They are declared against the `readings` schema rather than `Card`,
+  # so the declared context values they freeze are that table's.
+
+  defmodule RetryCount do
+    @moduledoc "An integer field: the ordinary case, on the tenant vault."
+
+    use Encryptor.Ecto.Integer, vault: Encryptor.Ecto.TestVaults.Merchant
+  end
+
+  defmodule FeeRate do
+    @moduledoc "A float field."
+
+    use Encryptor.Ecto.Float, vault: Encryptor.Ecto.TestVaults.Merchant
+  end
+
+  defmodule DateOfBirth do
+    @moduledoc "A date field."
+
+    use Encryptor.Ecto.Date, vault: Encryptor.Ecto.TestVaults.Merchant
+  end
+
+  defmodule ContactWindowOpensAt do
+    @moduledoc "A time-of-day field."
+
+    use Encryptor.Ecto.Time, vault: Encryptor.Ecto.TestVaults.Merchant
+  end
+
+  defmodule AgreedAt do
+    @moduledoc "A zoneless timestamp field."
+
+    use Encryptor.Ecto.NaiveDateTime, vault: Encryptor.Ecto.TestVaults.Merchant
+  end
+
+  defmodule VerifiedAt do
+    @moduledoc "A UTC instant field."
+
+    use Encryptor.Ecto.DateTime, vault: Encryptor.Ecto.TestVaults.Merchant
+  end
+
+  defmodule GlobalRetryCount do
+    @moduledoc "An integer field declared global, on a `:single`-profile vault."
+
+    use Encryptor.Ecto.Integer,
+      vault: Encryptor.Ecto.TestVaults.App,
+      tenant: :none
+  end
+
+  defmodule DateOfBirthLegacy do
+    @moduledoc "A date field in the mixed window, with a legacy reader that works."
+
+    use Encryptor.Ecto.Date,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      legacy: Encryptor.Ecto.TestLegacy.Date
+  end
 end
 
 defmodule Encryptor.Ecto.TestSerializers do
@@ -540,6 +599,32 @@ defmodule Encryptor.Ecto.TestSchemas do
 
     schema "coded_rows" do
       field(:pan, Encryptor.Ecto.TestTypes.Pan)
+    end
+  end
+
+  defmodule Reading do
+    @moduledoc """
+    A row of scalar encrypted columns: one per wrapper ADR-0001 decision 1
+    left out of the founding set.
+
+    Its own table rather than more columns on `Card`, so that what the scalar
+    types prove against the adapter - a date lands in `:binary`, comes back a
+    `Date`, and an absent one stays `NULL` - is provable without moving the
+    column inventory every other test reads off that schema.
+    """
+
+    use Ecto.Schema
+
+    @type t :: %__MODULE__{}
+
+    schema "readings" do
+      field(:merchant_id, :string)
+      field(:retry_count, Encryptor.Ecto.TestTypes.RetryCount)
+      field(:fee_rate, Encryptor.Ecto.TestTypes.FeeRate)
+      field(:date_of_birth, Encryptor.Ecto.TestTypes.DateOfBirth)
+      field(:contact_window_opens_at, Encryptor.Ecto.TestTypes.ContactWindowOpensAt)
+      field(:agreed_at, Encryptor.Ecto.TestTypes.AgreedAt)
+      field(:verified_at, Encryptor.Ecto.TestTypes.VerifiedAt)
     end
   end
 end

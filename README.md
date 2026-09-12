@@ -21,8 +21,9 @@ at the call site, and the column changes to `:binary` and nothing else.
 What the package ships today:
 
 - **Encrypted field types** - `Encryptor.Ecto.Binary`, `Encryptor.Ecto.String`
-  and `Encryptor.Ecto.Map`, each an `Ecto.ParameterizedType` with a closed
-  option set.
+  and `Encryptor.Ecto.Map`, with `Integer`, `Float`, `Date`, `Time`,
+  `NaiveDateTime` and `DateTime` wrappers over the same machinery, each an
+  `Ecto.ParameterizedType` with a closed option set.
 - **Tenant context, resolved once and fail-closed** - a process-scoped current
   tenant, or a host resolver module, with a write that has no tenant in scope
   raising rather than falling back to a default.

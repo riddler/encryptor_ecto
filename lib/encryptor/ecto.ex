@@ -17,12 +17,15 @@ defmodule Encryptor.Ecto do
 
   ## What the package ships
 
-  - **The field types.** `Encryptor.Ecto.Binary`, `Encryptor.Ecto.String` and
-    `Encryptor.Ecto.Map` (ADR-0001 decisions 1 and 8). The latter two call
-    `Binary` rather than copying it, so the closed option set, the declared
-    `"table"`/`"column"` encryption context, the tenant resolution, the
-    `:binary` column and the vault's bytes stored verbatim are the same for
-    all three.
+  - **The field types.** `Encryptor.Ecto.Binary` and, over it,
+    `Encryptor.Ecto.String`, `Encryptor.Ecto.Map`, `Encryptor.Ecto.Integer`,
+    `Encryptor.Ecto.Float`, `Encryptor.Ecto.Date`, `Encryptor.Ecto.Time`,
+    `Encryptor.Ecto.NaiveDateTime` and `Encryptor.Ecto.DateTime` (ADR-0001
+    decisions 1 and 8). Every one of them calls `Binary` rather than copying
+    it, so the closed option set, the declared `"table"`/`"column"` encryption
+    context, the tenant resolution, the `:binary` column and the vault's bytes
+    stored verbatim are the same for all of them; what a wrapper adds is a cast
+    arm and, for the six scalars, a parse arm over the decrypted plaintext.
   - **Tenant resolution.** `Encryptor.Ecto.Tenant` holds the current tenant
     for a unit of work, `Encryptor.Ecto.TenantContext` is the behaviour a
     host implements to resolve it some other way, and

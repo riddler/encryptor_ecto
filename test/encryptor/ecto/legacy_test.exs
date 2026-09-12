@@ -348,6 +348,30 @@ defmodule Encryptor.Ecto.LegacyTest do
       refute Exception.message(error) =~ ~s(["not")
     end
 
+    # A legacy date type has already parsed: it answers with a `Date`, not
+    # with bytes. sabotage: Scalar.load/5's {:legacy, loaded} arm routed
+    # through parse!/4, red - the parse then chokes on a struct.
+    test "a scalar type returns the legacy reader's value without parsing it again" do
+      params = params(TestTypes.DateOfBirthLegacy, :date_of_birth)
+      bytes = legacy_bytes("1815-12-10")
+
+      assert TestTypes.DateOfBirthLegacy.load(bytes, nil, params) == {:ok, ~D[1815-12-10]}
+
+      assert_received {:telemetry, [:encryptor_ecto, :legacy_load], _measurements, metadata}
+      assert metadata == %{table: "cards", column: "date_of_birth"}
+    end
+
+    # The window is load-only (ADR-0004 decision 4). sabotage: the generated
+    # dump/3 routed through the legacy module, red.
+    test "a scalar type still writes, and reads its own writes, through the vault" do
+      params = params(TestTypes.DateOfBirthLegacy, :date_of_birth)
+
+      assert {:ok, ciphertext} = TestTypes.DateOfBirthLegacy.dump(~D[1815-12-10], nil, params)
+      assert TestTypes.DateOfBirthLegacy.load(ciphertext, nil, params) == {:ok, ~D[1815-12-10]}
+
+      refute_received {:telemetry, [:encryptor_ecto, :legacy_load], _measurements, _metadata}
+    end
+
     # sabotage: Map.load/3's primary arm returning the plaintext
     # undeserialized, red.
     test "Map still deserializes what the primary read" do

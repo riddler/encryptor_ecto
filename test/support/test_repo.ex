@@ -34,7 +34,8 @@ defmodule Encryptor.Ecto.TestRepo do
     {1, Encryptor.Ecto.TestMigrationTextAndMap},
     {2, Encryptor.Ecto.TestMigrationSignups},
     {3, Encryptor.Ecto.TestMigrationMigrator},
-    {4, Encryptor.Ecto.TestMigrationWrappedKeys}
+    {4, Encryptor.Ecto.TestMigrationWrappedKeys},
+    {5, Encryptor.Ecto.TestMigrationScalars}
   ]
 
   @doc """

@@ -125,6 +125,25 @@ defmodule Encryptor.Ecto.TestLegacy do
     end
   end
 
+  defmodule Date do
+    @moduledoc """
+    A date-typed reader: it returns a `Date`, not bytes to parse.
+
+    Which is what a legacy date type is - cloak's own is its binary type plus a
+    parse - and the reason a scalar type must not run its own parse arm over a
+    legacy answer.
+    """
+
+    @doc "Reads the envelope and parses the payload, the way a legacy date type would."
+    @spec load(binary()) :: {:ok, Elixir.Date.t()} | :error
+    def load(bytes) do
+      case Format.decode(bytes) do
+        {:ok, payload} -> Elixir.Date.from_iso8601(payload)
+        :error -> :error
+      end
+    end
+  end
+
   defmodule MapListy do
     @moduledoc "A map-typed reader whose answer is not a map."
 
