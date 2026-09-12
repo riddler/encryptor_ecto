@@ -1,8 +1,11 @@
 ### Changed
 
-- A migration pass recognises an already-migrated row from its message header
-  instead of decrypting it, so a resumed or repeated run over a mostly
-  migrated table no longer spends a decrypt per row it is going to skip. A
+- A migration pass recognises already-migrated rows from their message
+  headers, so a resumed or repeated run over a mostly migrated table spends
+  one decrypt per wrapping key per batch instead of one per row it is going
+  to skip. A row is only recognised this way once a load has proven the
+  target reads that key, so a rewrite whose source differs in vault, key,
+  algorithm suite or encryption context still rewrites every row. A
   verification (`mix encryptor.ecto.verify`) still opens every row it counts.
 
 ### Added

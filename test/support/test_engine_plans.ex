@@ -247,6 +247,27 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule SignedTarget do
+    @moduledoc """
+    A target whose vault writes the signing algorithm suite.
+
+    The engine puts the signature's public key into the encryption context, so
+    this plan is what proves the probe compares a declaration's own pairs
+    rather than everything the header happens to carry.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      tenant_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestSources.LegacyType,
+        to: Encryptor.Ecto.TestTypes.PanSigned,
+        source_authenticated: true
+    end
+  end
+
   defmodule Composite do
     @moduledoc "A rewrite of a composite-key schema, which the engine refuses to page."
 

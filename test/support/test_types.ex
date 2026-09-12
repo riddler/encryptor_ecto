@@ -14,6 +14,24 @@ defmodule Encryptor.Ecto.TestTypes do
     use Encryptor.Ecto.Binary, vault: Encryptor.Ecto.TestVaults.Merchant
   end
 
+  defmodule PanRekeyed do
+    @moduledoc "`Pan`'s declaration over the re-keyed vault: same context, other key."
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.MerchantRekeyed,
+      table: "cards",
+      column: "pan"
+  end
+
+  defmodule PanSigned do
+    @moduledoc "`Pan`'s declaration over the other algorithm suite."
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.MerchantSigned,
+      table: "cards",
+      column: "pan"
+  end
+
   defmodule Notes do
     @moduledoc "A second field in the same table, to show the column separates them."
 
