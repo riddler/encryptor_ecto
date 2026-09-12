@@ -1,0 +1,325 @@
+defmodule Encryptor.Ecto.ScalarTypesTest do
+  @moduledoc """
+  The six scalar wrappers ADR-0001 decision 1 left out of the founding set.
+
+  One file rather than six, because the claim under test is that they are the
+  same type six times over: `Encryptor.Ecto.Binary` with a cast arm and a parse
+  arm, sharing one mechanism. A per-type file would assert the shared half six
+  times and hide the one table worth reading, which is the round trip.
+  """
+
+  use ExUnit.Case, async: true
+
+  import Encryptor.Ecto.TenantScope
+
+  alias Encryptor.Ecto.DecryptError
+  alias Encryptor.Ecto.MissingTenantError
+  alias Encryptor.Ecto.SerializationError
+  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.TestSchemas.Reading
+  alias Encryptor.Ecto.TestTypes
+  alias Encryptor.Ecto.TestVaults
+
+  doctest Encryptor.Ecto.Integer
+  doctest Encryptor.Ecto.Float
+  doctest Encryptor.Ecto.Date
+  doctest Encryptor.Ecto.Time
+  doctest Encryptor.Ecto.NaiveDateTime
+  doctest Encryptor.Ecto.DateTime
+
+  # Every scalar type, its declaration, the field it is declared on, and one
+  # value of its own. The round trip is the same assertion for all six, so it
+  # is written once and driven from here.
+  @types [
+    {TestTypes.RetryCount, :retry_count, 3},
+    {TestTypes.FeeRate, :fee_rate, 0.0275},
+    {TestTypes.DateOfBirth, :date_of_birth, ~D[1815-12-10]},
+    {TestTypes.ContactWindowOpensAt, :contact_window_opens_at, ~T[09:30:00]},
+    {TestTypes.AgreedAt, :agreed_at, ~N[2026-09-12 10:20:30]},
+    {TestTypes.VerifiedAt, :verified_at, ~U[2026-09-12 10:20:30Z]}
+  ]
+
+  # The zero of each type: a value that is emphatically not `nil` and must
+  # round-trip as itself (ADR-0001 decision 7).
+  @zeroes [
+    {TestTypes.RetryCount, :retry_count, 0},
+    {TestTypes.FeeRate, :fee_rate, 0.0},
+    {TestTypes.DateOfBirth, :date_of_birth, ~D[0001-01-01]},
+    {TestTypes.ContactWindowOpensAt, :contact_window_opens_at, ~T[00:00:00]},
+    {TestTypes.AgreedAt, :agreed_at, ~N[0001-01-01 00:00:00]},
+    {TestTypes.VerifiedAt, :verified_at, ~U[0001-01-01 00:00:00Z]}
+  ]
+
+  defp params(type, field), do: type.init(schema: Reading, field: field)
+
+  describe "the option set is Binary's, and the messages name the macro" do
+    # sabotage: host_quote/3's `impl` argument replaced by Binary, red - the
+    # message would name Encryptor.Ecto.Binary rather than the macro written.
+    test "an option outside the set raises naming the type the host wrote" do
+      assert_raise ArgumentError,
+                   ~r/unknown option \[:searchable\] for use Encryptor.Ecto.Date/,
+                   fn ->
+                     defmodule Searchable do
+                       use Encryptor.Ecto.Date,
+                         vault: Encryptor.Ecto.TestVaults.Merchant,
+                         searchable: true
+                     end
+                   end
+    end
+
+    # sabotage: the same threading in missing_vault_message/2, red.
+    test "a missing vault raises naming the type the host wrote" do
+      assert_raise ArgumentError, ~r/use Encryptor.Ecto.Integer requires a :vault/, fn ->
+        defmodule NoVault do
+          use Encryptor.Ecto.Integer, tenant: :none
+        end
+      end
+    end
+
+    # sabotage: validate_declaration!/2's `extra_options` argument, [] in every
+    # scalar type, changed to [:json]. Red.
+    test "refuses :json, which belongs to Map alone" do
+      assert_raise ArgumentError, ~r/unknown option \[:json\]/, fn ->
+        defmodule Serialized do
+          use Encryptor.Ecto.Float,
+            vault: Encryptor.Ecto.TestVaults.Merchant,
+            json: Jason
+        end
+      end
+    end
+  end
+
+  describe "cast is Ecto's own caster over the primitive" do
+    # sabotage: Scalar.primitive/1's :integer clause -> :string, red.
+    test "each type casts what a plain column of its primitive would" do
+      assert TestTypes.RetryCount.cast("3", %{}) == {:ok, 3}
+      assert TestTypes.FeeRate.cast(1, %{}) == {:ok, 1.0}
+      assert TestTypes.DateOfBirth.cast("1815-12-10", %{}) == {:ok, ~D[1815-12-10]}
+      assert TestTypes.ContactWindowOpensAt.cast("09:30:00", %{}) == {:ok, ~T[09:30:00]}
+
+      assert TestTypes.AgreedAt.cast("2026-09-12T10:20:30", %{}) ==
+               {:ok, ~N[2026-09-12 10:20:30]}
+
+      assert TestTypes.VerifiedAt.cast("2026-09-12T10:20:30Z", %{}) ==
+               {:ok, ~U[2026-09-12 10:20:30Z]}
+    end
+
+    # sabotage: Scalar.cast/2 returning {:ok, value} unconditionally, red.
+    test "a value of the wrong shape is a validation failure, not an exception" do
+      assert TestTypes.RetryCount.cast("4.2", %{}) == :error
+      assert TestTypes.FeeRate.cast("four", %{}) == :error
+      assert TestTypes.DateOfBirth.cast("12/09/2026", %{}) == :error
+      assert TestTypes.ContactWindowOpensAt.cast(:noon, %{}) == :error
+      assert TestTypes.AgreedAt.cast("2026-09-12", %{}) == :error
+      assert TestTypes.VerifiedAt.cast("yesterday", %{}) == :error
+    end
+
+    # The cast is where sub-second precision goes, for the three types that
+    # have any: it is Ecto's `:time`, `:naive_datetime` and `:utc_datetime`
+    # doing it, before anything is encrypted. sabotage: primitive/1's
+    # :utc_datetime clause -> :utc_datetime_usec, red.
+    test "sub-second precision is truncated at the cast, not at the column" do
+      assert TestTypes.ContactWindowOpensAt.cast(~T[09:30:00.500000], %{}) ==
+               {:ok, ~T[09:30:00]}
+
+      assert TestTypes.AgreedAt.cast(~N[2026-09-12 10:20:30.500000], %{}) ==
+               {:ok, ~N[2026-09-12 10:20:30]}
+
+      assert TestTypes.VerifiedAt.cast(~U[2026-09-12 10:20:30.500000Z], %{}) ==
+               {:ok, ~U[2026-09-12 10:20:30Z]}
+    end
+  end
+
+  describe "the round trip is Binary's, once per type" do
+    scope_tenant "merchant_7f3"
+
+    # sabotage: Scalar.dump/5 handing the value to Binary without
+    # to_plaintext/2, red - Binary refuses a non-binary by shape.
+    test "every type stores ciphertext and reads its own value back" do
+      for {type, field, value} <- @types do
+        params = params(type, field)
+
+        assert {:ok, ciphertext} = type.dump(value, nil, params)
+        assert is_binary(ciphertext)
+        assert type.load(ciphertext, nil, params) == {:ok, value}
+      end
+    end
+
+    # sabotage: the generated type/1 delegating to something other than
+    # Binary.type/1, red.
+    test "the column is :binary for every one of them" do
+      for {type, field, _value} <- @types do
+        assert type.type(params(type, field)) == :binary
+      end
+    end
+
+    # sabotage: Scalar.dump/5's nil clause deleted, red - nil then falls to
+    # to_plaintext/2's catch-all and the dump raises instead of writing NULL.
+    test "nil is NULL and the zero of the type is a value" do
+      for {type, field, zero} <- @zeroes do
+        params = params(type, field)
+
+        assert type.dump(nil, nil, params) == {:ok, nil}
+        assert type.load(nil, nil, params) == {:ok, nil}
+
+        assert {:ok, ciphertext} = type.dump(zero, nil, params)
+        assert byte_size(ciphertext) > 0
+        assert type.load(ciphertext, nil, params) == {:ok, zero}
+      end
+    end
+
+    # sabotage: the generated init/1 dropping the derived column, red.
+    test "binds the same declared table and column Binary would" do
+      params = params(TestTypes.DateOfBirth, :date_of_birth)
+      assert %{table: "readings", column: "date_of_birth"} = params
+
+      assert {:ok, ciphertext} = TestTypes.DateOfBirth.dump(~D[1815-12-10], nil, params)
+
+      # The plaintext under the ciphertext is the ISO 8601 form, which is what
+      # makes a column written by a legacy date type readable through this one
+      # after the migrator re-encrypts it verbatim (ADR-0004, ADR-0002
+      # decision 3).
+      assert {:ok, "1815-12-10"} =
+               TestVaults.Merchant.decrypt(ciphertext,
+                 key: "merchant_7f3",
+                 encryption_context: %{"table" => "readings", "column" => "date_of_birth"}
+               )
+    end
+
+    # sabotage: the generated equal?/3 -> false, red.
+    test "compares plaintext, and embeds as itself" do
+      assert TestTypes.DateOfBirth.equal?(~D[1815-12-10], ~D[1815-12-10], %{})
+      refute TestTypes.DateOfBirth.equal?(~D[1815-12-10], ~D[1815-12-11], %{})
+      assert TestTypes.DateOfBirth.embed_as(:json, %{}) == :self
+    end
+
+    # sabotage: the generated load/3 returning the stored bytes unchanged, red.
+    test "reports bytes that are not a well-formed message as an integrity event" do
+      assert_raise DecryptError, fn ->
+        TestTypes.RetryCount.load(<<0, 1, 2, 3>>, nil, params(TestTypes.RetryCount, :retry_count))
+      end
+    end
+  end
+
+  describe "a plaintext the parse arm cannot read" do
+    scope_tenant "merchant_7f3"
+
+    # A decrypt that succeeded and a payload that is not a date: neither an
+    # encryption failure nor an integrity event, which is the row ADR-0001
+    # decision 6 gives SerializationError. sabotage: Scalar.parse!/4's :error
+    # arm returning the plaintext, red.
+    test "raises SerializationError naming the kind, on the decode side" do
+      params = params(TestTypes.DateOfBirth, :date_of_birth)
+
+      # Written through Binary with the same params, so the encryption context
+      # is identical and only the type differs - the shape a column gets from a
+      # migration onto the wrong scalar type.
+      assert {:ok, ciphertext} = TestTypes.Pan.dump("the tenth of December", nil, params)
+
+      error =
+        assert_raise SerializationError, fn ->
+          TestTypes.DateOfBirth.load(ciphertext, nil, params)
+        end
+
+      assert error.reason == {:unparsable, :date}
+      assert error.direction == :decode
+      assert error.serializer == Encryptor.Ecto.Date
+    end
+
+    # ADR-0001 decision 6: the parse failure is the point where a plaintext is
+    # closest to hand. sabotage: detail/4's reason -> the payload itself, red.
+    test "carries the table, the column and the kind, and never the payload" do
+      params = params(TestTypes.RetryCount, :retry_count)
+      assert {:ok, ciphertext} = TestTypes.Pan.dump("three attempts", nil, params)
+
+      error =
+        assert_raise SerializationError, fn ->
+          TestTypes.RetryCount.load(ciphertext, nil, params)
+        end
+
+      message = Exception.message(error)
+
+      assert message =~ "readings"
+      assert message =~ "retry_count"
+      assert message =~ "{:unparsable, :integer}"
+      refute message =~ "three attempts"
+      refute inspect(error) =~ "three attempts"
+    end
+
+    # A payload that parses and then has a tail is not a value of the type:
+    # "3 attempts" is not the integer 3. sabotage: from_plaintext/2's `{value,
+    # ""}` match -> `{value, _}`, red.
+    test "refuses a payload the parser would otherwise read the front of" do
+      params = params(TestTypes.RetryCount, :retry_count)
+      assert {:ok, ciphertext} = TestTypes.Pan.dump("3 attempts", nil, params)
+
+      assert_raise SerializationError, fn ->
+        TestTypes.RetryCount.load(ciphertext, nil, params)
+      end
+    end
+  end
+
+  describe "a value that never passed cast" do
+    scope_tenant "merchant_7f3"
+
+    # The `insert_all/3` shape: no changeset, so no cast. sabotage:
+    # Scalar.dump/5's :error arm delegating to Binary anyway, red.
+    test "is refused by shape, and its value is not reported" do
+      params = params(TestTypes.DateOfBirth, :date_of_birth)
+
+      error =
+        assert_raise ArgumentError, fn ->
+          TestTypes.DateOfBirth.dump("1815-12-10", nil, params)
+        end
+
+      message = Exception.message(error)
+
+      assert message =~ "readings.date_of_birth"
+      assert message =~ "expects a Date"
+      assert message =~ "was given a binary"
+      refute message =~ "1815-12-10"
+    end
+
+    # sabotage: to_plaintext/2's `time_zone: "Etc/UTC"` guard removed, red -
+    # the zoned datetime would store its offset and read back shifted.
+    test "a DateTime outside Etc/UTC is refused rather than silently shifted" do
+      params = params(TestTypes.VerifiedAt, :verified_at)
+
+      zoned = %Elixir.DateTime{
+        ~U[2026-09-12 10:20:30Z]
+        | time_zone: "Europe/Paris",
+          zone_abbr: "CEST",
+          utc_offset: 3600,
+          std_offset: 3600
+      }
+
+      error =
+        assert_raise ArgumentError, fn ->
+          TestTypes.VerifiedAt.dump(zoned, nil, params)
+        end
+
+      assert Exception.message(error) =~ "expects a DateTime in Etc/UTC"
+    end
+  end
+
+  describe "the tenant rules are Binary's too" do
+    # sabotage: the generated dump/3 delegating past Binary's tenant
+    # resolution, red.
+    test "a dump with no tenant in scope raises" do
+      Tenant.clear()
+
+      assert_raise MissingTenantError, ~r/readings/, fn ->
+        TestTypes.RetryCount.dump(3, nil, params(TestTypes.RetryCount, :retry_count))
+      end
+    end
+
+    # sabotage: the generated init/1 not carrying `tenant: :none` through, red.
+    test "a field declared global asks no resolver anything" do
+      Tenant.clear()
+      params = TestTypes.GlobalRetryCount.init(schema: Reading, field: :retry_count)
+
+      assert {:ok, ciphertext} = TestTypes.GlobalRetryCount.dump(3, nil, params)
+      assert TestTypes.GlobalRetryCount.load(ciphertext, nil, params) == {:ok, 3}
+    end
+  end
+end
