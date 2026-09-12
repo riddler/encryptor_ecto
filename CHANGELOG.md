@@ -10,6 +10,51 @@ fragment in [`changelog.d/`](changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
 
+## [0.3.0] - 2026-09-12
+
+### Added
+
+- `Encryptor.Ecto.KeyStore` resolves a vault's tenant selectors against a
+  wrapped-key table, so per-tenant keys come from the database instead of from
+  configuration.
+- `mix encryptor.ecto.gen.key_store_migration` writes that table's migration
+  into the host's tree, to review and run like any other migration.
+- `Encryptor.Ecto.Binary.declared_context/1` returns the encryption-context
+  pairs a field declaration composes, names and values.
+- `Encryptor.Ecto.Integer`, `Encryptor.Ecto.Float`, `Encryptor.Ecto.Date`,
+  `Encryptor.Ecto.Time`, `Encryptor.Ecto.NaiveDateTime` and
+  `Encryptor.Ecto.DateTime` encrypt a scalar field through the same vault call
+  and the same closed option set as `Encryptor.Ecto.Binary`, casting with
+  Ecto's own caster and storing the value's textual form.
+
+### Changed
+
+- A migration pass recognises already-migrated rows from their message
+  headers, so a resumed or repeated run over a mostly migrated table spends
+  one decrypt per wrapping key per batch instead of one per row it is going
+  to skip. A row is only recognised this way once a load has proven the
+  target reads that key, so a rewrite whose source differs in vault, key,
+  algorithm suite or encryption context still rewrites every row. A
+  verification (`mix encryptor.ecto.verify`) still opens every row it counts.
+- `blind_index`'s `:slow` option now runs Argon2id over the normalized value
+  before the HMAC, under the parameters the vault declares in `:slow_hash`
+  and a salt derived per index, per tenant and per deployment - so a
+  `slow: true` index finally costs an attacker one Argon2id hash per guess
+  rather than one HMAC. A column already written under a `slow: true`
+  declaration holds plain-HMAC bytes and is invalidated by this change:
+  reindex it the way a `:normalize`, `:bits` or `:version` change is
+  reindexed, through the two-column dance in `Encryptor.Ecto.BlindIndex`'s
+  rotation notes. A host declaring a slow index also adds
+  `{:argon2_elixir, "~> 4.0"}` to its own dependencies; this package still
+  depends on no native code.
+
+### Security
+
+- A `slow: true` index against a vault that declares no `:slow_hash` now
+  raises `Encryptor.Ecto.BlindIndex.DerivationError` and computes nothing,
+  rather than silently writing plain-cost index values into a column an
+  operator believes is hardened.
+
 ## [0.2.0] - 2026-08-28
 
 ### Added
