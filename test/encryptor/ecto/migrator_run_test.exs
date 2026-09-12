@@ -28,6 +28,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   alias Encryptor.Ecto.TestRepo
   alias Encryptor.Ecto.TestSchemas
   alias Encryptor.Ecto.TestTypes.Pan
+  alias Encryptor.Ecto.TestTypes.Pinned
 
   @merchant "merchant_7f3"
   @other_merchant "merchant_a19"
@@ -554,6 +555,57 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     end
   end
 
+  describe "the probe's header inspection (decision 5, A9)" do
+    # Sabotage: made `probe/2` take the load attempt in every mode - the
+    # rewrite went back to a decrypt per already-migrated row, and the row
+    # below, whose header this package wrote over a body it can no longer
+    # open, was sent to the source reader instead of being skipped.
+    test "a rewrite classifies an already-migrated row without opening it" do
+      id = insert_card(pan: legacy(@pan))
+      assert {:ok, _first} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      tampered = tamper(raw(:cards, id, :pan))
+      :ok = write_raw(id, tampered)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      assert report.counts.already_target == 1
+      assert report.failures == []
+      assert raw(:cards, id, :pan) == tampered
+    end
+
+    # Sabotage: made `claimed/2` answer `:already_target` for every header it
+    # could parse - the row below, written by a different declaration of ours
+    # into the same column, was counted migrated and left exactly as it was,
+    # which is the context-change rewrite silently doing nothing.
+    test "bytes another declaration of ours wrote are not this field's target" do
+      _id = insert_card(pan: pinned(@pan))
+
+      assert {:error, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      assert report.counts.already_target == 0
+      assert report.counts.undecryptable == 1
+      assert [%{schema: TestSchemas.Card, field: :pan}] = report.failures
+    end
+
+    # Sabotage: had `target_header/2` answer a header for an arity-1 target -
+    # the plain-text fixture's rows were read as unparseable messages and
+    # every one of them was rewritten on every run, which is decision 5's
+    # idempotence lost for every target that is not ours.
+    test "a target that is not one of ours still probes by loading" do
+      id = insert_card(pan: legacy(@pan))
+
+      assert {:ok, _first} = Migrator.run(TestEnginePlans.PlainTarget, mode: :write)
+      written = raw(:cards, id, :pan)
+
+      assert {:ok, second} = Migrator.run(TestEnginePlans.PlainTarget, mode: :write)
+
+      assert second.counts.already_target == 1
+      assert second.counts.migratable == 0
+      assert raw(:cards, id, :pan) == written
+    end
+  end
+
   defp insert_card(attrs) do
     row =
       attrs
@@ -583,6 +635,25 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   defp signup(id) do
     Tenant.put(@merchant)
     TestRepo.get(TestSchemas.Signup, id)
+  end
+
+  # The same column, written through a *different* declaration of ours: same
+  # vault, same tenant, one more declared context pair. The bytes are a
+  # well-formed message of this package's format, which is exactly why the
+  # probe has to read further than "it parses".
+  defp pinned(plaintext) do
+    Tenant.put(@merchant)
+    params = Pinned.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = Pinned.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
+
+  # A message whose header still describes itself and whose body no longer
+  # opens: the last byte, which is inside the authenticated payload.
+  defp tamper(bytes) do
+    size = byte_size(bytes) - 1
+    <<head::binary-size(size), last>> = bytes
+    head <> <<rem(last + 1, 256)>>
   end
 
   defp raw(table, id, column) do

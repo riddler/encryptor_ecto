@@ -10,11 +10,12 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   ## The order of operations for one row, and why it is that order
 
   1. **The source column is `NULL`** - nothing to do, and no key is touched.
-  2. **Probe the target** (decision 5): attempt the `to` type's load on the
-     bytes already in the target column. If it succeeds the row is in the
-     target state and is skipped. Probe-first is what makes the whole pass
-     idempotent by construction, which in turn is what makes the checkpoint a
-     performance record rather than a correctness one.
+  2. **Probe the target** (decision 5): decide whether the bytes already in
+     the target column are in the target state, and skip the row if they are.
+     Probe-first is what makes the whole pass idempotent by construction,
+     which in turn is what makes the checkpoint a performance record rather
+     than a correctness one. See "Two ways to probe" below for which of the
+     two answers the question.
   3. **Load through the source** (`from:`, ADR-0004 decision 2), and, where
      the field declared one, apply `validate:` to what it loaded. A failure
      of either is `:undecryptable`: the row cannot be read in a way anything
@@ -28,6 +29,54 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   A dry run does every one of those except the swap, which is what makes it an
   exact rehearsal including the decrypt and the encrypt cost (decision 7).
+
+  ## Two ways to probe, and when the cheap one is allowed
+
+  Decision 5 wrote the probe as a load attempt: call the `to` type's load on
+  the stored bytes, and read success as "already in the target state". That is
+  one decrypt per already-migrated row, and on a table that is mostly migrated
+  - a resumed pass, a second run, a scheduled re-run - it is the whole cost of
+  the pass. The same decision says the probe short-circuits to a header
+  inspection wherever upstream can classify a message without a key, which
+  assumption A9 resolved at acceptance: `Encryptor.Message.describe/1` reads a
+  message's encryption context keylessly.
+
+  So a pass whose target is one of this package's own vault-backed types
+  probes by reading the header and comparing the context the message claims
+  against the context that target's declaration writes - the vault's static
+  pairs, the declared `"table"` and `"column"`, and whatever `:context` added,
+  which `Encryptor.Ecto.Binary.declared_context/1` composes once rather than
+  twice. The `"tenant_ref"` pair the vault derives is compared for presence
+  and not for value: which tenant a row belongs to is not what the probe asks.
+
+  Comparing the *whole* context rather than merely parsing the header is what
+  keeps the context-change rewrite correct - `from:` and `to:` naming the same
+  module with different params (`Encryptor.Ecto.Migration`'s "Silence is
+  allowed only where authentication is provable"). Both sides of that rewrite
+  write well-formed messages of this package's format, and a probe that read
+  no further than "it parses" would call every unrewritten row already
+  migrated and silently do nothing.
+
+  `describe/1`'s answer is an unverified claim by whoever wrote the bytes, and
+  that is the right strength here: nothing downstream of the probe is an
+  authorization decision (`Encryptor.Message`'s own warning). The worst a
+  forged header can do is have the pass leave a row alone, which is also what
+  the load probe does with a row it cannot read.
+
+  Two cases keep the load attempt:
+
+    * a **foreign target** - a plain `Ecto.Type`, someone else's
+      parameterized type, or a vault that is not running when the pass is
+      built - because there is no header this package can read a claim out of;
+    * a **verification** (`mode: :verify`), because opening the bytes is the
+      whole of what decision 10 makes it the authoritative answer *for*. A
+      verification that classified from headers would be a cheap census
+      wearing the acceptance test's name, and the cheap census already exists
+      (`Encryptor.Ecto.Migrator.Census`).
+
+  Both ways are the one `probe/2` below, which is what
+  `Encryptor.Ecto.Migrator.verify/2` means by borrowing the pass's probe
+  rather than reimplementing it.
 
   ## The third mode reads and stops
 
@@ -79,11 +128,27 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   `Encryptor.Ecto.Migrator.Source`.
   """
 
+  alias Encryptor.Context
   alias Encryptor.Ecto.Migrator.Checkpoint
   alias Encryptor.Ecto.Migrator.Keyset
   alias Encryptor.Ecto.Migrator.Report
   alias Encryptor.Ecto.Migrator.RowTenant
   alias Encryptor.Ecto.Migrator.Source
+  alias Encryptor.Message
+
+  @typedoc """
+  What a message written by this field's target says about itself, keylessly.
+
+  `:context` is every pair such a message carries except `"tenant_ref"`, and
+  `:tenant_ref?` is whether it carries that one - the value is the vault's
+  derivation of a tenant selector and is never compared. Resolved once, before
+  the pass starts, by `Encryptor.Ecto.Migrator`; `nil` there means the probe
+  cannot be answered from a header and the load attempt runs instead.
+  """
+  @type target_header :: %{
+          context: %{optional(String.t()) => String.t()},
+          tenant_ref?: boolean()
+        }
 
   @typedoc """
   Everything one field's pass needs, resolved once before it starts.
@@ -112,6 +177,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
           to: module(),
           to_arity: 1 | 3,
           to_params: term(),
+          target_header: target_header() | nil,
           mode: Encryptor.Ecto.Migrator.pass_mode(),
           batch_size: pos_integer(),
           sample: pos_integer() | :all,
@@ -141,6 +207,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     :to,
     :to_arity,
     :to_params,
+    :target_header,
     :mode,
     :batch_size,
     :sample,
@@ -369,16 +436,48 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   defp row_tenant([tenant]), do: tenant
   defp row_tenant([]), do: nil
 
-  # The probe is a load attempt on the bytes already in the target column, and
-  # its failure is the ordinary case rather than an event: a row that has not
-  # been rewritten yet fails it every time. So every failure shape - a raise
-  # from a type that raises by design (ADR-0001 decision 6), an `:error` from
-  # an `Ecto.Type`, an off-contract return - is the same answer here, and none
-  # of them reaches the report.
+  # Decision 5, both ways: see the moduledoc's "Two ways to probe". A
+  # verification and a target this package cannot read a header claim out of
+  # take the load attempt; everything else reads the header.
   @spec probe(t(), binary() | nil) :: :already_target | :not_target
   defp probe(_pass, nil), do: :not_target
 
-  defp probe(pass, bytes) do
+  defp probe(%__MODULE__{mode: :verify} = pass, bytes), do: load_probe(pass, bytes)
+
+  defp probe(%__MODULE__{target_header: nil} = pass, bytes), do: load_probe(pass, bytes)
+
+  defp probe(%__MODULE__{target_header: header}, bytes) do
+    case Message.describe(bytes) do
+      {:ok, info} -> claimed(header, info)
+      _unreadable -> :not_target
+    end
+  rescue
+    _exception -> :not_target
+  end
+
+  # `describe/1` returns what the writer of the bytes says, so this is a
+  # comparison of claims and not a verification of one. A header whose context
+  # differs from the target's in any pair belongs to some other declaration -
+  # the context-change rewrite's `from:` side, most often - and the row is
+  # rewritten, which is the answer a decrypt would also have given.
+  @spec claimed(target_header(), term()) :: :already_target | :not_target
+  defp claimed(header, info) do
+    {tenant_ref, context} = Map.pop(info.encryption_context, Context.tenant_ref_key())
+
+    if context == header.context and is_binary(tenant_ref) == header.tenant_ref? do
+      :already_target
+    else
+      :not_target
+    end
+  end
+
+  # The load attempt's failure is the ordinary case rather than an event: a row
+  # that has not been rewritten yet fails it every time. So every failure shape
+  # - a raise from a type that raises by design (ADR-0001 decision 6), an
+  # `:error` from an `Ecto.Type`, an off-contract return - is the same answer
+  # here, and none of them reaches the report.
+  @spec load_probe(t(), binary()) :: :already_target | :not_target
+  defp load_probe(pass, bytes) do
     case load_target(pass, bytes) do
       {:ok, _loaded} -> :already_target
       _other -> :not_target
