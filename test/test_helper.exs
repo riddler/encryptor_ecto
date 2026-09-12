@@ -6,7 +6,13 @@ for vault <- [
       Encryptor.Ecto.TestVaults.App,
       Encryptor.Ecto.TestVaults.Strict,
       Encryptor.Ecto.TestVaults.Unsalted,
-      Encryptor.Ecto.TestVaults.OtherDeployment
+      Encryptor.Ecto.TestVaults.OtherDeployment,
+      # The wrapped-key store's own pair. Neither `init/1` touches a database -
+      # the store-backed provider resolves configuration and nothing else at
+      # start - so both start on this arm too, and the tests that read rows
+      # carry `:database` themselves.
+      Encryptor.Ecto.TestKeyStore.Root,
+      Encryptor.Ecto.TestKeyStore.Tenant
     ] do
   {:ok, _pid} = vault.start_link()
 end
