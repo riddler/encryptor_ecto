@@ -52,7 +52,8 @@ defmodule Encryptor.Ecto.MixProject do
         "README.md",
         "CHANGELOG.md",
         "docs/explanation/moving-off-cloak.md",
-        "docs/guides/migrate-from-cloak.md"
+        "docs/guides/migrate-from-cloak.md",
+        "docs/guides/bind-extra-context.md"
       ],
       groups_for_extras: [
         Guides: ~r{docs/}

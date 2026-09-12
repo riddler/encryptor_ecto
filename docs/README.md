@@ -27,6 +27,11 @@ Task-shaped, for someone who already understands the target state.
   migration runbook of ADR-0004 decision 8, step by step: the command for each
   step in release `eval` and `mix` form, what its output should say, what to do
   when it differs, and where reversibility actually ends.
+- [How to bind extra identifiers into an encrypted field's context](guides/bind-extra-context.md) -
+  the `:context` option: what belongs in a declared context and what does not,
+  how the pairs compose with the vault's static ones, which refusals a
+  declaration buys, why a bound value is permanent, and what changing one
+  costs.
 
 ## Reference
 

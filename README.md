@@ -379,6 +379,10 @@ The pages under [`docs/`](https://github.com/riddler/encryptor_ecto/blob/main/do
   the nine-step runbook, each step in both release `eval` and `mix` form, with
   the expected output, what to do when it differs, the disposition of a legacy
   lookup column, and where reversibility actually ends.
+- [How to bind extra identifiers into an encrypted field's context](docs/guides/bind-extra-context.md) -
+  what belongs in a declared `:context` and what does not, how the pairs
+  compose, which refusals a declaration buys, and why a bound value is
+  permanent.
 
 Reference material is the module documentation: `Encryptor.Ecto.Binary`,
 `Encryptor.Ecto.BlindIndex`, `Encryptor.Ecto.Migration`,
