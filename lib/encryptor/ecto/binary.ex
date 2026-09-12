@@ -645,10 +645,10 @@ defmodule Encryptor.Ecto.Binary do
   # `:none` field omits `:key` entirely, which is what a `:single`-profile
   # vault expects.
   @spec vault_opts(params(), String.t() | :none) :: keyword()
-  defp vault_opts(params, :none), do: [encryption_context: encryption_context(params)]
+  defp vault_opts(params, :none), do: [encryption_context: declared_context(params)]
 
   defp vault_opts(params, tenant),
-    do: [key: tenant, encryption_context: encryption_context(params)]
+    do: [key: tenant, encryption_context: declared_context(params)]
 
   @doc """
   The encryption-context key *names* a declaration composes, sorted.
@@ -663,10 +663,29 @@ defmodule Encryptor.Ecto.Binary do
       ["column", "purpose", "table"]
   """
   @spec context_keys(params()) :: [String.t()]
-  def context_keys(params), do: params |> encryption_context() |> Map.keys() |> Enum.sort()
+  def context_keys(params), do: params |> declared_context() |> Map.keys() |> Enum.sort()
 
-  @spec encryption_context(params()) :: %{optional(String.t()) => String.t()}
-  defp encryption_context(params) do
+  @doc """
+  The encryption-context pairs a declaration composes, names and values.
+
+  Public for the same reason `context_keys/1` is: a caller that has to reason
+  about the context a declaration writes reads it from here rather than
+  recomposing it, because a second composition is free to drift from this one.
+  The migrator's probe is the caller that needs the values as well as the
+  names - it compares them against what a stored message says about itself
+  (ADR-0002 decision 5, resolved assumption A9) - and `Encryptor.Ecto.Map`'s
+  serializer is the one that needs only the names.
+
+  The tenant is not here. It passes to the vault as `key:` and the vault
+  derives `"tenant_ref"` from the selector itself, so a declaration's context
+  never carries it (acceptance amendment 1).
+
+      iex> Encryptor.Ecto.Binary.declared_context(%{context: %{"purpose" => "pii"},
+      ...>   table: "cards", column: "pan"})
+      %{"column" => "pan", "purpose" => "pii", "table" => "cards"}
+  """
+  @spec declared_context(params()) :: %{optional(String.t()) => String.t()}
+  def declared_context(params) do
     Map.merge(params.context, %{"table" => params.table, "column" => params.column})
   end
 

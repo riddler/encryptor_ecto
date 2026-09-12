@@ -22,6 +22,7 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
   alias Encryptor.Ecto.Migrator
   alias Encryptor.Ecto.Migrator.Report
   alias Encryptor.Ecto.TestEnginePlans
+  alias Encryptor.Ecto.TestRepo
   alias Encryptor.Ecto.TestSchemas
 
   @merchant "merchant_7f3"
@@ -220,6 +221,31 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
     end
   end
 
+  describe "what a verification opens" do
+    # Sabotage: let decision 5's header short-circuit into `mode: :verify` -
+    # the acceptance test stopped opening the bytes, and a row it cannot
+    # decrypt verified green because its header said it was ours. That is the
+    # keyless census (`Encryptor.Ecto.Migrator.Census`) wearing this
+    # function's name.
+    test "a row a rewrite would skip from its header is opened here" do
+      id = insert_card(pan: legacy(@pan))
+      assert {:ok, _run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      tampered = tamper(raw(:cards, id, :pan))
+      :ok = write_raw(id, tampered)
+
+      assert {:ok, rerun} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      assert rerun.counts.already_target == 1
+
+      assert {:error, report} = Migrator.verify(TestEnginePlans.Cards)
+
+      assert report.counts.already_target == 0
+      assert report.counts.undecryptable == 1
+      assert [%{schema: TestSchemas.Card, field: :pan}] = report.failures
+      refute Report.verified?(report)
+    end
+  end
+
   # -- fixtures -------------------------------------------------------------
 
   defp legacy(plaintext), do: "legacy:" <> String.reverse(plaintext)
@@ -298,5 +324,20 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
 
   defp checkpoints do
     TestRepo.all(from(c in "encryptor_ecto_migration_checkpoints", select: c.id))
+  end
+
+  # A message whose header still describes itself and whose body no longer
+  # opens: the last byte, which is inside the authenticated payload.
+  defp tamper(bytes) do
+    size = byte_size(bytes) - 1
+    <<head::binary-size(size), last>> = bytes
+    head <> <<rem(last + 1, 256)>>
+  end
+
+  defp write_raw(id, bytes) do
+    {1, _returned} =
+      TestRepo.update_all(from(r in "cards", where: r.id == ^id), set: [pan: bytes])
+
+    :ok
   end
 end

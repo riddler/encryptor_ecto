@@ -116,6 +116,7 @@ defmodule Encryptor.Ecto.Migrator do
   below.
   """
 
+  alias Encryptor.Ecto.Binary
   alias Encryptor.Ecto.Migrator.Checkpoint
   alias Encryptor.Ecto.Migrator.Keyset
   alias Encryptor.Ecto.Migrator.Pass
@@ -257,6 +258,13 @@ defmodule Encryptor.Ecto.Migrator do
   verify mode skips is the dump - see that module's "The third mode reads and
   stops".
 
+  It takes the expensive half of the one probe. A rewrite reads an
+  already-migrated row's header and skips it without a key (decision 5's
+  short-circuit); a verification opens the bytes, because "it says it is ours"
+  is what the keyless census answers and this is the function that exists to
+  answer more than that. Same code, same classification, one mode flag - see
+  the pass's "Two ways to probe".
+
   A verification never halts on a row. It runs with `on_error: :continue`, so
   a table with unreadable rows produces a count of them rather than a report
   that stops at the first: an operator asking "is this finished?" is asking
@@ -352,6 +360,7 @@ defmodule Encryptor.Ecto.Migrator do
       to: to,
       to_arity: arity,
       to_params: params,
+      target_header: target_header(arity, params),
       mode: options.mode,
       batch_size: options.batch_size,
       sample: options.sample,
@@ -437,6 +446,36 @@ defmodule Encryptor.Ecto.Migrator do
       Map.put(params, :tenant, resolver(rewrite.tenant))
     else
       params
+    end
+  end
+
+  # ADR-0002 decision 5's probe short-circuit, resolved once per pass: what a
+  # message this field's target writes says about itself, keylessly (A9, and
+  # `Encryptor.Ecto.Migrator.Pass`'s "Two ways to probe"). The vault's static
+  # pairs are half of it and they live in the frozen configuration, so this is
+  # the one place that reads them - a probe that read them per row would be
+  # asking a supervised process a question whose answer cannot change while
+  # the pass runs.
+  #
+  # `nil` is the fallback to the load attempt and has three causes, none of
+  # them an error here: a target that is not one of ours, a target that is a
+  # plain arity-1 `Ecto.Type`, and a vault that is not running yet. The third
+  # is deliberate rather than tolerated: `run/2` does not require the vault at
+  # build time, the dump will raise soon enough if it is genuinely down, and a
+  # pass that refused to start would be this function inventing a lifecycle
+  # check ADR-0002 does not give it.
+  @spec target_header(1 | 3, term()) :: Pass.target_header() | nil
+  defp target_header(1, _params), do: nil
+
+  defp target_header(3, params) do
+    with true <- ours?(params),
+         {:ok, config} <- params.vault.config() do
+      %{
+        context: Map.merge(config.static_encryption_context, Binary.declared_context(params)),
+        tenant_ref?: params.tenant != :none
+      }
+    else
+      _no_header -> nil
     end
   end
 
