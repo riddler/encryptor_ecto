@@ -180,7 +180,7 @@ defmodule Encryptor.Ecto.KeyStore do
   @doc """
   The newest live version for this selector.
 
-  The head of `c:decryption_keys/2`, from the same single query, so the two
+  The head of `c:Encryptor.Provider.decryption_keys/2`, from the same single query, so the two
   cannot disagree about which version is current.
   """
   @impl Provider
