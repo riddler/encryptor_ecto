@@ -130,20 +130,34 @@ different way at every call site. This package is that glue:
 - **Tenant context, resolved once.** Which tenant a value belongs to is
   resolved by a declared strategy the type reads, rather than being threaded
   through every changeset by hand.
-- **No key management of its own.** The vault stays `Encryptor`. This package
-  adds no dependency beyond Ecto and the vault.
+- **Blind indexes.** A keyed, equality-only fingerprint in a second column
+  beside an encrypted one, so equality on plaintext becomes equality on
+  fingerprint. Per-tenant by default, and equality only - no ordering, no
+  prefix search (ADR-0003).
+- **A key store, because the vault has none.** The vault owns the six fields
+  of a wrapped key and nothing about where they live (encryptor ADR-0003
+  decision 9), so `Encryptor.Ecto.KeyStore` is the table, the query and the
+  `Encryptor.Provider` implementation that turns rows into key descriptors.
+- **No key management of its own.** The vault stays `Encryptor`. Beyond Ecto
+  and the vault the dependency list is deliberately short and each entry
+  carries its reason in `mix.exs`: `jason` as the default serializer for
+  `Encryptor.Ecto.Map`, `telemetry` for the migration window's event.
 
-**Nothing is implemented yet.** The repository holds the scaffold only, so
-almost every convention below is inherited rather than demonstrated.
+The package is implemented; the scaffold-stage caveats this file used to
+carry are gone. The conventions below are demonstrated by the code rather
+than merely inherited, and a convention the code contradicts is a defect in
+one of the two - say which, rather than following this file over `lib/`.
 
 ### Read before writing any code here
 
-The founding ADR beads (`ece-alx` the `cloak_ecto`-shaped vault-backed Ecto
-types, `ece-56a` the migrator, `ece-azn` the blind index)
-decide the contracts this package is built out of, and `ece-404` is the
-operator gate that accepts them. Until an ADR is accepted, its contract is
-open: do not encode a guess about it in code, and stop and report if a bead
-needs an answer that no accepted ADR gives.
+`docs/adr/` decides the contracts this package is built out of. ADR-0001
+(the `cloak_ecto`-shaped vault-backed types), ADR-0002 (the migrator),
+ADR-0003 (the blind index) and ADR-0004 (migration from a prior scheme) are
+all accepted, several of them with acceptance amendments that are part of
+the decision - read the amendments, not only the decisions. An ADR that is
+still `Status: proposed` has an open contract: do not encode a guess about
+it in code, and stop and report if a bead needs an answer that no accepted
+ADR gives.
 
 Cryptographic decisions are ADR decisions here, always. A blind-index
 construction, an encryption-context field, a ciphertext layout, or an
@@ -164,8 +178,10 @@ Full `mix quality` must be green before any commit. The format stage runs in
 check mode (`format: [check: true]` in `.quality.exs`): drift fails the gate
 and nothing is rewritten, so run `mix format` yourself before committing.
 `.quality.exs` records why this gate is deliberately smaller than
-statifier-ex's, including the `coveralls.json` deviation that keeps the 90%
-floor meaningful while the package is still a moduledoc-only scaffold.
+statifier-ex's, and the `coveralls.json` deviation beside it. Both still
+describe the package as a moduledoc-only scaffold; the deviation's own note
+says to drop the flag once there is real code, which there now is. That
+re-check is its own bead, not something to fold into an unrelated change.
 
 <!-- usage-rules-start -->
 ## ExQuality (`mix quality`)
