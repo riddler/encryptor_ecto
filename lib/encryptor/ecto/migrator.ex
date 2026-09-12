@@ -452,10 +452,12 @@ defmodule Encryptor.Ecto.Migrator do
   # ADR-0002 decision 5's probe short-circuit, resolved once per pass: what a
   # message this field's target writes says about itself, keylessly (A9, and
   # `Encryptor.Ecto.Migrator.Pass`'s "Two ways to probe"). The vault's static
-  # pairs are half of it and they live in the frozen configuration, so this is
-  # the one place that reads them - a probe that read them per row would be
-  # asking a supervised process a question whose answer cannot change while
-  # the pass runs.
+  # pairs and its algorithm suite are the half of it that is knowable without
+  # a key, and both live in the frozen configuration, so this is the one place
+  # that reads them - a probe that read them per row would be asking a
+  # supervised process a question whose answer cannot change while the pass
+  # runs. The other half, the wrapping key the header names, is not knowable
+  # from configuration at all and the pass proves it per batch instead.
   #
   # `nil` is the fallback to the load attempt and has three causes, none of
   # them an error here: a target that is not one of ours, a target that is a
@@ -472,7 +474,8 @@ defmodule Encryptor.Ecto.Migrator do
          {:ok, config} <- params.vault.config() do
       %{
         context: Map.merge(config.static_encryption_context, Binary.declared_context(params)),
-        tenant_ref?: params.tenant != :none
+        tenant_ref?: params.tenant != :none,
+        suite: config.algorithm_suite_id
       }
     else
       _no_header -> nil

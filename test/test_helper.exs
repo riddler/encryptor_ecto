@@ -3,6 +3,8 @@
 # to do with Postgres.
 for vault <- [
       Encryptor.Ecto.TestVaults.Merchant,
+      Encryptor.Ecto.TestVaults.MerchantRekeyed,
+      Encryptor.Ecto.TestVaults.MerchantSigned,
       Encryptor.Ecto.TestVaults.App,
       Encryptor.Ecto.TestVaults.Strict,
       Encryptor.Ecto.TestVaults.Unsalted,

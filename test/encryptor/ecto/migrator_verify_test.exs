@@ -228,20 +228,24 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
     # keyless census (`Encryptor.Ecto.Migrator.Census`) wearing this
     # function's name.
     test "a row a rewrite would skip from its header is opened here" do
-      id = insert_card(pan: legacy(@pan))
+      _first = insert_card(pan: legacy(@pan))
+      second = insert_card(pan: legacy(@pan))
       assert {:ok, _run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
 
-      tampered = tamper(raw(:cards, id, :pan))
-      :ok = write_raw(id, tampered)
+      # One merchant, so one wrapping key and one identity: the first row
+      # proves it and a rewrite then skips the second on its header, body or
+      # no body.
+      tampered = tamper(raw(:cards, second, :pan))
+      :ok = write_raw(second, tampered)
 
       assert {:ok, rerun} = Migrator.run(TestEnginePlans.Cards, mode: :write)
-      assert rerun.counts.already_target == 1
+      assert rerun.counts.already_target == 2
 
       assert {:error, report} = Migrator.verify(TestEnginePlans.Cards)
 
-      assert report.counts.already_target == 0
+      assert report.counts.already_target == 1
       assert report.counts.undecryptable == 1
-      assert [%{schema: TestSchemas.Card, field: :pan}] = report.failures
+      assert [%{schema: TestSchemas.Card, field: :pan, id: ^second}] = report.failures
       refute Report.verified?(report)
     end
   end

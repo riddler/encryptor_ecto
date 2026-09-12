@@ -72,6 +72,31 @@ defmodule Encryptor.Ecto.TestVaults do
      end}
   end
 
+  @doc "The descriptor a merchant selector resolves to after a re-key."
+  @spec rekeyed_descriptor(String.t()) :: Aes.t()
+  def rekeyed_descriptor(selector) do
+    %Aes{
+      namespace: "encryptor-tenant",
+      name: "t/" <> Reference.derive(@subkey, selector) <> "/v2",
+      material: :binary.copy(<<0x66>>, 32),
+      bits: 256
+    }
+  end
+
+  @doc "A provider resolving a merchant selector to that merchant's re-keyed key."
+  @spec rekeyed_provider() :: {module(), keyword()}
+  def rekeyed_provider do
+    {Encryptor.Provider.Function,
+     encryption_key: fn
+       selector when selector in @merchants -> {:ok, rekeyed_descriptor(selector)}
+       selector -> {:error, {:unknown_key, selector}}
+     end,
+     decryption_keys: fn
+       selector when selector in @merchants -> {:ok, [rekeyed_descriptor(selector)]}
+       selector -> {:error, {:unknown_key, selector}}
+     end}
+  end
+
   @doc "The single key the application vault holds."
   @spec app_provider() :: {module(), keyword()}
   def app_provider do
@@ -98,6 +123,69 @@ defmodule Encryptor.Ecto.TestVaults do
     alias Encryptor.Ecto.TestVaults
 
     @doc "Layer 5: the provider and the reference subkey, both key material."
+    def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: TestVaults.merchant_provider(),
+         reference_subkey: TestVaults.reference_subkey(),
+         derivation_salt: TestVaults.derivation_salt()
+       )}
+    end
+  end
+
+  defmodule MerchantRekeyed do
+    @moduledoc """
+    `Merchant`'s deployment after a re-key: same namespace, same tenant
+    references, new key names over new material.
+
+    ADR-0002's R3 names a rewrite whose "format, algorithm, library, or
+    encryption context" changes, and this is the half of it that changes none
+    of them: a message this vault wrote carries exactly the context, the
+    tenant reference and the algorithm suite `Merchant` writes, and differs
+    only in the wrapping key the header names. It exists so the probe can be
+    held to that difference.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :tenant,
+      algorithm_suite_id: 0x0478,
+      required_context: ["table", "column"],
+      cache: false
+
+    alias Encryptor.Ecto.TestVaults
+
+    @doc "Layer 5: the re-keyed provider, under `Merchant`'s own subkey."
+    def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: TestVaults.rekeyed_provider(),
+         reference_subkey: TestVaults.reference_subkey(),
+         derivation_salt: TestVaults.derivation_salt()
+       )}
+    end
+  end
+
+  defmodule MerchantSigned do
+    @moduledoc """
+    `Merchant` writing the other algorithm suite.
+
+    The R3 dimension the header names in one integer. Everything else - the
+    provider, the material, the key names, the subkey, the required pair - is
+    `Merchant`'s, so a message from here differs from one of `Merchant`'s in
+    the suite and in nothing the probe compares beside it.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :tenant,
+      algorithm_suite_id: 0x0578,
+      required_context: ["table", "column"],
+      cache: false
+
+    alias Encryptor.Ecto.TestVaults
+
+    @doc "Layer 5: `Merchant`'s own provider and subkey, a different suite."
     def init(config) do
       {:ok,
        Keyword.merge(config,

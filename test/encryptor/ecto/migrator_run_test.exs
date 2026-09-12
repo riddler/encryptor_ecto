@@ -28,6 +28,8 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   alias Encryptor.Ecto.TestRepo
   alias Encryptor.Ecto.TestSchemas
   alias Encryptor.Ecto.TestTypes.Pan
+  alias Encryptor.Ecto.TestTypes.PanRekeyed
+  alias Encryptor.Ecto.TestTypes.PanSigned
   alias Encryptor.Ecto.TestTypes.Pinned
 
   @merchant "merchant_7f3"
@@ -556,22 +558,66 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   end
 
   describe "the probe's header inspection (decision 5, A9)" do
-    # Sabotage: made `probe/2` take the load attempt in every mode - the
-    # rewrite went back to a decrypt per already-migrated row, and the row
-    # below, whose header this package wrote over a body it can no longer
-    # open, was sent to the source reader instead of being skipped.
-    test "a rewrite classifies an already-migrated row without opening it" do
-      id = insert_card(pan: legacy(@pan))
-      assert {:ok, _first} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+    # Sabotage: made `probe/3` take the load attempt in every mode - the
+    # rewrite went back to a decrypt per already-migrated row, and the second
+    # row below, whose header this package wrote over a body it can no longer
+    # open, was sent to the source reader instead of riding the first row's
+    # proof.
+    test "one proof per identity carries the rest of the batch" do
+      first = insert_card(pan: legacy(@pan))
+      second = insert_card(pan: legacy(@pan))
+      assert {:ok, _run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
 
-      tampered = tamper(raw(:cards, id, :pan))
-      :ok = write_raw(id, tampered)
+      # The two rows are one merchant's, so they carry one wrapping key and
+      # one identity: the first proves it and the second is skipped on the
+      # header alone - which a decrypt could not do, because there is no
+      # longer a body under it to decrypt.
+      tampered = tamper(raw(:cards, second, :pan))
+      :ok = write_raw(second, tampered)
 
       assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
 
-      assert report.counts.already_target == 1
+      assert report.counts.already_target == 2
       assert report.failures == []
-      assert raw(:cards, id, :pan) == tampered
+      assert raw(:cards, second, :pan) == tampered
+      refute raw(:cards, first, :pan) == legacy(@pan)
+    end
+
+    # Sabotage: had `against_proof/4` believe a claimed identity without
+    # proving it - the re-keyed rows below were counted already migrated and
+    # the pass left them exactly as it found them, which is ADR-0002's R3
+    # rewrite reporting success over a column it never touched.
+    test "a row written under another wrapping key is not this field's target" do
+      proven = insert_card(pan: legacy(@pan))
+      assert {:ok, _run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      # Same declared context, same tenant reference, same algorithm suite,
+      # different wrapping key: every pair the header comparison can check
+      # matches, and the row is still the source's.
+      bytes = rekeyed(@pan)
+      rekeyed = insert_card(pan: bytes)
+
+      assert {:error, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      assert report.counts.already_target == 1
+      assert report.counts.undecryptable == 1
+      assert [%{id: ^rekeyed, field: :pan}] = report.failures
+      assert raw(:cards, rekeyed, :pan) == bytes
+      refute raw(:cards, proven, :pan) == legacy(@pan)
+    end
+
+    # Sabotage: dropped the algorithm-suite comparison from
+    # `against_declaration/2` - a row the other suite wrote claimed the
+    # identity the target's own rows claim and was skipped, so a rewrite whose
+    # whole purpose is the algorithm change did nothing.
+    test "a row written under another algorithm suite is not this field's target" do
+      id = insert_card(pan: signed(@pan))
+
+      assert {:error, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      assert report.counts.already_target == 0
+      assert report.counts.undecryptable == 1
+      assert [%{id: ^id, field: :pan}] = report.failures
     end
 
     # Sabotage: made `claimed/2` answer `:already_target` for every header it
@@ -586,6 +632,23 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert report.counts.already_target == 0
       assert report.counts.undecryptable == 1
       assert [%{schema: TestSchemas.Card, field: :pan}] = report.failures
+    end
+
+    # Sabotage: dropped `declared_pairs/1` - a signing suite writes its public
+    # key into the message's context, so every row this target had already
+    # migrated failed the comparison, went to the source reader and was
+    # reported undecryptable on the next run.
+    test "a target whose suite signs still recognises its own rows" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert {:ok, first} = Migrator.run(TestEnginePlans.SignedTarget, mode: :write)
+      assert first.counts.migratable == 1
+
+      assert {:ok, second} = Migrator.run(TestEnginePlans.SignedTarget, mode: :write)
+
+      assert second.counts.already_target == 1
+      assert second.counts.migratable == 0
+      assert second.failures == []
     end
 
     # Sabotage: had `target_header/2` answer a header for an arity-1 target -
@@ -645,6 +708,23 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     Tenant.put(@merchant)
     params = Pinned.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = Pinned.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
+
+  # The same declared context and tenant under the re-keyed vault: the header
+  # names a wrapping key the target's own vault has never heard of.
+  defp rekeyed(plaintext) do
+    Tenant.put(@merchant)
+    params = PanRekeyed.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = PanRekeyed.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
+
+  # The same declaration over the vault writing the other algorithm suite.
+  defp signed(plaintext) do
+    Tenant.put(@merchant)
+    params = PanSigned.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = PanSigned.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
   end
 

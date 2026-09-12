@@ -42,12 +42,16 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   message's encryption context keylessly.
 
   So a pass whose target is one of this package's own vault-backed types
-  probes by reading the header and comparing the context the message claims
-  against the context that target's declaration writes - the vault's static
-  pairs, the declared `"table"` and `"column"`, and whatever `:context` added,
-  which `Encryptor.Ecto.Binary.declared_context/1` composes once rather than
-  twice. The `"tenant_ref"` pair the vault derives is compared for presence
-  and not for value: which tenant a row belongs to is not what the probe asks.
+  probes by reading the header, in two steps.
+
+  **Step one is a comparison against what the target declares.** The context
+  the message claims must equal the context that target's declaration writes -
+  the vault's static pairs, the declared `"table"` and `"column"`, and
+  whatever `:context` added, which `Encryptor.Ecto.Binary.declared_context/1`
+  composes once rather than twice - and the algorithm suite the message names
+  must equal the one the target's vault is configured to write. The
+  `"tenant_ref"` pair the vault derives is compared for presence and not for
+  value: which tenant a row belongs to is not what the probe asks.
 
   Comparing the *whole* context rather than merely parsing the header is what
   keeps the context-change rewrite correct - `from:` and `to:` naming the same
@@ -56,6 +60,38 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   write well-formed messages of this package's format, and a probe that read
   no further than "it parses" would call every unrewritten row already
   migrated and silently do nothing.
+
+  **Step two is a proof, because a context and a suite do not identify a
+  key.** ADR-0002's R3 rewrites a column whose "format, algorithm, library, or
+  encryption context" changes, and two of those - a different vault over the
+  same declared context, a re-keyed one - leave every compared pair identical
+  while the bytes are still the source's. What separates them is the wrapping
+  key, which the header names as each encrypted data key's
+  `{provider_id, key_name}` and which nothing keyless can predict: the name is
+  a keyed derivation the provider mints (`Encryptor.Key.Aes`), so the pass
+  cannot compute the one the target would use for a row it has not written.
+
+  It can prove one instead. The first row of a batch claiming a given
+  `{suite, encrypted data keys}` identity is **loaded** rather than believed,
+  and only an identity a load has just proven the target reads is allowed to
+  short-circuit the rest of that batch. A source row's identity is never
+  proven - its load fails, exactly as it does on `main` - so an R3 rewrite
+  whose two sides differ only in vault, key or suite rewrites every row it
+  used to rewrite. The saving is per batch rather than per row: one decrypt
+  for each distinct wrapping key a batch touches, instead of one per
+  already-migrated row.
+
+  The proof is sound because a key name is bound to its material forever -
+  `Encryptor.Key.Aes` makes reusing one for different material a defect,
+  since it silently breaks every message already written under it. Two
+  messages with the same identity and the same context are therefore
+  readable by the same key, and the first one's load answers for both.
+
+  The memo lives in the batch's own fold and nowhere else. It is a pure
+  optimization: dropping it costs decrypts, never correctness, which is why
+  it is scoped to the smallest thing that still pays - a batch is one
+  transaction, and a pass that resumes has no use for what a previous
+  transaction proved.
 
   `describe/1`'s answer is an unverified claim by whoever wrote the bytes, and
   that is the right strength here: nothing downstream of the probe is an
@@ -141,14 +177,28 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   `:context` is every pair such a message carries except `"tenant_ref"`, and
   `:tenant_ref?` is whether it carries that one - the value is the vault's
-  derivation of a tenant selector and is never compared. Resolved once, before
-  the pass starts, by `Encryptor.Ecto.Migrator`; `nil` there means the probe
-  cannot be answered from a header and the load attempt runs instead.
+  derivation of a tenant selector and is never compared. `:suite` is the
+  algorithm suite that target's vault is configured to write. Resolved once,
+  before the pass starts, by `Encryptor.Ecto.Migrator`; `nil` there means the
+  probe cannot be answered from a header and the load attempt runs instead.
   """
   @type target_header :: %{
           context: %{optional(String.t()) => String.t()},
-          tenant_ref?: boolean()
+          tenant_ref?: boolean(),
+          suite: non_neg_integer()
         }
+
+  @typedoc """
+  The wrapping-key identity a message claims: the algorithm suite it names,
+  and the `{provider_id, key_name}` pair of every encrypted data key in it, in
+  the order the header carries them.
+
+  Two messages with the same identity are wrapped by the same key or by a
+  provider that has broken `Encryptor.Key.Aes`'s name-is-bound-to-material
+  rule. That is what lets one load answer for both - see the moduledoc's "Two
+  ways to probe".
+  """
+  @type identity :: %{suite: non_neg_integer(), keys: [map()]}
 
   @typedoc """
   Everything one field's pass needs, resolved once before it starts.
@@ -397,30 +447,40 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   @spec last_id([list()]) :: term()
   defp last_id(rows), do: rows |> List.last() |> hd()
 
+  # The fold carries the identities this batch has proven the target reads,
+  # which is the whole of the probe's memo: it starts empty at every batch and
+  # is dropped with the fold. See the moduledoc's "Two ways to probe".
   @spec rows(t(), Report.t(), [list()]) :: {Report.t(), :ok | :halt}
   defp rows(pass, report, rows) do
-    Enum.reduce_while(rows, {report, :ok}, fn row, {report, _status} ->
-      case row(pass, report, row) do
-        {report, :ok} -> {:cont, {report, :ok}}
-        {report, :halt} -> {:halt, {report, :halt}}
-      end
-    end)
+    {report, status, _proven} =
+      Enum.reduce_while(rows, {report, :ok, MapSet.new()}, fn row, {report, _status, proven} ->
+        case row(pass, report, proven, row) do
+          {report, :ok, proven} -> {:cont, {report, :ok, proven}}
+          {report, :halt, proven} -> {:halt, {report, :halt, proven}}
+        end
+      end)
+
+    {report, status}
   end
 
   # -- one row --------------------------------------------------------------
 
-  @spec row(t(), Report.t(), list()) :: {Report.t(), :ok | :halt}
-  defp row(_pass, report, [_id, nil, _target | _tenant]),
-    do: {Report.count(report, :null), :ok}
+  @spec row(t(), Report.t(), MapSet.t(identity()), list()) ::
+          {Report.t(), :ok | :halt, MapSet.t(identity())}
+  defp row(_pass, report, proven, [_id, nil, _target | _tenant]),
+    do: {Report.count(report, :null), :ok, proven}
 
-  defp row(pass, report, [id, source_value, target_value | tenant]) do
+  defp row(pass, report, proven, [id, source_value, target_value | tenant]) do
     tenant = row_tenant(tenant)
 
     RowTenant.with_tenant(tenant, fn ->
-      if probe(pass, target_value) == :already_target do
-        {Report.count(report, :already_target), :ok}
-      else
-        migrate(pass, report, id, source_value, target_value, tenant)
+      case probe(pass, proven, target_value) do
+        {:already_target, proven} ->
+          {Report.count(report, :already_target), :ok, proven}
+
+        {:not_target, proven} ->
+          {report, status} = migrate(pass, report, id, source_value, target_value, tenant)
+          {report, status, proven}
       end
     end)
   end
@@ -438,37 +498,93 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   # Decision 5, both ways: see the moduledoc's "Two ways to probe". A
   # verification and a target this package cannot read a header claim out of
-  # take the load attempt; everything else reads the header.
-  @spec probe(t(), binary() | nil) :: :already_target | :not_target
-  defp probe(_pass, nil), do: :not_target
+  # take the load attempt; everything else reads the header, and believes it
+  # only for an identity this batch has already proven.
+  @spec probe(t(), MapSet.t(identity()), binary() | nil) ::
+          {:already_target | :not_target, MapSet.t(identity())}
+  defp probe(_pass, proven, nil), do: {:not_target, proven}
 
-  defp probe(%__MODULE__{mode: :verify} = pass, bytes), do: load_probe(pass, bytes)
+  defp probe(%__MODULE__{mode: :verify} = pass, proven, bytes),
+    do: {load_probe(pass, bytes), proven}
 
-  defp probe(%__MODULE__{target_header: nil} = pass, bytes), do: load_probe(pass, bytes)
+  defp probe(%__MODULE__{target_header: nil} = pass, proven, bytes),
+    do: {load_probe(pass, bytes), proven}
 
-  defp probe(%__MODULE__{target_header: header}, bytes) do
-    case Message.describe(bytes) do
-      {:ok, info} -> claimed(header, info)
-      _unreadable -> :not_target
+  defp probe(%__MODULE__{target_header: header} = pass, proven, bytes) do
+    case claimed(header, bytes) do
+      :no -> {:not_target, proven}
+      {:claims, identity} -> against_proof(pass, proven, identity, bytes)
     end
-  rescue
-    _exception -> :not_target
+  end
+
+  # An identity a load has already proven this batch is believed; the first
+  # row claiming one is loaded, and joins the proof only where that load
+  # succeeded. A source row - a different vault, a different key, a re-keyed
+  # one - fails here exactly as it fails on a probe that never read a header,
+  # which is what keeps an R3 rewrite (ADR-0002's "format, algorithm, library,
+  # or encryption context") from silently doing nothing.
+  @spec against_proof(t(), MapSet.t(identity()), identity(), binary()) ::
+          {:already_target | :not_target, MapSet.t(identity())}
+  defp against_proof(pass, proven, identity, bytes) do
+    cond do
+      MapSet.member?(proven, identity) ->
+        {:already_target, proven}
+
+      load_probe(pass, bytes) == :already_target ->
+        {:already_target, MapSet.put(proven, identity)}
+
+      true ->
+        {:not_target, proven}
+    end
   end
 
   # `describe/1` returns what the writer of the bytes says, so this is a
   # comparison of claims and not a verification of one. A header whose context
-  # differs from the target's in any pair belongs to some other declaration -
-  # the context-change rewrite's `from:` side, most often - and the row is
-  # rewritten, which is the answer a decrypt would also have given.
-  @spec claimed(target_header(), term()) :: :already_target | :not_target
-  defp claimed(header, info) do
-    {tenant_ref, context} = Map.pop(info.encryption_context, Context.tenant_ref_key())
-
-    if context == header.context and is_binary(tenant_ref) == header.tenant_ref? do
-      :already_target
-    else
-      :not_target
+  # or algorithm suite differs from the target's belongs to some other
+  # declaration - the context-change rewrite's `from:` side, most often - and
+  # the row is rewritten, which is the answer a decrypt would also have given.
+  # What survives this comparison is not yet an answer: it is a claim to hand
+  # to `against_proof/4` under the identity it makes.
+  @spec claimed(target_header(), binary()) :: {:claims, identity()} | :no
+  defp claimed(header, bytes) do
+    case Message.describe(bytes) do
+      {:ok, info} -> against_declaration(header, info)
+      _unreadable -> :no
     end
+  rescue
+    _exception -> :no
+  end
+
+  @spec against_declaration(target_header(), Message.Info.t()) :: {:claims, identity()} | :no
+  defp against_declaration(header, info) do
+    {tenant_ref, context} =
+      info.encryption_context
+      |> declared_pairs()
+      |> Map.pop(Context.tenant_ref_key())
+
+    if context == header.context and is_binary(tenant_ref) == header.tenant_ref? and
+         info.algorithm_suite_id == header.suite do
+      {:claims, %{suite: info.algorithm_suite_id, keys: info.encrypted_data_keys}}
+    else
+      :no
+    end
+  end
+
+  # What is left of a message's context after the pairs no declaration is
+  # allowed to write are removed. `Encryptor.Context` reserves two prefixes,
+  # and the engine writes one of them itself: a signing suite puts its public
+  # key in the context, so comparing those pairs against a declared context
+  # would be comparing something the declaration never composed - and would
+  # have the short-circuit silently never fire for a vault configured to sign.
+  # The suite is compared as a suite, on the line above, which is where that
+  # difference belongs.
+  @spec declared_pairs(%{optional(String.t()) => String.t()}) :: %{
+          optional(String.t()) => String.t()
+        }
+  defp declared_pairs(context) do
+    Map.reject(context, fn {key, _value} ->
+      Enum.any?(Context.reserved_prefixes(), &String.starts_with?(key, &1))
+    end)
   end
 
   # The load attempt's failure is the ordinary case rather than an event: a row
@@ -621,13 +737,17 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     end
   end
 
+  # One row, read after a lost compare-and-swap, and the load attempt is the
+  # right probe for it twice over: the application has just written this row,
+  # so the decrypt is the thing being asked about, and a single row is not
+  # where a per-batch proof pays for itself.
   @spec reprobe(t(), term()) :: :already_target | :not_target
   defp reprobe(pass, id) do
     query = Keyset.row_query(pass.source, pass.key, id, pass.target_column)
 
     case pass.repo.all(query, query_opts(pass)) do
-      [[bytes]] -> probe(pass, bytes)
-      _gone -> :not_target
+      [[bytes]] when is_binary(bytes) -> load_probe(pass, bytes)
+      _gone_or_null -> :not_target
     end
   end
 
