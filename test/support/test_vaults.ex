@@ -34,6 +34,19 @@ defmodule Encryptor.Ecto.TestVaults do
 
   @merchants ["merchant_7f3", "merchant_a19"]
 
+  # enc-ADR-0003 amendment B decision 4's parameter set, at the smallest one
+  # the vault will accept: the memory floor is 32 MiB and one iteration is the
+  # minimum, which keeps the suite's Argon2id hashes affordable without
+  # weakening anything the tests assert. Nothing here is a production tuning
+  # recommendation - what a host declares is a host's decision, and this
+  # package neither supplies nor interprets it (ece-ADR-0003 amendment C
+  # decision C5).
+  @slow_hash [memory_kib: 32_768, iterations: 1, parallelism: 1]
+
+  @doc "The Argon2id parameters the tenant vault declares."
+  @spec slow_hash() :: keyword()
+  def slow_hash, do: @slow_hash
+
   @doc "The per-deployment salt the blind index derives under."
   @spec derivation_salt() :: binary()
   def derivation_salt, do: @derivation_salt
@@ -128,7 +141,8 @@ defmodule Encryptor.Ecto.TestVaults do
        Keyword.merge(config,
          provider: TestVaults.merchant_provider(),
          reference_subkey: TestVaults.reference_subkey(),
-         derivation_salt: TestVaults.derivation_salt()
+         derivation_salt: TestVaults.derivation_salt(),
+         slow_hash: TestVaults.slow_hash()
        )}
     end
   end
@@ -202,6 +216,12 @@ defmodule Encryptor.Ecto.TestVaults do
 
     Acceptance amendment 3: a global field cannot ride a `:tenant`-profile
     vault with the pair omitted, so it names a `:single` one instead.
+
+    It declares no `:slow_hash`, deliberately: ece-ADR-0003 amendment C's
+    decision C7 refuses a `slow: true` index against exactly such a vault, and
+    a refusal needs a vault that starts, encrypts and derives normally in
+    every other respect to be a refusal about the declaration rather than
+    about a broken fixture.
     """
 
     use Encryptor.Vault,

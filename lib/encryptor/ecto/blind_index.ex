@@ -40,7 +40,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   | `:scope` | `:tenant` | `:tenant` or `:global` key derivation (decision 3) |
   | `:normalize` | `:none` | What the HMAC is computed over (decision 4) |
   | `:bits` | `256` | Stored width; `64`/`128`/`192` truncate the HMAC |
-  | `:slow` | `false` | `true` runs Argon2id before the HMAC |
+  | `:slow` | `false` | `true` runs Argon2id before the HMAC (decision 6, amendment C) |
   | `:version` | `1` | Participates in the derivation, so a bump is a real rotation (decision 7) |
 
   `:normalize` is the option to read before any of the others.
@@ -60,16 +60,34 @@ defmodule Encryptor.Ecto.BlindIndex do
   normalizer change does (decision 7). What a narrower width actually buys,
   and what it does not, is *Truncation and false positives* below.
 
-  `:slow` is **declared but not available.** It is accepted, checked and
-  carried on the declaration, and it does nothing to a computed value: a
-  `slow: true` index and a `slow: false` index over the same plaintext store
-  the same bytes. Decision 6 puts Argon2id's parameters in "the vault's
-  configuration rather than this package's" and the vault exposes no Argon2id
-  surface, so the half of the option that would read them is not implemented.
-  Read it as a reserved option name rather than as a mitigation available
-  today - the low-entropy row of the table below has no defence in this
-  package until the vault grows one (`enc-dtv`). See
-  `Encryptor.Ecto.BlindIndex.Value`'s *Width* section.
+  `:slow` runs **Argon2id over the normalized value before the HMAC**, which
+  is the defence the low-entropy row of the table below otherwise has none of:
+  an attacker holding the index key still recovers a guessable column, but at
+  one Argon2id hash per candidate rather than one HMAC. ADR-0003 amendment C
+  fixes the whole construction - the parameters are the vault's frozen
+  `:slow_hash` set and never this package's, and the salt is derived per
+  index, per tenant and per deployment through the same vault call the index
+  key comes from. `Encryptor.Ecto.BlindIndex.Value`'s *Slow hashing* section
+  documents the pipeline and
+  `Encryptor.Ecto.BlindIndex.Derivation`'s *The Argon2id salt* section
+  documents the salt.
+
+  Two consequences belong at the option rather than in a record:
+
+    * **A vault that declares no `:slow_hash` refuses.** A `slow: true` index
+      whose vault names no Argon2id parameters raises
+      `Encryptor.Ecto.BlindIndex.DerivationError` and computes nothing
+      (amendment C decision C7). It does not fall back to a plain HMAC, which
+      would write plain-cost bytes into a column an operator believes is
+      hardened, and it does not choose parameters of its own. The vault
+      declares them; the host adds `:argon2_elixir` to its own deps, which is
+      the NIF a slow index opts the build into.
+    * **Turning `:slow` on invalidates the column**, exactly as a normalizer
+      or a `:bits` change does (decision 7), and the two-column dance is the
+      migration. This includes a column written under a `slow: true`
+      declaration before the option was wired, when it was accepted and inert:
+      those rows hold plain-HMAC bytes, and amendment C's C6 calls them out as
+      the one invalidation a host cannot avoid by changing nothing.
 
   ## Security properties
 
@@ -102,10 +120,13 @@ defmodule Encryptor.Ecto.BlindIndex do
   exactly the guessable spaces. Keying the fingerprint is the whole security
   value of the feature.
 
-  **The fourth row is the one with no mitigation here.** Decision 6 offers
-  `:slow` for it, and `:slow` is inert (above). A column whose plaintext
-  space is small enough to enumerate is a column whose index key is worth
-  exactly as much as the column, to anyone who obtains it.
+  **The fourth row is the one whose only mitigation is `:slow`.** A column
+  whose plaintext space is small enough to enumerate is a column whose index
+  key is worth exactly as much as the column, to anyone who obtains it. What
+  `:slow` buys is the *rate*: recovery becomes one Argon2id hash per candidate
+  at the vault's declared cost rather than one HMAC, which is a different
+  budget rather than a different outcome. The row is written at HMAC speed
+  because that is what a declaration that says nothing gets.
 
   **The last row is why `scope: :global` has to be written out loud**, and
   why declaring nothing on a `tenant: :none` field is a compile-time error

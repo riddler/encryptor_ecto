@@ -8,6 +8,11 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
 
       index_value = HMAC-SHA256(index_key, norm(plaintext))
 
+  Or, for a `slow: true` declaration (ADR-0003 decision 6, as amendment C
+  fixes it):
+
+      index_value = HMAC-SHA256(index_key, Argon2id(norm(plaintext), index_salt))
+
   Every surface in `Encryptor.Ecto.BlindIndex` - `put_index/3`, `where_eq/3`,
   `where_eq_candidates/3` and `compute/3` - computes through `compute!/3` and
   nothing else. That is what makes decision 5's promise structural rather than
@@ -17,7 +22,8 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   ## The order of operations, and why it is this one
 
   Three things happen before any plaintext is touched, and the first of them
-  is the tenant.
+  is the tenant. A `slow: true` declaration adds a fourth, and it happens
+  before the plaintext too.
 
   1. **The selector is resolved**, which is where a missing tenant raises
      (decision 3a, ADR-0001 decision 5c). It is first because it is the only
@@ -27,11 +33,21 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
      query the single worst failure this feature can have; a scope check that
      could be reached only after a normalizer succeeded would be one that a
      host could stop reaching.
-  2. **The value is normalized** (decision 4), under the declaration's
+  2. **The slow parameters are read**, for a `slow: true` declaration only,
+     which is where amendment C's decision C7 refuses a vault that declares no
+     `:slow_hash`. It is here, above the value, for the reason the selector is
+     first: what is wrong in that case is the pairing of a declaration and a
+     vault configuration, a constant that is wrong in the source, and a
+     constant that is wrong in the source has to be wrong whether or not the
+     value that arrived happens to normalize.
+  3. **The value is normalized** (decision 4), under the declaration's
      normalizer, with the encrypted field's declared table and column reaching
      the failure so it names the schema line.
-  3. **The key is derived** through the vault, and the HMAC is taken over the
-     normalized bytes.
+  4. **The slow hash is taken**, again for a `slow: true` declaration only,
+     over the normalized bytes and under a salt derived for this index. The
+     *Slow hashing* section below is what that salt is.
+  5. **The key is derived** through the vault, and the HMAC is taken over
+     whichever of the two the steps above produced.
 
   ## Width
 
@@ -65,13 +81,43 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   two-column dance is the migration, with the new width declared under its own
   `index_name` or `:version`.
 
-  `:slow` is the other half of decision 6 and is **not** applied here. It is
-  accepted and carried by the declaration and does nothing to a computed
-  value. Decision 6 puts Argon2id's parameters in "the vault's configuration
-  rather than this package's", and the vault exposes no Argon2id surface to
-  read them from; inventing one here would be this package choosing a
-  cryptographic parameter set, which this repo's conventions call a defect
-  even when the choice is a good one. See `ece-6a6`'s notes.
+  ## Slow hashing
+
+  `:slow` is the other half of decision 6, and unlike `:bits` it is applied
+  *before* the HMAC rather than after it. A `slow: true` declaration hashes
+  the normalized value with Argon2id first and takes the HMAC over the 32
+  bytes that come back:
+
+      normalized  = norm(plaintext)
+      index_salt  = Derivation.derive_salt(vault, derivation, selector)
+      slow_input  = Encryptor.Kdf.slow_hash(normalized, index_salt, params)
+      index_value = leading bits/8 bytes of HMAC-SHA256(index_key, slow_input)
+
+  Three things about that are decisions rather than implementation, and each
+  one is amendment C's:
+
+    * **The parameters are the vault's, never this package's** (C5). They are
+      the frozen `:slow_hash` configuration `Encryptor.Ecto.BlindIndex.Derivation.slow_params!/2`
+      reads, passed through without being interpreted, and a vault that
+      declares none gets a refusal rather than a default - C7, and the reason
+      `:slow` shipped inert until the vault had a surface to read them from.
+    * **`:slow` does not reach the HKDF `info` string**, exactly as `:bits`
+      does not and for the same reason: it is a property of the stored value,
+      so flipping it changes the bytes without changing which key the index
+      derives. What it *does* change is the salt's `info` - but only by
+      existing at all, since a `slow: false` declaration derives no salt.
+    * **The salt derivation is lazy** (C5 again). A `slow: false` declaration
+      performs exactly one `derive/3` call and decision 1's formula is
+      literally unchanged for it; a `slow: true` one performs two, the second
+      an HKDF expansion standing next to an Argon2id hash tuned to cost tens
+      of mebibytes, which is not the cost anyone will measure.
+
+  Turning `:slow` on over an already-written column invalidates it, in
+  decision 7's ordinary sense and with decision 7's two-column dance as the
+  migration. Amendment C's C6 calls out the one case a host cannot avoid by
+  changing nothing: a column written under a `slow: true` declaration *before*
+  this was wired holds plain-HMAC bytes, because the option was accepted and
+  inert then.
 
   ## Redaction
 
@@ -90,6 +136,7 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   alias Encryptor.Ecto.BlindIndex.Declaration
   alias Encryptor.Ecto.BlindIndex.Derivation
   alias Encryptor.Ecto.TenantContext
+  alias Encryptor.Kdf
 
   @doc """
   The index value for one declaration and one plaintext.
@@ -109,24 +156,53 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   `Encryptor.Ecto.BlindIndex.NormalizationError` when the declared normalizer
   cannot produce a binary. A value that is not a binary is the normalizer's
   refusal rather than a separate one, so a host indexing a field this package
-  encrypts but cannot fingerprint learns it in the same words.
+  encrypts but cannot fingerprint learns it in the same words. A `slow: true`
+  declaration also raises `Encryptor.Ecto.BlindIndex.DerivationError` when the
+  vault it names declares no `:slow_hash` parameters (amendment C decision
+  C7).
   """
   @spec compute!(Declaration.t(), term(), TenantContext.operation()) :: binary()
   def compute!(%Declaration{} = declaration, value, operation) do
     params = Declaration.field_params!(declaration)
     derivation = Declaration.derivation!(declaration)
     selector = Derivation.selector!(derivation, params, operation)
+    slow_params = slow_params!(declaration, params.vault, derivation)
 
     normalized = Declaration.normalize!(declaration, value)
+    hashed = pre_hash(normalized, params.vault, derivation, selector, slow_params)
 
     case Derivation.derive(params.vault, derivation, selector) do
       {:ok, index_key} ->
         :hmac
-        |> :crypto.mac(:sha256, index_key, normalized)
+        |> :crypto.mac(:sha256, index_key, hashed)
         |> binary_part(0, byte_width(declaration))
 
       {:error, error} ->
         raise error
+    end
+  end
+
+  # `nil` here is "this declaration asked for no slow hashing", and it is the
+  # only thing that distinguishes the two arms of `pre_hash/5` below. It is
+  # not a parameter set that happens to be absent: enc-ADR-0003 amendment B
+  # decision 4 makes a declared set complete by construction, so the vault
+  # never hands back a partial one to be filled in here.
+  @spec slow_params!(Declaration.t(), module(), Derivation.t()) :: Kdf.params() | nil
+  defp slow_params!(%Declaration{slow: false}, _vault, _derivation), do: nil
+
+  defp slow_params!(%Declaration{slow: true}, vault, derivation),
+    do: Derivation.slow_params!(vault, derivation)
+
+  # The lazy half of amendment C decision C5: no salt is derived for a
+  # declaration that will not hash under one.
+  @spec pre_hash(binary(), module(), Derivation.t(), Derivation.selector(), Kdf.params() | nil) ::
+          binary()
+  defp pre_hash(normalized, _vault, _derivation, _selector, nil), do: normalized
+
+  defp pre_hash(normalized, vault, derivation, selector, slow_params) do
+    case Derivation.derive_salt(vault, derivation, selector) do
+      {:ok, index_salt} -> Kdf.slow_hash(normalized, index_salt, slow_params)
+      {:error, error} -> raise error
     end
   end
 

@@ -259,13 +259,16 @@ Four things are worth knowing before adding one:
   the first stored index value; the tenant-key case has no supported rotation
   sequence today.
 
-`:slow` is **declared but not available.** It is accepted and carried on the
-declaration and it does nothing to a computed value: `slow: true` and
-`slow: false` store the same bytes. The Argon2id parameters it would read
-belong to the vault's configuration and the vault exposes no Argon2id surface
-yet (upstream `enc-dtv`), so read it as a reserved option name rather than as a
-mitigation available today. The low-entropy column has no defence in this
-package until the vault grows one.
+`:slow` runs **Argon2id over the normalized value before the HMAC**, which is
+the low-entropy column's only defence here: an attacker holding the index key
+still recovers a guessable column, but at one Argon2id hash per candidate
+rather than one HMAC. The parameters are the vault's frozen `:slow_hash`
+configuration and never this package's, and the salt is derived per index, per
+tenant and per deployment through the same vault call the index key comes from
+(ADR-0003 amendment C). Two things follow: a `slow: true` index whose vault
+declares no `:slow_hash` raises rather than quietly writing plain-cost bytes,
+and a host declaring one adds `:argon2_elixir` to its own dependencies - the
+NIF is not this package's.
 
 The full leakage table - what an attacker learns from a dump, from a dump plus
 one tenant's index key, and from a retained dump after a shred - is
