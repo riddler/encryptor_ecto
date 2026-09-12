@@ -15,10 +15,34 @@ defmodule Encryptor.Ecto do
   changeset, the query, and the migration all keep their ordinary form, and
   the column changes to `:binary` and nothing else.
 
-  The package is being built out against its accepted ADRs. Tenant resolution
-  is in place - `Encryptor.Ecto.Tenant` holds the current tenant for a unit of
-  work and `Encryptor.Ecto.TenantContext` is the behaviour a host implements to
-  resolve it some other way. The type surface and the error vocabulary are
-  still ahead.
+  ## What the package ships
+
+  - **The field types.** `Encryptor.Ecto.Binary`, `Encryptor.Ecto.String` and
+    `Encryptor.Ecto.Map` (ADR-0001 decisions 1 and 8). The latter two call
+    `Binary` rather than copying it, so the closed option set, the declared
+    `"table"`/`"column"` encryption context, the tenant resolution, the
+    `:binary` column and the vault's bytes stored verbatim are the same for
+    all three.
+  - **Tenant resolution.** `Encryptor.Ecto.Tenant` holds the current tenant
+    for a unit of work, `Encryptor.Ecto.TenantContext` is the behaviour a
+    host implements to resolve it some other way, and
+    `Encryptor.Ecto.TenantScope` scopes an ExUnit case or one `describe`
+    block to a tenant (ADR-0001 decision 5c).
+  - **Blind indexes.** `Encryptor.Ecto.BlindIndex` declares a keyed,
+    equality-only fingerprint column beside an encrypted one, so equality on
+    plaintext becomes equality on fingerprint (ADR-0003).
+  - **The migrator.** `Encryptor.Ecto.Migration` compiles a plan and
+    `Encryptor.Ecto.Migrator` rewrites the columns it names against live
+    traffic, with `verify/2` as the read-only half; the `mix` tasks are thin
+    parsers over the library functions so a release can run one (ADR-0002,
+    ADR-0004).
+  - **The key provider.** `Encryptor.Ecto.KeyStore` is the store-backed
+    `Encryptor.Provider`: a wrapped-key table owned here, key descriptors
+    out, because the vault defines no storage of its own.
+
+  The error vocabulary is `Encryptor.Ecto.Error` and the exceptions that
+  `use` it. Its redaction rule is enforced structurally rather than by
+  convention: nothing this package raises, logs or inspects carries
+  plaintext, ciphertext bytes or key material (ADR-0001 decision 6).
   """
 end
