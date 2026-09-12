@@ -768,3 +768,322 @@ The security-properties table is the deliverable a host reviews before adding
 one, not after. A column that gets an index publishes its equality structure
 inside the index's scope, permanently, to anyone who ever holds a backup - and
 that is true even when everything in this record is implemented correctly.
+
+## Amendment C (proposed, 2026-09-12): the per-index Argon2id salt
+
+Status: **proposed**. Acceptance is the operator's. This section is additive
+and changes no decision above. It is appended at the foot of the file rather
+than beside the 2026-08-27 and 2026-08-28 amendments, which sit at the head;
+the ordering is the campaign's append-only rule and carries no meaning.
+
+It resolves `ece-xu5`, and it exists so that `ece-3lc` - the bead that wires
+decision 6's `:slow` option to the upstream Argon2id surface - has nothing
+cryptographic left to choose.
+
+### Why now
+
+Decision 6 says Argon2id parameters "come from the vault's configuration
+rather than this package's" and says nothing at all about a salt. Every salt
+this record has ever named is the vault's per-deployment `:derivation_salt`
+(the 2026-08-28 amendment), which is an *HKDF* salt spent at the extract of
+key material - a different thing from the salt Argon2id takes. So `:slow` has
+been declared and inert: the option is accepted, checked and carried on a
+declaration, and a `slow: true` index and a `slow: false` index over the same
+plaintext store the same bytes
+(`lib/encryptor/ecto/blind_index/value.ex:68-74`, read at `encryptor_ecto`
+33636a9).
+
+`encryptor` closed its half on 2026-09-12. Its ADR-0003 Amendment B fixes the
+primitive - `Encryptor.Kdf.slow_hash/3`, 32 raw output bytes, a complete
+parameter set supplied by the caller, `:argon2_elixir` optional
+(`lib/encryptor/kdf.ex:485-486` and the `params()` type at `:431`, read at
+`encryptor` 3aaa23b) - and its decision B3 fixes the salt *contract*: the
+salt is the caller's, must be deterministic, and is at least 16 bytes. B3
+recommends deriving the per-index salt through `Encryptor.Vault.derive/3`
+(`lib/encryptor/vault.ex:415-416`, `encryptor` 3aaa23b) under the index's own
+identity, and then stops, in its own words: "This package records the shape of
+a correct salt; which string identifies an index belongs to the package that
+owns indexes."
+
+This package owns indexes. This amendment is that string.
+
+### Why this record and not a new one
+
+Decision 2 and the two amendments above own the whole of what identifies an
+index: the `info` grammar, the version component, and the nesting under
+`encryptor`'s reserved `"blind-index"` purpose. The Argon2id salt is another
+value derived under that same identity, so splitting it into a fourth record
+would leave a reader of
+`Encryptor.Ecto.BlindIndex.Derivation` - which is where every one of those
+constants lives (`lib/encryptor/ecto/blind_index/derivation.ex:130-141`, ece
+33636a9) - with half its rules recorded elsewhere.
+
+### The decisions
+
+**C1. The per-index Argon2id salt is derived through the vault, never stored
+and never constant.**
+
+It is obtained the way the index key is obtained - `Encryptor.Vault.derive/3`
+under the reserved `"blind-index"` purpose - and differs from the index key
+only in the `info` string C2 fixes:
+
+```
+index_salt = Encryptor.Vault.derive(vault, "blind-index",
+               info:   <C2's salt info>,
+               length: 32,
+               key:    <the selector the index key derives under, C3>)
+```
+
+Three alternatives were available and each is rejected for a stated reason.
+
+A **literal constant** - the index's `info` string used directly as the salt,
+or any fixed byte string this package ships - is identical in every
+deployment of this package, so one precomputed Argon2id table for a common
+low-entropy value under the published default parameters would be reusable
+against every host that ever adopts the feature. That is the exact failure a
+salt exists to prevent.
+
+A **stored random salt**, per index or per row, would be deterministic only
+by being written down. A per-row salt is not an index at all: the point of
+decision 1 is that two writes of the same plaintext produce the same bytes. A
+per-index random salt stored in a table would put a new piece of durable
+state, with its own migration and its own restore-ordering hazard, into a
+package whose decision 5 promises the host declares every column it owns and
+this package writes no migrations.
+
+A **host-supplied salt** would make a cryptographic parameter a call-site
+constant, which this repository's conventions call a defect even when the
+choice is good.
+
+Deriving through the vault has none of those costs and one property the
+others do not: the salt is already per-deployment, because `derive/3` extracts
+under the vault's `:derivation_salt` (2026-08-28 amendment decision 1). Two
+deployments provisioned from the same tenant key material present different
+Argon2id inputs for the same plaintext, and the salt is stable for the life of
+the index without existing anywhere but in the derivation.
+
+**C2. The string that identifies an index, for this purpose, is decision 2's
+`info` string with one constant component appended.**
+
+```
+salt_info = "encryptor_ecto/blind_index/v1|" <> table <> "|" <> column <>
+            "|" <> index_name <> "|" <> Integer.to_string(version) <>
+            "|slow-salt"
+```
+
+Every component is decision 2's, as amended on 2026-08-27 by the operator's
+D1 ruling, and carries the same meaning it carries there: the prefix is the
+domain separation, `table` and `column` are the encrypted field's *declared*
+context values, `index_name` distinguishes two indexes over one column, and
+`version` is what makes decision 7's rotation rotate anything. The salt
+therefore changes under exactly the changes the index key changes under, and
+under no others.
+
+The appended `"slow-salt"` component is this record's, verbatim, and it is
+what keeps the salt and the key apart. It **cannot collide with any index
+key's `info`**, and the argument is structural rather than probabilistic: no
+component may contain the separator, and none may be empty
+(`derivation.ex:422-435`, ece 33636a9), so an index key's `info` has exactly
+four separators and a salt's has exactly five. No declaration a host can
+write produces one string from the other side of that count.
+
+The salt is separated at **this package's inner layer, not by a second
+upstream purpose.** A `"blind-index-salt"` purpose would add an entry to
+enc-ADR-0003 decision 7's one-way reserved namespace, which belongs to
+`encryptor` and not to this record. Separating inside the `info` is precisely
+the composition the operator's 2026-08-27 D2 ruling fixed - the outer label
+separates the blind-index tree from every other use of a tenant's key
+material and is `encryptor`'s; the inner `info` separates this package's
+derivations from one another and is ours - applied one level further down.
+
+**C3. The salt derives under the same selector as the index key.**
+
+A `scope: :tenant` index derives its salt under the same resolved tenant; a
+`scope: :global` index names no key and derives its salt under the vault's
+`:default` selector, exactly as its key does (`derivation.ex:464-468`, ece
+33636a9). One selector is resolved per computation and used twice.
+
+This is the cheap choice and also the strictly stronger one. The alternative
+- a deployment-wide salt shared by every tenant - would make the Argon2id
+output a function of the plaintext alone, so the pre-hash stage would
+reintroduce, one layer in, the cross-tenant correlatability that decision 3b
+argues at length against. Nothing about the stored value would leak, because
+the HMAC key is still per tenant, but a defence that costs one HKDF expansion
+is not one to decline. Resolving the selector once and using it twice also
+makes it impossible for the salt and the key to disagree about which tenant a
+row belongs to, which is decision 5's promise applied here.
+
+**C4. The salt is 32 bytes.**
+
+B3's floor is 16. This record takes 32, for two reasons that are not about
+strength: 32 is what `Encryptor.Vault.derive/3` returns at the length this
+package already asks for everywhere (`derivation.ex:138-141`, ece 33636a9),
+so the salt needs no second length constant and no truncation step; and a
+salt derived from key material has no cost-of-entropy argument for stopping
+at the recommended minimum. The value is a decision, not a default: it is
+frozen from the first stored index value by C6 like every other constant
+here.
+
+**C5. Where the slow hash sits, and what is unchanged without it.**
+
+For a declaration with `slow: true`:
+
+```
+normalized  = norm(plaintext)                                  # decision 4
+index_salt  = <C1, C2, C3, C4>
+slow_input  = Encryptor.Kdf.slow_hash(normalized, index_salt, params)  # 32 B
+index_value = leading bits/8 bytes of HMAC-SHA256(index_key, slow_input)
+```
+
+`params` is the vault's frozen `:slow_hash` configuration, read through
+`Encryptor.Vault.config/1` (`lib/encryptor/vault.ex:446-447`, `encryptor`
+3aaa23b), passed through and never interpreted - which is exactly what
+assumption A12 asks for and all it asks for. Amendment B's B4 completes and
+validates that set once, at vault start.
+
+Argon2id runs **before** the HMAC and over the normalized value, which is
+decision 6's own wording and not a new choice. Two things follow and are
+recorded rather than left to the implementation. The slow stage is a stage in
+the *value* pipeline, not in the key pipeline: `:slow` does not reach the
+HKDF `info` string, exactly as `:bits` does not, so a `slow` flip changes the
+stored bytes without changing which key the index derives - the same shape
+`value.ex:43-49` (ece 33636a9) records for `:bits`, for the same reason.
+And the salt derivation is **lazy**: a `slow: false` declaration derives no
+salt and performs exactly one `derive/3` call, so decision 1's formula is
+literally unchanged for it.
+
+| `:scope` | `:slow` | Derivations per computation | Value hashed under the HMAC |
+|---|---|---|---|
+| `:tenant` | `false` | index key, under `{:tenant, t}` | `norm(plaintext)` |
+| `:tenant` | `true` | index key **and** salt, both under `{:tenant, t}` | `slow_hash(norm(plaintext), salt, params)` |
+| `:global` | `false` | index key, under the vault's default | `norm(plaintext)` |
+| `:global` | `true` | index key **and** salt, both under the vault's default | `slow_hash(norm(plaintext), salt, params)` |
+
+`:bits` applies to the HMAC output in all four rows, unchanged: it truncates
+the stored value and never the key, and never the salt.
+
+**C6. The stability guarantee: the salt adds no new invalidating trigger, and
+every constant above is frozen from the first stored value.**
+
+The salt is a pure function of the vault's `:derivation_salt`, the scope's
+key material, `table`, `column`, `index_name`, `version`, and the constants
+this record fixes. Nothing in it is random, time-varying, stored, or
+configurable. So for a given index in a given deployment it is the same 32
+bytes forever, which is what B3 requires of it.
+
+What changes it is already, without exception, a reindex under decision 7:
+
+| Change | Already invalidating because |
+|---|---|
+| `:derivation_salt` rotated | 2026-08-28 amendment decision 4 |
+| `:version` bumped | decision 7 (that is what the bump is for) |
+| `index_name`, `table` or `column` changed | a different index, decision 2 |
+| The tenant's key material rotated | decision 7's opening sentence |
+| `:slow_hash` parameters retuned | decision 6, decision 7, and enc B6 |
+
+So this amendment introduces **no new way to invalidate a column**. A host
+that has read decision 7's list has read the whole list.
+
+The constants are the other half of the guarantee. `"slow-salt"`, the 32-byte
+length, the position of the salt component at the end of the `info` string,
+and C3's choice of selector are permanent from the first stored index value
+of the first host that turns `:slow` on. Changing any of them is an
+invalidating change in exactly the family decision 7 names - alongside a
+normalizer change and a `:bits` change - and gets the two-column dance and no
+second mechanism. They are written here so that a later reader can see they
+were chosen rather than fallen into.
+
+One already-stored case exists and is stated rather than discovered. Because
+`:slow` is declared-inert today, a column written under a `slow: true`
+declaration holds plain-HMAC bytes. When `ece-3lc` ships, that column's
+values are computed differently, so **an existing `slow: true` column is
+invalidated by the implementation of this record**. It is decision 7's dance
+like any other, and it is called out because it is the one invalidation a
+host cannot avoid by not changing anything.
+
+**C7. A `slow: true` index against a vault that declares no `:slow_hash` is a
+refusal, not a default.**
+
+Amendment B's B4 is deliberate that an absent `:slow_hash` means the vault
+declares no slow parameters and "a consumer asking for them gets nothing
+rather than a guess". This record says what this package does with that
+nothing: it raises, naming the constraint, and computes no value.
+
+It does not fall back to a plain HMAC. A silent fallback would write
+plain-cost index values into a column the operator believes is hardened - the
+"never rescue-to-default in cryptographic code" convention, and the same
+argument amendment B's B5 makes at its own call site. And it does not invent
+parameters, which would be this package choosing a cryptographic parameter
+set.
+
+The refusal is `Encryptor.Ecto.BlindIndex.DerivationError`, with an
+atom-tuple reason naming the missing configuration and no value, which is
+that exception's existing contract (`derivation.ex:113-118` and `:476-486`,
+ece 33636a9). **No new exception module is introduced**: the pairing of a
+declaration and a vault configuration that cannot serve it is a constant that
+is wrong in the source, which is the family of failure that exception already
+reports, and it already carries the index's identity fields. It is *this*
+package's words rather than a pass-through precisely because the vault cannot
+see the declaration that asked - the contrast with the 2026-08-28 amendment's
+decision 3, where a missing `:derivation_salt` is passed through unchanged
+because it is a fact about the vault alone.
+
+### What this record does not claim
+
+A salt derived through the vault is secret, and it would be easy to read that
+as a new security property: an attacker holding an index key but not the salt
+cannot compute a candidate at any cost. **That is not claimed here, and the
+security-properties table above is unchanged.** The realistic way to hold an
+index key is to hold a vault that can derive it, and such a vault can derive
+the salt in the same call - which is the A9 resolution's point that a
+component able to compute index values is a component able to decrypt. The
+`slow: true` row of that table therefore continues to read "recovery at
+Argon2id cost per guess", and the salt's secrecy is defence in depth that
+this record declines to promise.
+
+### Consequences
+
+**`ece-3lc` can be implemented from this record alone.** The salt's
+construction, its `info` string, its selector, its length, its position in
+the pipeline, the source of the parameters, and the behaviour when a vault
+declares none are all fixed above. Nothing in the implementation bead has to
+choose a cryptographic parameter, which is what this repository's conventions
+require of it.
+
+**Decision 6's `:slow` sentence becomes a description of something that
+exists.** "Parameters come from the vault's configuration rather than this
+package's" has been true as an intent and false as a fact since the option
+shipped; assumption A12 is discharged by `Encryptor.Vault.config/1` with no
+new reader, and A13 by amendment B's B2, which puts the Argon2id input and
+output under the same prohibition for the opposite reason - the danger there
+is that the value is plaintext rather than key-shaped.
+
+**A slow index costs two vault derivations per computation, not one.** The
+second is an HKDF expansion next to an Argon2id hash deliberately tuned to
+cost 64 MiB of memory, so it is not the cost anyone will measure. This record
+fixes the derived value and not its caching: a memoized salt is an
+implementation matter, and any cache holds bytes that the redaction rule
+covers in full.
+
+**A host that turns `:slow` on opts its build into a NIF.** `:argon2_elixir`
+is optional upstream (amendment B's B5) and is not a dependency of this
+package at all. A host declaring a slow index adds it to its own `mix.exs`;
+one that declares none carries no native code, and this package's dependency
+surface is unchanged.
+
+### Open questions this amendment adds
+
+C-1. **Whether the salt component should be spelled into a declaration at
+all.** `"slow-salt"` is a constant a host never sees and cannot influence. If
+a future index-level parameter set arrives (amendment B's own open question
+B-1 asks whether `:slow_hash` should be per index rather than per vault),
+this component is the natural place to hang its identity, and this record
+neither reserves that nor forecloses it.
+
+C-2. **Whether a `slow: true` index should refuse `:bits` truncation.**
+Truncation is a deliberate collision knob (decision 6) and slow hashing is a
+defence against enumeration; a narrow slow index spends the Argon2id cost and
+then discards most of the output's distinguishing power. The two are not
+contradictory - candidates still have to be filtered after decryption - but
+no host has yet asked for the pair, and whether it is a warning, an error, or
+nothing at all is left until one does.
