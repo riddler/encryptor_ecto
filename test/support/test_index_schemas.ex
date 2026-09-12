@@ -112,6 +112,34 @@ defmodule Encryptor.Ecto.TestSchemas.SignupEmail do
   end
 end
 
+defmodule Encryptor.Ecto.TestSchemas.Enrollment do
+  @moduledoc """
+  A slow index on the vault that declares no `:slow_hash`.
+
+  ADR-0003 amendment C's decision C7 is a refusal about a *pairing* - a
+  `slow: true` declaration and a vault configuration that cannot serve it -
+  and nothing else in the fixtures spells that pairing. `Customer`'s phone
+  index is the same declaration against a vault that does declare the
+  parameters, so the two schemas differ in the one thing the decision turns
+  on.
+  """
+
+  use Ecto.Schema
+
+  import Encryptor.Ecto.BlindIndex
+
+  alias Encryptor.Ecto.TestTypes
+
+  @type t :: %__MODULE__{}
+
+  schema "enrollments" do
+    field(:email, TestTypes.GlobalName)
+    field(:email_index, :binary)
+
+    blind_index(:email, :email_index, scope: :global, normalize: :email, slow: true)
+  end
+end
+
 defmodule Encryptor.Ecto.TestSchemas.Wizard do
   @moduledoc """
   A signup wizard's email under a single, truncated index.

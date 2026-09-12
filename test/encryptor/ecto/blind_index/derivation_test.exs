@@ -230,6 +230,131 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
     end
   end
 
+  # ADR-0003 amendment C: the per-index Argon2id salt.
+  #
+  # The two expected values below came out of the same independent RFC 5869
+  # HKDF-SHA256 implementation the vectors above came from - extract under the
+  # deployment salt, expand under `"encryptor/v1/blind-index"`, expand under
+  # `salt_info/1` - run against RFC 5869 appendix A.1 first and against this
+  # file's already-pinned `card_number_index` key as a positive control before
+  # either salt was computed.
+  describe "the Argon2id salt (amendment C decisions C1-C4)" do
+    # sabotage: drop the `@salt_component` from salt_info/1, i.e. derive the
+    # salt under the index key's own info -> red, and red in the worst
+    # possible way: the salt would BE the index key, so the Argon2id stage
+    # would be hashing a value under the very secret that is supposed to key
+    # the HMAC over its output.
+    test "the salt info string is the index key's, with C2's component appended" do
+      assert Derivation.salt_info(card_number_index()) ==
+               "encryptor_ecto/blind_index/v1|payments|card_number|card_number_index|1|slow-salt"
+    end
+
+    # sabotage: allow an empty component in validate_component!/2 -> this
+    # count argument stops holding. C2's separation is structural rather than
+    # probabilistic precisely because no component may be empty or carry the
+    # separator, so an index key's info has exactly four separators and a
+    # salt's has exactly five.
+    test "no declaration can spell a salt's info from the index key side" do
+      derivation = card_number_index()
+
+      assert derivation |> Derivation.info() |> String.split("|") |> length() == 5
+      assert derivation |> Derivation.salt_info() |> String.split("|") |> length() == 6
+    end
+
+    # sabotage: `@salt_component "slow_salt"` (underscore) -> red. The
+    # constant is frozen from the first stored index value of the first host
+    # that turns `:slow` on (C6), so it is pinned to bytes rather than to
+    # itself.
+    test "the salt is 32 pinned bytes" do
+      {:ok, salt} =
+        Derivation.derive_salt(TestVaults.Merchant, card_number_index(), @merchant_7f3)
+
+      assert byte_size(salt) == 32
+
+      assert Base.encode16(salt, case: :lower) ==
+               "9c335768d399e0b70c4d52b72c0e7877b36840dcc462127f97231455a8f423d2"
+    end
+
+    # sabotage: have derive_salt/3 call derive_opts/2 -> red. This is the
+    # assertion that the two derivations under one identity are different
+    # values, which is the whole reason C2 exists.
+    test "the salt is not the index key" do
+      derivation = card_number_index()
+
+      {:ok, salt} = Derivation.derive_salt(TestVaults.Merchant, derivation, @merchant_7f3)
+      {:ok, key} = Derivation.derive(TestVaults.Merchant, derivation, @merchant_7f3)
+
+      refute salt == key
+    end
+
+    # sabotage: drop `key_opt/2` from salt_derive_opts/2, i.e. derive every
+    # tenant's salt under the vault's default selector -> red. C3: a
+    # deployment-wide salt would make the Argon2id output a function of the
+    # plaintext alone, reintroducing one layer in the cross-tenant
+    # correlatability decision 3b argues against.
+    test "the salt derives under the same selector as the index key" do
+      derivation = card_number_index()
+
+      {:ok, salt_7f3} = Derivation.derive_salt(TestVaults.Merchant, derivation, @merchant_7f3)
+      {:ok, salt_a19} = Derivation.derive_salt(TestVaults.Merchant, derivation, @merchant_a19)
+
+      refute salt_7f3 == salt_a19
+    end
+
+    # sabotage: pin the version out of salt_info/1 -> red. C6's claim is that
+    # the salt adds no NEW invalidating trigger, which is only true if it
+    # changes under exactly what the key changes under.
+    test "the salt changes under exactly what the index key changes under" do
+      base = card_number_index()
+
+      for changed <- [
+            card_number_index(version: 2),
+            card_number_index(index_name: "card_number_truncated"),
+            card_number_index(table: "captures"),
+            card_number_index(column: "holder_name")
+          ] do
+        {:ok, base_salt} = Derivation.derive_salt(TestVaults.Merchant, base, @merchant_7f3)
+        {:ok, other_salt} = Derivation.derive_salt(TestVaults.Merchant, changed, @merchant_7f3)
+
+        refute base_salt == other_salt
+      end
+    end
+
+    # sabotage: add a `salt:` key to salt_derive_opts/2 -> red, for
+    # derive_opts/2's own reason: the HKDF salt is the vault's per-deployment
+    # value and a caller cannot supply one.
+    test "salt_derive_opts/2 never names a salt of its own" do
+      opts = Derivation.salt_derive_opts(card_number_index(), @merchant_7f3)
+
+      refute Keyword.has_key?(opts, :salt)
+      assert Keyword.fetch!(opts, :length) == 32
+      assert Keyword.fetch!(opts, :key) == "merchant_7f3"
+    end
+  end
+
+  describe "slow_params!/2 (amendment C decisions C5 and C7)" do
+    # sabotage: return `Kdf`'s own defaults when the vault declares none ->
+    # red. C7: an absent `:slow_hash` is a refusal, not a default.
+    test "a vault declaring no :slow_hash refuses, naming the constraint" do
+      error =
+        assert_raise DerivationError, fn ->
+          Derivation.slow_params!(TestVaults.App, card_number_index())
+        end
+
+      assert error.reason == {:invalid, :slow, :vault_declares_no_slow_hash}
+      assert error.index_name == "card_number_index"
+    end
+
+    # sabotage: interpret the set here - fill a missing key, clamp a value ->
+    # red. C5: the parameters are passed through and never interpreted,
+    # because enc-ADR-0003 amendment B decision 4 completes and validates them
+    # once, at vault start.
+    test "a vault's declared set is passed through as the vault froze it" do
+      assert Derivation.slow_params!(TestVaults.Merchant, card_number_index()) ==
+               Map.new(TestVaults.slow_hash())
+    end
+  end
+
   describe "new!/1" do
     # sabotage: change the version default from 1 to 2 -> red
     test "defaults version to 1 and scope to :tenant" do

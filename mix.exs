@@ -83,7 +83,15 @@ defmodule Encryptor.Ecto.MixProject do
       # any pre-1.0 releases, so a range here would let a host's deps.update
       # change what stored rows mean; the pin widens when the vault's
       # guarantees do.
-      {:encryptor, "== 0.2.0"},
+      #
+      # INTERIM, ece-3lc: pinned to an `encryptor` commit rather than to a Hex
+      # release, because `Encryptor.Kdf.slow_hash/3` - the Argon2id surface
+      # ADR-0003 amendment C's decision C5 hashes through - landed after
+      # `0.2.0`, and the blind index's `:slow` option cannot be wired to a
+      # release that does not carry it. The pin is a SHA rather than a branch
+      # so the build stays reproducible, and `ece-1gy` swaps it back to
+      # `{:encryptor, "== 0.3.0"}` once that release is published.
+      {:encryptor, github: "riddler/encryptor", ref: "e17f55d30f546da40424f445fc09f239660ba031"},
 
       # The serializer `Encryptor.Ecto.Map` defaults to (ADR-0001 decision 8).
       # A direct dependency rather than a transitive one: the vault happens to
@@ -114,6 +122,16 @@ defmodule Encryptor.Ecto.MixProject do
       # survive the adapter's own dump and load path.
       {:ecto_sql, "~> 3.13", only: :test},
       {:postgrex, "~> 0.21", only: :test},
+
+      # The Argon2id NIF `Encryptor.Kdf.slow_hash/3` calls. It is optional
+      # upstream and is deliberately NOT a dependency of this package -
+      # ADR-0003 amendment C's consequences say a host that declares a
+      # `slow: true` index adds it to its own `mix.exs`, and one that declares
+      # none carries no native code. It is here on the same footing as
+      # `ecto_sql` and `postgrex` above: test-only, absent from the published
+      # package, and present so that the slow path is exercised end to end
+      # rather than asserted about.
+      {:argon2_elixir, "~> 4.0", only: [:dev, :test]},
       {:ex_quality, "~> 0.14", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

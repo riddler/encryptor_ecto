@@ -616,9 +616,11 @@ Four facts about this column decide when you can do it, rather than how:
   keys change without any declaration changing, and lookups for that tenant
   miss until the reindex lands. `Encryptor.Ecto.BlindIndex`'s own
   documentation is the full statement.
-- `:slow` (Argon2id before the HMAC) is declared but not available: it is
-  accepted and carried, and it computes nothing, because the vault exposes no
-  Argon2id surface. Do not plan around it.
+- Turning `:slow` (Argon2id before the HMAC) on or off invalidates that column
+  too, for the same reason: it changes what the HMAC is taken over. A column
+  written under a `slow: true` declaration *before* the option was wired holds
+  plain-HMAC bytes and is invalidated by the wiring itself, which is the one
+  reindex on this list that no change of yours triggers.
 
 **A dump taken before the drop still contains the old column.** That is a fact
 about your backups, and this package cannot fix it. It is worth saying plainly

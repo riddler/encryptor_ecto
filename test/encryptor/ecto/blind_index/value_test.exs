@@ -15,12 +15,16 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
   alias Encryptor.Ecto.BlindIndex
   alias Encryptor.Ecto.BlindIndex.Declaration
   alias Encryptor.Ecto.BlindIndex.Derivation
+  alias Encryptor.Ecto.BlindIndex.DerivationError
   alias Encryptor.Ecto.BlindIndex.Value
   alias Encryptor.Ecto.Tenant
   alias Encryptor.Ecto.TestSchemas.Capture
   alias Encryptor.Ecto.TestSchemas.Customer
+  alias Encryptor.Ecto.TestSchemas.Enrollment
+  alias Encryptor.Ecto.TestSchemas.Identity
   alias Encryptor.Ecto.TestSchemas.Variant
   alias Encryptor.Ecto.TestVaults
+  alias Encryptor.Kdf
 
   @merchant "merchant_7f3"
 
@@ -36,14 +40,14 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     test "the value is HMAC-SHA256 of the normalized plaintext under the index key" do
       Tenant.put(@merchant)
 
-      declaration = Declaration.fetch!(Customer, :phone, :phone_index)
+      declaration = Declaration.fetch!(Customer, :email, :email_index)
       derivation = Declaration.derivation!(declaration)
 
       {:ok, index_key} =
         Derivation.derive(TestVaults.Merchant, derivation, {:tenant, @merchant})
 
-      assert Value.compute!(declaration, "+1 (555) 0100", :load) ==
-               :crypto.mac(:hmac, :sha256, index_key, "15550100")
+      assert Value.compute!(declaration, " Bob@Example.COM ", :load) ==
+               :crypto.mac(:hmac, :sha256, index_key, "bob@example.com")
     end
 
     # sabotage: `@key_bytes` in Derivation -> 16, red - a shorter key changes
@@ -150,6 +154,132 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
             do: {declaration.bits, byte_size(Value.compute!(declaration, "b", :load))}
 
       assert widths == [{256, 32}, {192, 24}, {128, 16}, {64, 8}]
+    end
+  end
+
+  # ADR-0003 decision 6's `:slow`, as amendment C fixes it. `Customer`'s phone
+  # index is the worked subject: `slow: true, version: 2` on a vault that
+  # declares `:slow_hash`, next to the same schema's email indexes on the same
+  # vault that declare nothing.
+  describe ":slow hashes with Argon2id before the HMAC (decision 6, amendment C)" do
+    # sabotage: `pre_hash/5`'s slow arm returning `normalized` -> red. This is
+    # the whole wiring in one assertion: the salt is the one C1 derives, the
+    # parameters are the vault's, and the HMAC is taken over the 32 bytes
+    # Argon2id returns rather than over the normalized value.
+    test "the value is the HMAC over slow_hash(normalized, index_salt, params)" do
+      Tenant.put(@merchant)
+
+      declaration = Declaration.fetch!(Customer, :phone, :phone_index)
+      derivation = Declaration.derivation!(declaration)
+      selector = {:tenant, @merchant}
+
+      {:ok, index_key} = Derivation.derive(TestVaults.Merchant, derivation, selector)
+      {:ok, index_salt} = Derivation.derive_salt(TestVaults.Merchant, derivation, selector)
+      params = Derivation.slow_params!(TestVaults.Merchant, derivation)
+
+      slow_input = Kdf.slow_hash("15550100", index_salt, params)
+
+      assert Value.compute!(declaration, "+1 (555) 0100", :load) ==
+               :crypto.mac(:hmac, :sha256, index_key, slow_input)
+    end
+
+    # sabotage: any arm that skips the Argon2id stage -> red. Until this bead
+    # the option was accepted and inert, so a `slow: true` index stored
+    # exactly these bytes; amendment C's C6 names that already-stored case as
+    # the one invalidation a host cannot avoid by changing nothing, and this
+    # is the assertion that it is genuinely invalidated.
+    test "a slow index no longer stores the plain-HMAC bytes" do
+      Tenant.put(@merchant)
+
+      declaration = Declaration.fetch!(Customer, :phone, :phone_index)
+      derivation = Declaration.derivation!(declaration)
+
+      {:ok, index_key} =
+        Derivation.derive(TestVaults.Merchant, derivation, {:tenant, @merchant})
+
+      refute Value.compute!(declaration, "+1 (555) 0100", :load) ==
+               :crypto.mac(:hmac, :sha256, index_key, "15550100")
+    end
+
+    # sabotage: hash the raw value instead of the normalized one -> red.
+    # Decision 6's own wording puts Argon2id "before the HMAC and over the
+    # normalized value", and normalization is what makes an index an index.
+    test "the slow hash is taken over the normalized value, so the normalizer still holds" do
+      Tenant.put(@merchant)
+
+      declaration = Declaration.fetch!(Customer, :phone, :phone_index)
+
+      assert Value.compute!(declaration, "+1 (555) 0100", :load) ==
+               Value.compute!(declaration, "1-555-0100", :load)
+    end
+
+    # sabotage: add `to_string(slow)` to Derivation.info/1 -> red. C5: `:slow`
+    # does not reach the HKDF info string, exactly as `:bits` does not, so a
+    # `slow` flip changes the stored bytes without changing which key the
+    # index derives.
+    test ":slow does not reach the HKDF info string" do
+      info =
+        Customer
+        |> Declaration.fetch!(:phone, :phone_index)
+        |> Declaration.derivation!()
+        |> Derivation.info()
+
+      assert info == "encryptor_ecto/blind_index/v1|customers|phone|phone_index|2"
+      refute info =~ "slow"
+    end
+
+    # sabotage: make `slow_params!/3` unconditional, or `pre_hash/5` derive a
+    # salt whatever it was handed -> red. C5's laziness is what keeps decision
+    # 1's formula literally unchanged for a `slow: false` declaration: this
+    # index is on the vault that declares no `:slow_hash` at all, so anything
+    # that read the parameters or derived a salt for it would refuse.
+    test "a slow: false declaration reads no parameters and derives no salt" do
+      declaration = Declaration.fetch!(Identity, :email, :email_index)
+
+      assert declaration.slow == false
+      assert byte_size(Value.compute!(declaration, "bob@example.com", :load)) == 32
+    end
+
+    # sabotage: rescue the refusal into a plain HMAC -> red. C7: a silent
+    # fallback would write plain-cost index values into a column the operator
+    # believes is hardened.
+    test "a slow index against a vault declaring no :slow_hash refuses and computes nothing" do
+      declaration = Declaration.fetch!(Enrollment, :email, :email_index)
+
+      error =
+        assert_raise DerivationError, fn ->
+          Value.compute!(declaration, "bob@example.com", :load)
+        end
+
+      assert error.reason == {:invalid, :slow, :vault_declares_no_slow_hash}
+    end
+
+    # sabotage: move the parameter read below `Declaration.normalize!/2` ->
+    # red. The pairing of a declaration and a vault configuration that cannot
+    # serve it is a constant that is wrong in the source, and a constant that
+    # is wrong in the source has to be wrong whether or not the value that
+    # arrived happens to normalize.
+    test "the refusal does not wait for the value to normalize" do
+      declaration = Declaration.fetch!(Enrollment, :email, :email_index)
+
+      assert_raise DerivationError, fn ->
+        Value.compute!(declaration, :not_a_binary, :load)
+      end
+    end
+
+    # sabotage: raise a bare `RuntimeError` carrying the value, or put the
+    # plaintext in the reason -> red. ADR-0001 decision 6's prohibition is
+    # unchanged by the new arm: the reason is a tuple of atoms naming a
+    # violated constraint, never a value.
+    test "the refusal carries no plaintext" do
+      declaration = Declaration.fetch!(Enrollment, :email, :email_index)
+
+      error =
+        assert_raise DerivationError, fn ->
+          Value.compute!(declaration, "bob@example.com", :load)
+        end
+
+      refute Exception.message(error) =~ "bob@example.com"
     end
   end
 

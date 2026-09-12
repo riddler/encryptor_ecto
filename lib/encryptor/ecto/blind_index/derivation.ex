@@ -99,6 +99,39 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   come from on a real write path. That is `put_index/3`'s, and it belongs to
   the surface bead rather than to this one.
 
+  ## The Argon2id salt
+
+  ADR-0003 amendment C adds a second value derived under this same identity:
+  the per-index Argon2id salt a `slow: true` declaration hashes its normalized
+  plaintext under. It is obtained exactly the way the index key is - the same
+  `derive/3` call, the same reserved `"blind-index"` purpose, the same
+  selector, the same 32 bytes - and differs only in the `info` string, which
+  carries one further component:
+
+      salt_info = <the index key's info> <> "|slow-salt"
+
+  Decision C1 rejects the three alternatives by name: a literal constant is
+  identical in every deployment of this package and precomputable against all
+  of them at once, a stored random salt puts durable state into a package
+  whose decision 5 promises none, and a host-supplied salt makes a
+  cryptographic parameter a call-site constant. Deriving through the vault
+  costs one HKDF expansion and gets a salt that is per deployment - because
+  the extract is under the vault's `:derivation_salt` - per index, per tenant
+  (C3), and stable for the life of the index without existing anywhere but in
+  the derivation.
+
+  The separation from the index key's own `info` is structural rather than
+  probabilistic, which is decision C2's argument and the reason the component
+  is appended rather than mixed in: no component may be empty or carry the
+  separator, so an index key's `info` has exactly four separators and a salt's
+  has exactly five, and no declaration a host can write produces one from the
+  other side of that count.
+
+  Nothing here is derived unless it is asked for. `derive_salt/3` is a
+  separate call from `derive/3` precisely so that a `slow: false` declaration
+  performs exactly one derivation and decision 1's formula is literally
+  unchanged for it.
+
   ## Scope
 
   `selector!/3` discharges decision 3a. It has no tenant channel of its own
@@ -123,6 +156,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   alias Encryptor.Ecto.TenantContext
   alias Encryptor.Kdf
   alias Encryptor.Vault
+  alias Encryptor.Vault.Config
 
   # enc-ADR-0003 decision 7's reserved purpose. `Encryptor.Kdf.label/1` writes
   # the "encryptor/v1/" namespace; naming the purpose here is what keeps the
@@ -138,7 +172,19 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   # 32 bytes at both layers: the amendment's outer expansion says 32, and 32
   # is HMAC-SHA256's block-independent natural key size, which is what the
   # inner key is used as (decision 1).
+  #
+  # The Argon2id salt takes the same 32 rather than a constant of its own,
+  # which is amendment C decision C4: enc-ADR-0003 amendment B's floor is 16,
+  # this is already the length every derivation here asks for, and a second
+  # length constant would be a second thing to keep in step with no reason to
+  # differ.
   @key_bytes 32
+
+  # Amendment C decision C2's one appended component, verbatim from the
+  # record. It is what keeps the salt and the index key apart, and it is
+  # frozen from the first stored index value of the first host that turns
+  # `:slow` on (C6).
+  @salt_component "slow-salt"
 
   @enforce_keys [:table, :column, :index_name, :version]
   defstruct [:table, :column, :index_name, :version, scope: :tenant]
@@ -272,6 +318,33 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   end
 
   @doc """
+  The HKDF `info` string the per-index Argon2id salt derives under.
+
+  Amendment C decision C2: `info/1`'s string with `"|slow-salt"` appended.
+  Public for the same reason `info/1` is - it is a constant the operator's
+  crypto read checks, and a constant only observable through the bytes it
+  produces is a constant nobody reviews.
+
+      iex> Encryptor.Ecto.BlindIndex.Derivation.new!(
+      ...>   table: "payments", column: "card_number", index_name: "card_number_index")
+      ...> |> Encryptor.Ecto.BlindIndex.Derivation.salt_info()
+      "encryptor_ecto/blind_index/v1|payments|card_number|card_number_index|1|slow-salt"
+
+  It changes under exactly the changes `info/1` changes under and under no
+  others, which is what makes decision C6's claim - that the salt adds no new
+  way to invalidate a column - true rather than merely intended:
+
+      iex> Encryptor.Ecto.BlindIndex.Derivation.new!(
+      ...>   table: "payments", column: "card_number",
+      ...>   index_name: "card_number_index", version: 2)
+      ...> |> Encryptor.Ecto.BlindIndex.Derivation.salt_info()
+      "encryptor_ecto/blind_index/v1|payments|card_number|card_number_index|2|slow-salt"
+  """
+  @spec salt_info(t()) :: String.t()
+  def salt_info(%__MODULE__{} = derivation),
+    do: info(derivation) <> @info_separator <> @salt_component
+
+  @doc """
   The label of the outer expansion, which belongs to `encryptor`.
 
       iex> Encryptor.Ecto.BlindIndex.Derivation.outer_label()
@@ -314,6 +387,41 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   end
 
   @doc """
+  The `Encryptor.Vault.derive/3` options the Argon2id salt derives under.
+
+  `derive_opts/2` with `salt_info/1` in place of `info/1`, and identical in
+  every other position - amendment C decision C3 puts the salt under the same
+  selector as the index key, and C4 puts it at the same length.
+
+      iex> alias Encryptor.Ecto.BlindIndex.Derivation
+      iex> Derivation.new!(table: "payments", column: "card_number",
+      ...>   index_name: "card_number_index")
+      ...> |> Derivation.salt_derive_opts({:tenant, "merchant_7f3"})
+      [
+        info: "encryptor_ecto/blind_index/v1|payments|card_number|card_number_index|1|slow-salt",
+        length: 32,
+        key: "merchant_7f3"
+      ]
+
+  C3 is the cheap choice and the stronger one: a deployment-wide salt would
+  make the Argon2id output a function of the plaintext alone, reintroducing
+  one layer in the cross-tenant correlatability decision 3b argues against.
+  Resolving one selector per computation and using it twice is also what makes
+  it impossible for the salt and the key to disagree about which tenant a row
+  belongs to.
+
+      iex> alias Encryptor.Ecto.BlindIndex.Derivation
+      iex> Derivation.new!(table: "signups", column: "email",
+      ...>   index_name: "email_index", scope: :global)
+      ...> |> Derivation.salt_derive_opts(:global)
+      [info: "encryptor_ecto/blind_index/v1|signups|email|email_index|1|slow-salt", length: 32]
+  """
+  @spec salt_derive_opts(t(), selector()) :: keyword()
+  def salt_derive_opts(%__MODULE__{} = derivation, selector) do
+    [info: salt_info(derivation), length: @key_bytes] ++ key_opt(derivation, selector)
+  end
+
+  @doc """
   Derives the 32-byte index key for one identity, through `vault`.
 
   The whole construction is the vault's - `Encryptor.Vault.derive/3` extracts
@@ -336,6 +444,68 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   @spec derive(module(), t(), selector()) :: {:ok, binary()} | {:error, Encryptor.Error.t()}
   def derive(vault, %__MODULE__{} = derivation, selector) when is_atom(vault) do
     Vault.derive(vault, @outer_purpose, derive_opts(derivation, selector))
+  end
+
+  @doc """
+  Derives the 32-byte Argon2id salt for one identity, through `vault`.
+
+  Amendment C decision C1. The same call `derive/3` makes, under
+  `salt_derive_opts/2` - so the salt is a pure function of the vault's
+  `:derivation_salt`, the selector's key material, and the constants
+  `salt_info/1` composes. Nothing in it is random, time-varying, stored, or
+  configurable, which is what enc-ADR-0003 amendment B decision 3 requires of
+  a slow-hash salt and what decision C6 promises about it.
+
+  It is a separate function rather than a second return from `derive/3`
+  because C5 makes the salt **lazy**: a `slow: false` declaration must
+  perform exactly one derivation, and a call that always produced both would
+  spend an HKDF expansion on every index in the package to serve the ones
+  that ask.
+
+  The result is the vault's tagged tuple, unwrapped by nothing here, for the
+  reason `derive/3` gives: a vault with no `:derivation_salt` is a fact about
+  the vault rather than about this index's declaration.
+  """
+  @spec derive_salt(module(), t(), selector()) :: {:ok, binary()} | {:error, Encryptor.Error.t()}
+  def derive_salt(vault, %__MODULE__{} = derivation, selector) when is_atom(vault) do
+    Vault.derive(vault, @outer_purpose, salt_derive_opts(derivation, selector))
+  end
+
+  @doc """
+  The Argon2id parameters a slow index hashes under, read off `vault`.
+
+  Amendment C decision C5: the parameters are the vault's frozen `:slow_hash`
+  configuration, read through `Encryptor.Vault.config/1`, **passed through and
+  never interpreted**. enc-ADR-0003 amendment B decision 4 completes and
+  validates the set once, at vault start, so there is nothing left here to
+  check and nothing here that could disagree with the primitive about what a
+  complete set is.
+
+  A vault that declares no `:slow_hash` declares no slow parameters, and
+  decision C7 says what this package does with that: it raises
+  `Encryptor.Ecto.BlindIndex.DerivationError` and computes no value. It does
+  not fall back to a plain HMAC, which would write plain-cost bytes into a
+  column an operator believes is hardened, and it does not invent parameters,
+  which would be this package choosing a cryptographic parameter set.
+
+  The refusal is this package's words rather than the vault's - the contrast
+  with `derive/3`'s missing `:derivation_salt` - because the vault cannot see
+  the declaration that asked. What is wrong is the *pairing* of a `slow: true`
+  declaration and a vault configuration that cannot serve it, and a reader
+  sent to the vault alone would find nothing there to fix.
+  """
+  @spec slow_params!(module(), t()) :: Kdf.params()
+  def slow_params!(vault, %__MODULE__{} = derivation) when is_atom(vault) do
+    case Vault.config(vault) do
+      {:ok, %Config{slow_hash: nil}} ->
+        refuse!(derivation, {:invalid, :slow, :vault_declares_no_slow_hash})
+
+      {:ok, %Config{slow_hash: params}} ->
+        params
+
+      {:error, error} ->
+        raise error
+    end
   end
 
   @doc """
