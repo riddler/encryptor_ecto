@@ -180,6 +180,40 @@ defmodule Encryptor.Ecto.TestVaults do
     end
   end
 
+  defmodule MerchantStatic do
+    @moduledoc """
+    `Merchant` with a deployment-wide context pair of its own.
+
+    `:static_encryption_context` is vault configuration rather than anything a
+    field declares, so its pairs are on every message this vault writes and on
+    none of the pairs `Encryptor.Ecto.Binary.declared_context/1` composes. That
+    makes it the only fixture that can hold the migrator's probe to the *merge*
+    of the two: a probe comparing the declaration alone would find a pair it
+    did not expect on the target's own rows and rewrite every one of them,
+    forever.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :tenant,
+      algorithm_suite_id: 0x0478,
+      required_context: ["table", "column"],
+      static_encryption_context: %{"deployment" => "eu-west-1"},
+      cache: false
+
+    alias Encryptor.Ecto.TestVaults
+
+    @doc "Layer 5: `Merchant`'s own provider and subkey."
+    def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: TestVaults.merchant_provider(),
+         reference_subkey: TestVaults.reference_subkey(),
+         derivation_salt: TestVaults.derivation_salt()
+       )}
+    end
+  end
+
   defmodule MerchantSigned do
     @moduledoc """
     `Merchant` writing the other algorithm suite.

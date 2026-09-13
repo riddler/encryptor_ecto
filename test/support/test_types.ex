@@ -32,6 +32,15 @@ defmodule Encryptor.Ecto.TestTypes do
       column: "pan"
   end
 
+  defmodule PanStatic do
+    @moduledoc "`Pan`'s declaration over the vault that adds a static context pair."
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.MerchantStatic,
+      table: "cards",
+      column: "pan"
+  end
+
   defmodule Notes do
     @moduledoc "A second field in the same table, to show the column separates them."
 

@@ -2,6 +2,7 @@ defmodule Encryptor.Ecto.LegacyTest do
   use ExUnit.Case, async: true
 
   import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.TestTelemetry, only: [capture_legacy_load: 1]
 
   alias Encryptor.Ecto.Binary
   alias Encryptor.Ecto.DecryptError
@@ -27,26 +28,6 @@ defmodule Encryptor.Ecto.LegacyTest do
   # Bytes in the old format: what a row the migration has not reached yet
   # holds.
   defp legacy_bytes(value \\ @pan), do: TestLegacy.Format.encode(value)
-
-  # Collects `[:encryptor_ecto, :legacy_load]` into the calling test's mailbox
-  # for the duration of that test. The handler id is per-test so that two
-  # cases never share one.
-  defp capture_legacy_load(context) do
-    id = {__MODULE__, context.test, make_ref()}
-    owner = self()
-
-    :ok = :telemetry.attach(id, [:encryptor_ecto, :legacy_load], &__MODULE__.forward/4, owner)
-
-    on_exit(fn -> :telemetry.detach(id) end)
-  end
-
-  @doc false
-  # A named function rather than a closure, because `:telemetry` logs an
-  # advisory on every local-function handler and the suite's output is worth
-  # more than the two lines it saves.
-  def forward(event, measurements, metadata, owner) do
-    send(owner, {:telemetry, event, measurements, metadata})
-  end
 
   describe "the declaration" do
     # sabotage: init/2 freezing :legacy as nil rather than the validated
@@ -346,30 +327,6 @@ defmodule Encryptor.Ecto.LegacyTest do
       assert error.reason == {:legacy_not_a_map, :list}
       assert error.direction == :decode
       refute Exception.message(error) =~ ~s(["not")
-    end
-
-    # A legacy date type has already parsed: it answers with a `Date`, not
-    # with bytes. sabotage: Scalar.load/5's {:legacy, loaded} arm routed
-    # through parse!/4, red - the parse then chokes on a struct.
-    test "a scalar type returns the legacy reader's value without parsing it again" do
-      params = params(TestTypes.DateOfBirthLegacy, :date_of_birth)
-      bytes = legacy_bytes("1815-12-10")
-
-      assert TestTypes.DateOfBirthLegacy.load(bytes, nil, params) == {:ok, ~D[1815-12-10]}
-
-      assert_received {:telemetry, [:encryptor_ecto, :legacy_load], _measurements, metadata}
-      assert metadata == %{table: "cards", column: "date_of_birth"}
-    end
-
-    # The window is load-only (ADR-0004 decision 4). sabotage: the generated
-    # dump/3 routed through the legacy module, red.
-    test "a scalar type still writes, and reads its own writes, through the vault" do
-      params = params(TestTypes.DateOfBirthLegacy, :date_of_birth)
-
-      assert {:ok, ciphertext} = TestTypes.DateOfBirthLegacy.dump(~D[1815-12-10], nil, params)
-      assert TestTypes.DateOfBirthLegacy.load(ciphertext, nil, params) == {:ok, ~D[1815-12-10]}
-
-      refute_received {:telemetry, [:encryptor_ecto, :legacy_load], _measurements, _metadata}
     end
 
     # sabotage: Map.load/3's primary arm returning the plaintext

@@ -25,12 +25,14 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   alias Encryptor.Ecto.Tenant
   alias Encryptor.Ecto.TestEnginePlans
   alias Encryptor.Ecto.TestEngineTypes
+  alias Encryptor.Ecto.TestLegacy
   alias Encryptor.Ecto.TestRepo
   alias Encryptor.Ecto.TestSchemas
   alias Encryptor.Ecto.TestTypes.Pan
   alias Encryptor.Ecto.TestTypes.PanRekeyed
   alias Encryptor.Ecto.TestTypes.PanSigned
   alias Encryptor.Ecto.TestTypes.Pinned
+  alias Encryptor.Message
 
   @merchant "merchant_7f3"
   @other_merchant "merchant_a19"
@@ -662,6 +664,95 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       written = raw(:cards, id, :pan)
 
       assert {:ok, second} = Migrator.run(TestEnginePlans.PlainTarget, mode: :write)
+
+      assert second.counts.already_target == 1
+      assert second.counts.migratable == 0
+      assert raw(:cards, id, :pan) == written
+    end
+
+    # The vault's `:static_encryption_context` is on every message it writes
+    # and on nothing a field declares, so the probe's declaration is the
+    # *merge* of the two. Sabotage: dropped `config.static_encryption_context`
+    # from `target_header/2`'s `Map.merge` - the target's own rows carried a
+    # pair the comparison did not expect, failed it, and went to the source
+    # reader, which reported every already-migrated row undecryptable.
+    test "a vault's static context pairs are part of what the probe compares" do
+      id = insert_card(pan: legacy(@pan))
+
+      assert {:ok, first} = Migrator.run(TestEnginePlans.StaticContext, mode: :write)
+      assert first.counts.migratable == 1
+
+      written = raw(:cards, id, :pan)
+
+      # The fixture is only worth anything if the pair really is in the
+      # message: a vault that quietly wrote none would make the run below
+      # pass for the wrong reason.
+      assert {:ok, info} = Message.describe(written)
+      assert info.encryption_context["deployment"] == "eu-west-1"
+
+      assert {:ok, second} = Migrator.run(TestEnginePlans.StaticContext, mode: :write)
+
+      assert second.counts.already_target == 1
+      assert second.counts.migratable == 0
+      assert second.failures == []
+      assert raw(:cards, id, :pan) == written
+    end
+
+    # The tenant-reference pair is compared for presence and not for value,
+    # and a global field's messages carry none. Sabotage: inverted
+    # `target_header/2`'s `tenant_ref?` (`params.tenant == :none`) - this
+    # field's own rows claimed a reference the message does not carry and were
+    # rewritten on every run. (The tenant-bearing half of the same inversion
+    # is what "a second run finds every row already in the target state"
+    # catches, which is why the branch needs this row as well as that one.)
+    test "a global field's rows are recognised by carrying no tenant reference" do
+      id = insert_signup(variant_notes: legacy("variant A wins"))
+
+      assert {:ok, _first} = Migrator.run(TestEnginePlans.Global, mode: :write)
+      written = raw(:signups, id, :variant_notes)
+
+      assert {:ok, second} = Migrator.run(TestEnginePlans.Global, mode: :write)
+
+      assert second.counts.already_target == 1
+      assert second.counts.migratable == 0
+      assert raw(:signups, id, :variant_notes) == written
+    end
+  end
+
+  describe "a target that declares `legacy:`" do
+    # The load probe cannot answer this one: the target reads the old format
+    # for as long as the window is open (ADR-0001 acceptance amendment 4), so
+    # a probe that took a successful load for "already in the target state"
+    # would count every un-migrated row migrated and rewrite none of them.
+    # Sabotage: had `probe/3`'s `target_header: nil` clause match every pass -
+    # the row below was counted `already_target` and left in the legacy
+    # format, which is the migration window that never closes.
+    test "a row still in the legacy format is migratable and is rewritten" do
+      bytes = TestLegacy.Format.encode(@pan)
+      id = insert_card(pan: bytes)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.LegacyWindow, mode: :write)
+
+      assert report.counts.migratable == 1
+      assert report.counts.already_target == 0
+      assert report.failures == []
+      refute raw(:cards, id, :pan) == bytes
+
+      Tenant.put(@merchant)
+      assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, id)
+    end
+
+    # Sabotage: made `claimed/2` answer `:no` for every header - the rewritten
+    # rows went round again through the legacy reader, which still reads
+    # nothing but the old format, so the second run reported them
+    # undecryptable rather than done.
+    test "a second run finds the rewritten rows already in the target state" do
+      id = insert_card(pan: TestLegacy.Format.encode(@pan))
+
+      assert {:ok, _first} = Migrator.run(TestEnginePlans.LegacyWindow, mode: :write)
+      written = raw(:cards, id, :pan)
+
+      assert {:ok, second} = Migrator.run(TestEnginePlans.LegacyWindow, mode: :write)
 
       assert second.counts.already_target == 1
       assert second.counts.migratable == 0
