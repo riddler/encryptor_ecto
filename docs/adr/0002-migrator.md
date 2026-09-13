@@ -730,6 +730,10 @@ Encryptor.Ecto.Migrator.run(MyApp.Encryption.Rotate,
 )
 ```
 
+This paragraph is refined by the amendment at the foot of this file
+(2026-09-13): the invocation above is the rotation pass's shape, and it
+rewrites nothing until it also carries `writing_key:`.
+
 And the acceptance check:
 
 ```
@@ -1009,3 +1013,219 @@ word above flips.
 
 Provenance: campaign RF045, bead ece-lqz (the record half); the code half is
 ece-4vz.
+
+## Amendment (2026-09-13): the rotation pass - one option, a key-name comparison, and no new report class
+
+Status: proposed
+
+The worked example says that a single tenant's data-key rotation (R2) "is the
+same tool with a filter and `from`/`to` naming the same module"
+(`docs/adr/0002-migrator.md:723-731`, ece 6592581), and the operations table
+assigns R2 to this record (`:275`, ece 6592581). The spelling is right and the
+ownership is right. What the example does not say is that the pass it shows
+**rewrites nothing**, and this amendment supplies the one thing that makes it
+rewrite the rows it is pointed at.
+
+### The defect
+
+A rotation's `from:` and `to:` are one declaration under one vault, and A11 and
+A12 say that is a vault which still decrypts the outgoing version:
+"old and new versions coexist in one table for the duration of a pass", and
+"prior versions stay decryptable until an explicit shred"
+(`docs/adr/0002-migrator.md:581-582`, ece 6592581). So both probes answer
+"already in the target state" for a row written under the previous version.
+`load_probe/2` loads it, because the vault can
+(`lib/encryptor/ecto/migrator/pass.ex:605-612`, ece 6592581). The header probe
+accepts it, because
+`against_declaration/2` compares the declared encryption context, the
+`tenant_ref` presence and the algorithm suite and nothing else
+(`pass.ex:562-581`, ece 6592581), and every one of those three is identical
+across a rotation. `against_proof/4` then believes the claim as soon as one row
+under that identity has loaded (`pass.ex:530-543`, ece 6592581). Every row is
+counted `:already_target` and the pass writes nothing.
+
+The data the fix needs is already being read. The header probe calls
+`Encryptor.Message.describe/1`, which is documented for exactly this use - "for
+a migration that needs to know which key version wrote a row"
+(enc `lib/encryptor/message.ex:63`, in the `@doc` at `:56-92`, enc c50c9e1) -
+and the writing key's name arrives in each entry of `encrypted_data_keys`
+(enc `lib/encryptor/message/info.ex:43`, and the `key_name` paragraph at
+`:28-31`, enc c50c9e1). It is already in the probe's hands: the identity
+`against_proof/4` keys its proof cache on is `%{suite: ..., keys:
+info.encrypted_data_keys}` (`pass.ex:205`, ece 6592581), so the cache already
+separates a stale-version row from a current-version one. Only the comparison
+is missing.
+
+### The option
+
+**A rotation is a rewrite pass with one option set: `writing_key:`, a single
+key name as a string, defaulting to `nil`.** It joins `run/2`'s option list
+(`lib/encryptor/ecto/migrator.ex:181-193`, ece 6592581); the field spec gains
+nothing, and `@field_options` stays exactly as the preceding amendment left it
+(`lib/encryptor/ecto/migration.ex:167`, ece 6592581). A rotation is a property
+of a pass, not of a column.
+
+The option is named for what it compares - the message's writing key - rather
+than for the procedure it serves. Naming it `rotate:` would say that this
+package performs the rotation, and it does not: A10 is that "the migrator never
+selects a key version, it only causes a re-encrypt"
+(`docs/adr/0002-migrator.md:580`, ece 6592581), and upstream ships no
+`rotate/2` to delegate to (enc
+`docs/adr/0005-rotation-and-crypto-shred.md:675`, enc c50c9e1). The option
+states a fact about the rows, and the pass's answer to a scope already under
+that key is an honest "nothing to do".
+
+**`mode:` is unchanged, and there is no rotation mode.** Decision 7 stands
+whole: `mode:` is required and is exactly one of `:dry_run` or `:write`
+(`docs/adr/0002-migrator.md:441-442`, ece 6592581), `t:mode/0` stays
+`:dry_run | :write` and `t:pass_mode/0` stays `mode() | :verify`
+(`lib/encryptor/ecto/migrator.ex:129` and `:140`, ece 6592581). A rotation is a
+`:dry_run` or a `:write` pass with `writing_key:` set; the dry run is the
+census and the write is the rewrite, exactly as for every other pass.
+
+**`writing_key:` requires a scope with one key holder.** A tenant's wrapping
+key name is built as `"t/" <> tenant_ref <> "/v" <> version` (enc
+`lib/encryptor/envelope.ex:573-574`, enc c50c9e1), so one literal name belongs
+to one tenant and comparing it against another tenant's rows would classify
+every one of them migratable. A `writing_key:` pass over a tenant-profile
+vault therefore requires `only_tenants:` naming exactly one tenant
+(`lib/encryptor/ecto/migrator.ex:81`, ece 6592581); over a global-profile
+vault, whose scope holds one key holder already, it requires no tenant filter
+and permits none. Anything else is refused at option validation, in the same
+voice the existing filter refusals use. `only:` remains orthogonal and
+permitted - a rotation narrowed to some of the plan's columns is a partial
+rotation, and upstream's P2 preconditions already say what a missed column
+costs (enc `docs/adr/0005-rotation-and-crypto-shred.md:363-366`, enc c50c9e1).
+
+### The comparison, and where the current version comes from
+
+**The comparison is name equality.** A row is in the target state when every
+entry of the header's `encrypted_data_keys` claims `key_name` equal to the
+`writing_key:` value; a row claiming any other name is not, and is rewritten.
+The name is a version identity that travels in the clear, and it is a
+pseudonym rather than a tenant identifier (enc
+`lib/encryptor/message/info.ex:28-31`, enc c50c9e1), so carrying it in an
+option discloses nothing the ciphertext did not already disclose to its holder.
+It is a comparison target and never an authorization input, which is the
+condition `describe/1`'s documentation attaches to every value it returns.
+
+**The pass learns the current version from the option, which is to say from the
+operator running the plan.** Of the three places it could come from, this is
+the only one that exists:
+
+- *Not the vault.* Upstream offers no keyless reader for "this tenant's current
+  version". `Encryptor.Envelope.key_name/2` is `@doc false` and package-internal
+  (enc `lib/encryptor/envelope.ex:569-574`, enc c50c9e1) and the only `version`
+  resolver beside it is a private option reader, not a store query (enc
+  `lib/encryptor/envelope.ex:714-723`, enc c50c9e1). Asking for such a reader
+  would be new upstream surface, and this record does not ask for it.
+- *Not the provider.* The migrator holds no provider, keyring or key-store
+  handle, and decision 9's refusal to grow one survives the acceptance
+  rewording of A14 (`docs/adr/0002-migrator.md:599-603`, ece 6592581). The
+  current version lives in the host's key store, where the host itself inserted
+  it: upstream's P2 step 1 provisions version *n+1* and "the host inserts the
+  row" (enc `docs/adr/0005-rotation-and-crypto-shred.md:372-373`, enc c50c9e1).
+- *So the plan's invocation.* The operator who has just run P2 step 1 knows the
+  name of the version they minted, and step 2 is "downstream's tool and
+  downstream's runbook" (enc
+  `docs/adr/0005-rotation-and-crypto-shred.md:374-375`, enc c50c9e1). Stating
+  the name is how the runbook hands that fact across the boundary. A stale name
+  is self-correcting rather than dangerous: every row is classified migratable
+  and rewritten, each rewrite encrypts under whatever version is actually
+  current (A10), and a second pass under the right name reports a clean scope.
+
+### The report class: the closed set is unchanged
+
+**Rotation adds no class.** `Report.classes/0` stays the five it is today -
+`:null`, `:already_target`, `:migratable`, `:migratable_unverified`,
+`:undecryptable` (`lib/encryptor/ecto/migrator/report.ex:112-113`, ece
+6592581) - and a rotation's rows are counted under them with their existing
+meanings:
+
+| The row | Class | Why |
+|---|---|---|
+| Column is `NULL` | `:null` | Unchanged; nothing to do |
+| Header claims the `writing_key:` name | `:already_target` | The probe succeeded |
+| Header claims some other name | `:migratable` | The probe failed and the `from` load succeeded - which it does, by A11 |
+| Header claims some other name, on a field declaring `source_authenticated: false` | `:migratable_unverified` | The existing substitution, unchanged |
+| Neither side loads | `:undecryptable` | Unchanged; an operator's decision |
+
+`:migratable` is not a strained reading here. Its definition is "the probe
+failed and the `from` load succeeded" (`report.ex:17-19`, ece 6592581), and for
+a rotation both halves are literally true: the header comparison failed and the
+outgoing version still decrypts. `:not_target` stays what it is, an internal
+probe answer rather than a class, and nothing above needs it to become one.
+
+### What rotation adds to the probe, and nothing else
+
+**The version comparison is the only thing rotation adds.** It is one
+additional predicate inside the header probe's claim check, before the claim is
+handed on: when `writing_key:` is set and the header's names do not all match
+it, `claimed/2` answers `:no` (`pass.ex:552-560`, ece 6592581) and the row is
+rewritten without a load being attempted. Nothing else moves.
+`against_proof/4` is untouched, and does not need touching, because a
+stale-version header makes a different identity and never reaches a proof
+entry made by a current-version one. `load_probe/2` is untouched, and is not
+consulted for a row the comparison has already rejected, so rotation costs no
+decrypt it did not already cost. The plan resolution, the cursor, the batching,
+the concurrent-write re-probe and the write path are untouched.
+
+One consequence is worth stating because it is a refusal rather than a
+behaviour: a field whose target this package cannot read a header claim out of
+takes the load probe instead (`pass.ex:514-515`, ece 6592581), and the load
+probe cannot answer the rotation question at all. A `writing_key:` pass whose
+scope contains such a field is refused at plan resolution rather than run with
+that field silently answering "already in the target state" for every row.
+That silence is the defect this amendment exists to remove, and it is not
+acceptable one field at a time either.
+
+### A rotation is verified by its own dry run, not by `verify/2`
+
+`verify/2` takes a closed pair of options (`:sample` and `:prefix`,
+`lib/encryptor/ecto/migrator.ex:195`, ece 6592581) and it does not gain
+`writing_key:`. It could not use it: a verification takes the load probe by
+design and, by A12, the outgoing version loads. So the acceptance check for a
+rotation is a second `mode: :dry_run` pass with the same `writing_key:` value,
+reporting an empty migratable count over the whole scope.
+
+This is the census upstream's procedure already asks for - "no row remains
+whose header names version *n*, per the same census as P1's verification"
+(enc `docs/adr/0005-rotation-and-crypto-shred.md:383-384`, and the census
+sentence at `:338`, enc c50c9e1) - and it is a census over stored bytes, which
+is what a dry run with this option is. Nothing in decision 10 changes and
+`verify/2`'s contract is not narrowed; a rotation simply is not the question
+`verify/2` answers.
+
+### Ownership
+
+**The rotation model is upstream's; the probe and its option are this
+record's.** `encryptor`'s ADR-0005 owns what a rotation is, what it costs, the
+window between a rotation and a shred, and the order of the procedure - and
+its P2 step 2 hands the row rewrite to this package by name, "nothing in this
+package participates" (enc
+`docs/adr/0005-rotation-and-crypto-shred.md:374-375`, enc c50c9e1). This
+record owns the pass that performs step 2: the comparison, the option that
+turns it on, the scope rule, the classification, and the refusals. The
+operations table's assignment of R2 to this record (`:275`, ece 6592581)
+stands, and R1 and R4 stay upstream's, unchanged.
+
+### The code half
+
+The code half adds `:writing_key` to `run/2`'s known options and its option
+validation, threads it into the pass, and adds the one predicate in the header
+probe's claim check. The worked example's R2 invocation gains the option. The
+addition is recorded as an `Added` changelog fragment, because it is a public
+option a host reading the published documentation would write.
+
+This amendment **asserts the rules above** and delegates the proof to a test in
+the migrator run suite: a row written under an outgoing version, under a vault
+that decrypts both versions, is classified `:already_target` without
+`writing_key:` and `:migratable` with it, and is rewritten under the current
+version by a `mode: :write` pass. It is that test, not this record, that
+enumerates the cases.
+
+Nothing in the decision text above changes, no other amendment changes, and no
+status word above flips.
+
+Provenance: campaign RF045, bead ece-a7s (the record half); the code half is
+ece-uiw.
