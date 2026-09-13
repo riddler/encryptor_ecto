@@ -626,7 +626,7 @@ are historical rather than wrong, and neither is edited:
   happened after it - after the accuracy pass that Note records, which is the
   order acceptance wants.
 - Assumption A5 is phrased "... before this record is accepted". That moment
-  is now, and A5 held at it: the only wrap record `encryptor` has added since
+  is now, and A5 held at it: the one further wrap record `encryptor` carries
   is its ADR-0008, which is keyring-backed - "The classification stands: AWS
   KMS is keyring-backed, it maps to the engine's own AWS KMS keyrings"
   (`enc docs/adr/0008-aws-kms-keyring-backed.md:39-41`, read at `6acefff`) -
