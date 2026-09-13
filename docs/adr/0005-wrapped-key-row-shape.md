@@ -503,7 +503,20 @@ reader should trust.
 | Context, open question 1 | `enc 0007:851-856` | `enc 0007:852-855` - 851 is the question's own heading line, and the quote stops at "not a decision" |
 | Decision 5, the ride-along rule | `key_store.ex:117-121`, at `a0717e9` | `key_store.ex:181-184`, at `f441f66` |
 | Decision 1, "`postgrex` is a test-only dependency" | `mix.exs:107-123`, at `a0717e9` | `mix.exs:115-116`, at `f441f66` - the two `only: :test` lines are the claim; 107-114 is the comment above them |
-| Decision 6, the exit-2 refusal | `encryptor.ecto.gen.key_store_migration.ex:182-196`, at `a0717e9` | `:98-105` (`main/1`, which routes an error to `CLI.usage_error/1`) and `:211-217` (`unwritten/2`, which produces it), with the `2` itself at `lib/encryptor/ecto/migrator/cli.ex:113-117`, all at `f441f66` |
+
+Decision 6's exit-2 cite belongs in a different category and is corrected
+separately. `encryptor.ecto.gen.key_store_migration.ex:182-196` at `a0717e9`
+covered both `unwritten/2` and the sentence the record quotes, so it neither
+ran past nor fell short. What is wrong there is the **attribution**: the
+record says `unwritten/2` "refuses with exit 2", and `unwritten/2` returns
+`{:error, message}` and nothing else. The refusal is split across three
+functions, and a complete cite names all three - `unwritten/2`, which produces the
+error and carries the glob (`:211-217`); `already_written_message/1`, which
+is where the quoted "a repeated `CREATE TABLE` fails on the way up" actually
+lives (`:219-225`); and `main/1`, which routes the error to
+`Encryptor.Ecto.Migrator.CLI.usage_error/1` (`:98-105`), where the `2`
+itself is returned (`lib/encryptor/ecto/migrator/cli.ex:113-117`). All at
+`f441f66`.
 
 One quotation also re-renders its source's punctuation: Context quotes `enc`
 open question 1 as `but 'probably' is why this is a question`. Upstream has

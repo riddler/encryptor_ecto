@@ -1212,7 +1212,7 @@ a `:slow` flip is not a *new* way to invalidate, it is decision 7's existing
 family - a normalizer change, a `:bits` change - with one more member. C6's
 following paragraph already names the `"slow-salt"` constant, the 32-byte
 length, the component position and C3's selector as members of that same
-family. Read the table as those six rows plus this one.
+family. C6's table carries five rows; read it as those five plus this one.
 
 **2. C1's derivation block is schematic and does not type-check as written.**
 The block binds `index_salt` to `Encryptor.Vault.derive(vault, "blind-index",
