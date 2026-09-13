@@ -10,6 +10,15 @@ fragment in [`changelog.d/`](changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
 
+## [0.4.1] - 2026-09-13
+
+### Changed
+
+- The package now requires `encryptor` 0.4.0 (`== 0.4.0`). The 0.4.0 release
+  on Hex was published requiring `encryptor` 0.3.0, so it does not deliver
+  that release's telemetry - encryptor's ADR-0006 - through this package;
+  upgrade to 0.4.1 to consume it. Nothing else changed.
+
 ## [0.4.0] - 2026-09-13
 
 ### **Breaking**
