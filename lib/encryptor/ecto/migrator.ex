@@ -469,8 +469,11 @@ defmodule Encryptor.Ecto.Migrator do
   # -- the target type ------------------------------------------------------
 
   # The migrator constructs both sides' params itself (decision 3), which is
-  # what makes `from:` and `to:` naming the same module with different context
-  # expressible at all. The tenant is replaced by the plan's own strategy: a
+  # what lets a plan name one of this package's own types on either side: each
+  # side's params come from the declaration that side names, so the two differ
+  # exactly when the two declarations do. An in-place declaration edit is
+  # therefore two declarations rather than one module named twice (decision 3
+  # as amended 2026-09-13). The tenant is replaced by the plan's own strategy: a
   # `tenant_from` rewrite resolves per row through
   # `Encryptor.Ecto.Migrator.RowTenant`, never through the process scope the
   # type would otherwise read.

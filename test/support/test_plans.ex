@@ -50,9 +50,12 @@ defmodule Encryptor.Ecto.TestPlans do
 
   defmodule ContextChange do
     @moduledoc """
-    The same module on both sides (ADR-0002 decision 3): nothing about the
-    type changed, the declared context did, and that is a full rewrite the
-    plan format has to be able to say.
+    The same module on both sides, which the plan format accepts (ADR-0002
+    decision 3): a rewrite may name one of this package's own types on either
+    side, and this fixture is what pins the compiler's acceptance of the
+    spelling. The 2026-09-13 amendment withdrew the claim that this spelling
+    expresses an in-place declaration edit - that is two declarations - and
+    left the spelling itself accepted.
 
     It is also the one shape that needs no `source_authenticated:`: the `from:`
     type is one of this package's own, so the amendment's silence is earned

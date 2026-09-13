@@ -143,9 +143,9 @@ defmodule Encryptor.Ecto.MigrationTest do
     end
 
     # Sabotage: added a `from == to` refusal to `__field__` - red before the
-    # suite ran, since the fixture plan stopped compiling: the context change
-    # ADR-0002 decision 3 names had become inexpressible.
-    test "accepts the same module on both sides, which is a context change" do
+    # suite ran, since the fixture plan stopped compiling: the data-key rotation
+    # ADR-0002 decision 3 leaves expressible had become inexpressible.
+    test "accepts the same module on both sides" do
       %Plan{rewrites: [rewrite]} = TestPlans.ContextChange.__plan__()
       {:pan, spec} = List.keyfind(rewrite.fields, :pan, 0)
 

@@ -48,7 +48,9 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Plan do
 
   This package's own types are candidates like any other, which is correct
   rather than incidental: a field moving between tenant strategies is a full
-  rewrite with `from:` and `to:` naming the same module (ADR-0002 decision 3).
+  rewrite, and the plan spells it with the declaration the bytes were written
+  under as `from:` and the edited declaration as `to:` (ADR-0002 decision 3,
+  as amended 2026-09-13).
 
   ## Flags
 
