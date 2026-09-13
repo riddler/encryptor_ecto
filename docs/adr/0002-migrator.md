@@ -922,3 +922,90 @@ Read the sentence as "this Note carries ADR-0002's status; the amendments above
 were accepted on 2026-09-13, and no decision text above changes." The Status
 line is correct as written, nothing in the Note's substance about the probe
 short-circuit changes, and no status word flips.
+
+## Amendment (2026-09-13): an in-place declaration edit is migrated as two declarations, and the field options stay closed
+
+Status: proposed
+
+Decision 3's third bullet, the one beginning "**`from` and `to` may be the
+same module with different params.**"
+(`docs/adr/0002-migrator.md:372-377`, ece 1bee606), is **withdrawn in its
+final clause**. The bullet's first sentence stands: a field moving from
+`tenant: :none` to `tenant: :scope`, or gaining a `:context` pair, is a
+context change and therefore a full rewrite even though no type module
+changed. What is withdrawn is the claim that follows it - that "because the
+migrator constructs both sides' params itself, this is expressible" by
+naming the same module on both sides of the field spec.
+
+### Why the same-module form does not express it
+
+The source-side params change (`lib/encryptor/ecto/migrator.ex:455-462`,
+`source_params/3`, and its comment block at `:425-441`; ece 1bee606,
+landed in commit 235765f) builds a vault-backed source's params from the
+`from:` type's *own* declaration - `from.init(schema: ..., field: ...)`,
+with only the `:tenant` replaced by the plan's resolution strategy - which
+is the same pair of moves `target_params/3` already made for the target
+(`lib/encryptor/ecto/migrator.ex:488-497`, ece 1bee606). That is the right
+answer for one of this package's own types, and decision 3's "the migrator
+constructs both sides' params itself" survives it; the migrator does
+construct both sides.
+
+What does not survive is the inference drawn from it. When `from:` and `to:`
+name the same module, both sides read **that module's current declaration**.
+A declaration edited in place has exactly one current form, and the bytes
+already on disk were written under the form it no longer has. There is no
+params value the migrator could construct for the source side out of the new
+declaration that describes the old bytes, so the same-module spelling cannot
+express the in-place edit at all: it describes a rewrite from the new
+declaration to the new declaration.
+
+### The rule
+
+**An in-place declaration edit is migrated as two declarations.** The host
+keeps the old declaration as a module of its own - a second declaration of
+the same column, under the old params - and names it `from:`; the edited
+declaration is `to:`. This is the shape a cloak-to-encryptor plan's `from:`
+module already takes (decision 3, and the worked example above), so the
+migrator needs nothing new to run it: the source side reads the old
+module's own declaration, the target side reads the new one, and the two
+params values differ because the two declarations do.
+
+This withdrawal is scoped to the *different params* clause. A `from:` and
+`to:` that name the same module under the **same** declaration - the
+single-tenant data-key rotation the worked example shows
+(`docs/adr/0002-migrator.md:723-731`, ece 1bee606) - is a different case and
+is not addressed here.
+
+### `@field_options` stays closed
+
+The field spec gains **no source-side params or context option**: no
+`from_params:`, no `from_context:`, nothing else that would let a plan
+describe the source side's declaration inline.
+`@field_options`
+(`lib/encryptor/ecto/migration.ex:167`, ece 1bee606) stays
+`[:from, :to, :into, :source_authenticated, :validate]`. The two-declaration
+form already expresses every in-place edit, in the host's own code, in the
+same vocabulary the host wrote the declaration in; a source-side params
+option would be a second spelling of a declaration, checked by this package
+rather than by the compiler that checks the first one.
+
+### The code half
+
+`Encryptor.Ecto.Migration`'s moduledoc carries the same claim in the section
+headed "`from:` and `to:` may be the same module"
+(`lib/encryptor/ecto/migration.ex:65-73`, ece 1bee606): "the plan expresses
+this by naming the same module on both sides". That paragraph is the code
+half's site: it is rewritten to state the two-declaration form, and the
+withdrawal is recorded as a `Changed` changelog fragment because it changes
+what a host reading the published documentation would write.
+
+This amendment **asserts the rule** and delegates the proof to a test in the
+migrator run suite: a two-declaration plan whose `from:` module declares the
+old params and whose `to:` module declares the new ones rewrites the rows,
+and it is that test, not this record, that enumerates the declaration pairs.
+
+Nothing else in decision 3 changes, no other decision changes, and no status
+word above flips.
+
+Provenance: campaign RF045, bead ece-lqz (the record half); the code half is
+ece-4vz.
