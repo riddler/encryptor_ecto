@@ -868,3 +868,44 @@ Decision 12 leaves parallelism additive; decision 8's `Source.Plaintext` leg
 leaves the expand/contract sequence to a documented runbook. Both are known
 gaps, both are compatible with everything above, and neither blocks the founding
 implementation.
+
+## Note (2026-09-13): the probe short-circuit is a rewrite-mode decision; a verification keeps the load
+
+Decision 5 writes the probe as a load attempt and then says, without
+qualification, that "where upstream can report a message's key version without
+decrypting (assumption A9), the probe short-circuits to a header inspection".
+Decision 10 makes `Encryptor.Ecto.Verifier.run/2` the acceptance test for a
+rotation, and its whole value is that it opens the bytes rather than believing
+a header - the SQL half beneath it is already the keyless answer. Read
+literally, the two sentences collide: a verification that short-circuited to a
+header inspection would be the census with a slower loop around it.
+
+**The short-circuit belongs to the rewrite modes, and a verification takes the
+load attempt.** That is how the implementation resolved it, and this Note is
+the record saying so rather than leaving the resolution living only in a
+moduledoc. `Encryptor.Ecto.Migrator.Pass`'s "Two ways to probe, and when the
+cheap one is allowed" states the split, and `probe/3` implements it: the
+`mode: :verify` clause and the clause for a target this package cannot read a
+header claim out of both take the load attempt; every other pass reads the
+header, and believes it only for an identity a load has already proven in that
+batch (`lib/encryptor/ecto/migrator/pass.ex:33-75` and `:499-517`, ece
+6027ac3). `Encryptor.Ecto.Migrator.verify/2`'s moduledoc says the same thing
+from the caller's side - "It takes the expensive half of the one probe"
+(`lib/encryptor/ecto/migrator.ex:262-267`, ece 6027ac3).
+
+Two things follow that the decision text should not be read against. The probe
+and the classification stay single: verification does not reimplement "is this
+row in the target state?", it runs the same code with one mode flag, which is
+what keeps the verifier's answer from drifting from the pass's. And decision
+5's cost sentence is a rewrite-mode cost: an already-migrated row is skipped
+without a key during a rewrite, while a verification spends the decrypt on
+every row in scope by design, because that is the question `verify` exists to
+answer.
+
+Nothing in decision 5 or decision 10 changes. Decision 5's short-circuit
+sentence is read as scoped to the rewrite modes (`:dry_run` and `:write`),
+which is the only reading compatible with decision 10's "first-class pass",
+and assumption A9 is unaffected.
+
+This Note carries ADR-0002's status; the record was accepted on 2026-09-13 and
+no decision text above changes.
