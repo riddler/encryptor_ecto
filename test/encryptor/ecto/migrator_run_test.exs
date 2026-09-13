@@ -669,6 +669,71 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     end
   end
 
+  describe "a `from:` that is one of this package's own types" do
+    # Sabotage: handed the source side the migrator's identifying map again -
+    # every row raised `KeyError` inside the source type and classified
+    # `:undecryptable`, which is what this plan looked like before the engine
+    # constructed the source's own params.
+    test "a re-key rewrite classifies its rows migratable rather than undecryptable" do
+      _id = insert_card(pan: rekeyed(@pan))
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Rekey, mode: :dry_run)
+
+      assert report.counts.migratable == 1
+      assert report.counts.undecryptable == 0
+    end
+
+    # Sabotage: dropped the source params' `:vault` back to the migrator's
+    # map - the rewrite reported success on nothing and left the re-keyed
+    # bytes in the column.
+    test "the rows are rewritten and read back through the target type" do
+      id = insert_card(pan: rekeyed(@pan))
+      before = raw(:cards, id, :pan)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Rekey, mode: :write)
+      assert report.counts.migratable == 1
+
+      refute raw(:cards, id, :pan) == before
+
+      Tenant.put(@merchant)
+      assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, id)
+    end
+
+    # Sabotage: left the source type's own declared tenant in the params
+    # instead of the plan's strategy - the second merchant's row was read
+    # against whatever tenant the process scope happened to hold.
+    test "each row is read under its own tenant, not the ambient scope" do
+      mine = insert_card(pan: rekeyed_for(@merchant, @pan), merchant_id: @merchant)
+      theirs = insert_card(pan: rekeyed_for(@other_merchant, @pan), merchant_id: @other_merchant)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Rekey, mode: :write)
+      assert report.counts.migratable == 2
+      assert report.counts.undecryptable == 0
+
+      Tenant.put(@merchant)
+      assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, mine)
+
+      Tenant.put(@other_merchant)
+      assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, theirs)
+    end
+
+    # Sabotage: made the source params win over the adapter's own keys - the
+    # resolution's `:source_module` was overwritten by a field key of the same
+    # name and the adapter called the wrong module.
+    test "a second run finds every row already in the target state" do
+      id = insert_card(pan: rekeyed(@pan))
+
+      assert {:ok, _first} = Migrator.run(TestEnginePlans.Rekey, mode: :write)
+      written = raw(:cards, id, :pan)
+
+      assert {:ok, second} = Migrator.run(TestEnginePlans.Rekey, mode: :write)
+
+      assert second.counts.already_target == 1
+      assert second.counts.migratable == 0
+      assert raw(:cards, id, :pan) == written
+    end
+  end
+
   defp insert_card(attrs) do
     row =
       attrs
@@ -715,6 +780,15 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   # names a wrapping key the target's own vault has never heard of.
   defp rekeyed(plaintext) do
     Tenant.put(@merchant)
+    params = PanRekeyed.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = PanRekeyed.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
+
+  # The same bytes for a named tenant, for the rows a pass has to read under
+  # a tenant other than whatever the test process last put in scope.
+  defp rekeyed_for(tenant, plaintext) do
+    Tenant.put(tenant)
     params = PanRekeyed.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = PanRekeyed.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes

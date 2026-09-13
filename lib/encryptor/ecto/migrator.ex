@@ -123,6 +123,7 @@ defmodule Encryptor.Ecto.Migrator do
   alias Encryptor.Ecto.Migrator.Plan
   alias Encryptor.Ecto.Migrator.Report
   alias Encryptor.Ecto.Migrator.RowTenant
+  alias Encryptor.Ecto.Migrator.Source
 
   @typedoc "The mode a run performs. There is no default (decision 7)."
   @type mode :: :dry_run | :write
@@ -354,7 +355,7 @@ defmodule Encryptor.Ecto.Migrator do
       target_column: target_column,
       tenant: rewrite.tenant,
       tenant_column: tenant_column!(rewrite, options),
-      from_source: Keyword.fetch!(spec, :source),
+      from_source: source!(spec, rewrite, field),
       source_authenticated: Keyword.fetch!(spec, :source_authenticated),
       validate: Keyword.fetch!(spec, :validate),
       to: to,
@@ -418,6 +419,52 @@ defmodule Encryptor.Ecto.Migrator do
 
   @spec filtering?(options()) :: boolean()
   defp filtering?(options), do: options.only_tenants != nil or options.except_tenants != []
+
+  # -- the source type ------------------------------------------------------
+
+  # The other half of decision 3, and the half the record's context-change
+  # case rests on: a `from:` that is one of this package's own types is read
+  # with *its* params, not with the identifying map an unknown legacy reader
+  # gets. The map is right for a host's own legacy module, which is the only
+  # thing decision 3 was ever describing, and wrong for one of ours: these
+  # types read `:vault`, `:context` and `:legacy` off their params, and the
+  # `:tenant` they read is a resolution strategy rather than one row's tenant
+  # selector.
+  #
+  # The params travel in the resolution rather than in the per-row map because
+  # `Encryptor.Ecto.Migrator.Source.load/3` merges the resolution over the
+  # per-field map: the adapter's own keys still win, a foreign `from:` still
+  # sees exactly what it saw before, and nothing is decided per row.
+  #
+  # The tenant is replaced the way `target_params/3` replaces it, and for the
+  # same reason: a pass supplies the tenant explicitly, per row, and a source
+  # type reading the ambient process scope would open the wrong key or none.
+  @spec source!(keyword(), Plan.rewrite(), atom()) :: Source.resolved()
+  defp source!(spec, rewrite, column) do
+    {source, resolved} = Keyword.fetch!(spec, :source)
+
+    case source_params(Keyword.fetch!(spec, :from), rewrite, column) do
+      nil -> {source, resolved}
+      ours -> {source, Map.merge(ours, resolved)}
+    end
+  end
+
+  # `nil` for everything that is not provably one of ours - the same answer,
+  # for the same reason, as `Encryptor.Ecto.Migrator.Source.vault_backed?/2`
+  # gives the plan at compile time, including for an `init/1` that raises.
+  @spec source_params(module(), Plan.rewrite(), atom()) :: map() | nil
+  defp source_params(from, rewrite, column) do
+    if Code.ensure_loaded?(from) and function_exported?(from, :init, 1) do
+      ours_or_nil(from.init(schema: rewrite.schema, field: column), rewrite)
+    end
+  rescue
+    _exception -> nil
+  end
+
+  @spec ours_or_nil(term(), Plan.rewrite()) :: map() | nil
+  defp ours_or_nil(params, rewrite) do
+    if ours?(params), do: Map.put(params, :tenant, resolver(rewrite.tenant))
+  end
 
   # -- the target type ------------------------------------------------------
 
