@@ -7,9 +7,9 @@ softened to a key-hierarchy claim; independently wrapped index keys are the
 recorded upgrade path if a search-only consumer materializes. See the A9
 resolution below.)
 
-## Proposed amendments (2026-08-27)
+## Amendments (2026-08-27; accepted 2026-09-13)
 
-Status: **proposed**. Acceptance is the operator's; until then the decision
+Status: **accepted (2026-09-13)**, by the operator's reading. The decision
 text below is unchanged and these two sections are the operative reading of
 the points they name. They resolve `ece-0rn` items 1 and 2 - two places
 where this record contradicts itself rather than two new decisions.
@@ -84,10 +84,10 @@ The capability claim is unaffected: computing `index_root` requires the
 tenant master key, so this remains the key-hierarchy claim the acceptance
 amendment softened it to, not a search-only capability.
 
-## Proposed amendment (2026-08-28): the salt is real, and it is an extract
+## Amendment (2026-08-28; accepted 2026-09-13): the salt is real, and it is an extract
 
-Status: **proposed**. Acceptance is the operator's. This section is additive
-and changes no decision above; it records where the shipped construction's
+Status: **accepted (2026-09-13)**, by the operator's reading. This section is
+additive and changes no decision above; it records where the shipped construction's
 *expression* differs from the 2026-08-27 pseudocode, and why the difference is
 an implementation of that pseudocode rather than a departure from it.
 
@@ -769,10 +769,10 @@ one, not after. A column that gets an index publishes its equality structure
 inside the index's scope, permanently, to anyone who ever holds a backup - and
 that is true even when everything in this record is implemented correctly.
 
-## Amendment C (proposed, 2026-09-12): the per-index Argon2id salt
+## Amendment C (2026-09-12; accepted 2026-09-13): the per-index Argon2id salt
 
-Status: **proposed**. Acceptance is the operator's. This section is additive
-and changes no decision above. It is appended at the foot of the file rather
+Status: **accepted (2026-09-13)**, by the operator's reading. This section is
+additive and changes no decision above. It is appended at the foot of the file rather
 than beside the 2026-08-27 and 2026-08-28 amendments, which sit at the head;
 the ordering is the campaign's append-only rule and carries no meaning.
 

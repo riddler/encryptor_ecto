@@ -401,12 +401,12 @@ happens to be a good one, because the record is what makes it reviewable.
 |---|---|---|
 | [ADR-0001](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0001-vault-backed-ecto-types.md) | The types, the closed option set, the encryption context, tenant resolution | accepted, with amendments |
 | [ADR-0002](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0002-migrator.md) | The migrator: plan-driven, probe-first, compare-and-swap, live traffic | accepted, with amendments |
-| [ADR-0003](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0003-blind-index.md) | Keyed blind indexes, per-tenant by default, equality only | accepted, with one amendment |
-| [ADR-0004](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0004-migration-from-cloak.md) | Adoption: the migration runbook, the task family, the mixed window | accepted |
+| [ADR-0003](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0003-blind-index.md) | Keyed blind indexes, per-tenant by default, equality only | accepted, with amendments |
+| [ADR-0004](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0004-migration-from-cloak.md) | Adoption: the migration runbook, the task family, the mixed window | accepted, with amendments |
 
-ADR-0001, ADR-0002 and ADR-0003 each carry a *Proposed amendments
-(2026-08-27)* section awaiting an acceptance reading; the accepted decision
-text in each is unchanged.
+Every amendment the four records carry was accepted by the operator's
+reading of 2026-09-13; each says what it changes, and the decision text above
+it is unchanged.
 
 ## License
 

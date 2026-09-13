@@ -43,10 +43,10 @@ lands here as five amendments, already applied to the text below.
    fields sharing one declared pair would be silently mutually
    substitutable.
 
-## Proposed amendments (2026-08-27)
+## Amendments (2026-08-27; accepted 2026-09-13)
 
-Status: **proposed**. Acceptance is the operator's; the decision text below
-is unchanged. These are `ece-0rn` items 3 and 7 - two places where a
+Status: **accepted (2026-09-13)**, by the operator's reading; the decision
+text below is unchanged. These are `ece-0rn` items 3 and 7 - two places where a
 rendering of an accepted decision was not carried forward when the decision
 was amended at acceptance. Neither changes what this record decides; both
 make a stale rendering agree with it.
