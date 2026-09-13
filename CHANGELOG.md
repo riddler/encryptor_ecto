@@ -10,6 +10,24 @@ fragment in [`changelog.d/`](changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
 
+## [0.5.0] - 2026-09-13
+
+### Added
+
+- `Encryptor.Ecto.Migrator.run/2` takes `writing_key:`, the name of the
+  wrapping key the rows in scope are supposed to claim, which makes a single
+  tenant's data-key rotation rewrite the rows a pass without it left alone.
+
+### Changed
+
+- Migrating an in-place declaration edit - a field gaining a `:context` pair,
+  or moving between tenant strategies - is documented as two declarations: the
+  old declaration is kept as a module of its own and named `from:`, and the
+  edited one is `to:`. Naming the same module on both sides no longer
+  describes that case, because the source side reads the `from:` type's own
+  current declaration and an edited declaration has only one current form. The
+  field spec gains no source-side params or context option.
+
 ## [0.4.1] - 2026-09-13
 
 ### Changed
