@@ -27,11 +27,15 @@ defmodule Encryptor.Ecto.Time do
   `cast/2` is `Ecto.Type.cast(:time, value)` - Ecto's own caster - and the
   plaintext is `Time.to_iso8601/1`, parsed back with `Time.from_iso8601/1`.
 
-  The textual form is not a choice taken here. `cloak_ecto`'s scalar types
-  write the same one, and ADR-0004's migration hands the migrator a legacy
-  plaintext and re-encrypts it verbatim below the schema layer (ADR-0002
-  decision 3), so a column arriving from `Cloak.Ecto.Time` is readable through
-  this type only because the two agree about what the bytes say.
+  The textual form is not a choice taken here. `Cloak.Ecto.Time` writes the
+  same bytes: `cloak_ecto` 1.3.0 serializes every scalar with `to_string/1`,
+  which for a `Time` is `Time.to_iso8601/1`. ADR-0004's migration hands the
+  migrator a legacy plaintext and re-encrypts it verbatim below the schema
+  layer (ADR-0002 decision 3), so a column arriving from `Cloak.Ecto.Time` is
+  readable through this type because the two agree about what the bytes say.
+  The two datetime types are the exception - see
+  `Encryptor.Ecto.NaiveDateTime` - and every kind's exact bytes are pinned in
+  `test/encryptor/ecto/scalar_types_test.exs`.
 
   A payload that decrypts and then does not parse raises
   `Encryptor.Ecto.SerializationError` with `{:unparsable, :time}`: the decrypt
