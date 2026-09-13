@@ -268,6 +268,30 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule Rekey do
+    @moduledoc """
+    A `from:` that is one of this package's own types: the same declared
+    context under the re-keyed vault, rewritten into the ordinary one.
+
+    This is the shape `Encryptor.Ecto.Migration` documents under "`from:` and
+    `to:` may be the same module" and the one ADR-0004's 2026-08-28 amendment
+    lets stay silent about `source_authenticated:` - the package that wrote
+    the bytes authenticates them. Reading them needs the source type's *own*
+    params, not the migrator's identifying map, which is the whole of what
+    this plan is here to hold the engine to.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      tenant_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestTypes.PanRekeyed,
+        to: Encryptor.Ecto.TestTypes.Pan
+    end
+  end
+
   defmodule Composite do
     @moduledoc "A rewrite of a composite-key schema, which the engine refuses to page."
 
