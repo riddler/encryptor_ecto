@@ -1087,3 +1087,105 @@ then discards most of the output's distinguishing power. The two are not
 contradictory - candidates still have to be filtered after decryption - but
 no host has yet asked for the pair, and whether it is a warning, an error, or
 nothing at all is left until one does.
+
+## Note (2026-09-13): Amendment C's C7 refusal, with the atoms it raises and the moment it fires
+
+C7 says the refusal is `Encryptor.Ecto.BlindIndex.DerivationError` "with an
+atom-tuple reason naming the missing configuration", and fixes neither the
+reason itself nor when it is reached. `ece-3lc` has since landed the code, and
+this Note pins both so that a host writing a rescue clause, and an operator
+reading a production log line, are reading a recorded contract rather than an
+implementation detail.
+
+**The reason is `{:invalid, :slow, :vault_declares_no_slow_hash}`.** It is the
+`{:invalid, key, detail}` shape every other refusal in that module already
+uses - the same family as `{:invalid, :version, :not_a_positive_integer}` and
+`{:invalid, :scope, :not_tenant_or_global}` - so C7's "no new exception module
+is introduced" extends to no new reason shape either. The atom is raised from
+`Encryptor.Ecto.BlindIndex.Derivation.slow_params!/2`, on the arm that reads
+the vault's configuration and finds `slow_hash: nil`
+(`lib/encryptor/ecto/blind_index/derivation.ex:497-509`, ece 6027ac3), and the
+exception carries the index's identity fields exactly as C7 says it does.
+
+**The refusal fires at computation, not at declaration.** A `slow: true`
+declaration against a vault that declares no `:slow_hash` compiles, and the
+host's type module is built: nothing in the declaration can see the vault's
+configuration, which is read at vault start and only reachable through a live
+vault. The pairing is therefore only detectable when a value is computed, and
+`compute!/3` resolves the slow parameters on the way in - before the
+normalizer runs and before any key is derived
+(`lib/encryptor/ecto/blind_index/value.ex:159-162` and `:165-171`, ece
+6027ac3). The practical consequence is the one worth writing down: a
+mis-paired declaration is not a boot failure and not a compile failure; it
+surfaces on the first insert, update or lookup that touches the column.
+
+Nothing in Amendment C changes. C7's refusal, its rejection of a plain-HMAC
+fallback and of invented parameters, and its argument for this package's words
+rather than the vault's all stand as written; this Note only fills in the two
+details C7 left open.
+
+This Note is appended to Amendment C and carries that amendment's status.
+Amendment C was accepted on 2026-09-13.
+
+## Note (2026-09-13): this package may carry `:argon2_elixir` in dev and test only
+
+Amendment C's consequences say `:argon2_elixir` "is not a dependency of this
+package at all". That is true of the runtime dependency surface, which is what
+the sentence is about and what a host's build sees. It is not true of the
+repository: `ece-3lc` cannot exercise the slow path end to end without the NIF
+present while the suite runs, and asserting about a hash this package never
+computes is not the same evidence.
+
+**A dev-and-test-only entry is permitted, and it is in the tree.**
+`mix.exs:126` carries `{:argon2_elixir, "~> 4.0", only: [:dev, :test]}` (ece
+6027ac3), on the same footing as the `ecto_sql` and `postgrex` entries above
+it: absent from the published package, absent from a host's dependency
+resolution, and present so that the slow path is exercised rather than
+asserted about. The conductor authorized it for `ece-3lc` against that
+existing test-only precedent.
+
+The amendment's sentence is read as scoped to what this package ships. Both
+halves of it stand unchanged for a host: one that declares a `slow: true`
+index adds `:argon2_elixir` to its own `mix.exs`, and one that declares none
+carries no native code. What this Note adds is that the repository's own
+dev and test environments are not a host, and a dependency confined to them
+does not widen the surface the consequences paragraph is measuring.
+
+This Note is appended to Amendment C and carries that amendment's status.
+Amendment C was accepted on 2026-09-13.
+
+## Note (2026-09-13): what Amendment C's parameters cost, for capacity planning
+
+Amendment C fixes the source of the Argon2id parameters and B4 upstream fixes
+their values (`memory_kib: 65_536`, `iterations: 3`, `parallelism: 1`), but
+neither states a throughput, and the consequence that a slow index "costs two
+vault derivations per computation" deliberately dismisses the cheaper of the
+two. An operator sizing a backfill needs the expensive one as a number.
+
+**At B4's defaults the measured cost is 64.24 ms per hash, or 15.6 hashes per
+second on one core.** The figure is measured rather than estimated, and it is
+recorded upstream in encryptor's
+`docs/measurements/260912-enc-anz-stated-bounds.md`, section 5 "Addendum:
+Argon2id at 64 MiB / 3 iterations" (`:326-353`, read at enc 5c0652b), whose
+harness and reproduction command are named in the same document. That note
+says the number "belongs in that record rather than this note", which is what
+this Note is.
+
+Three consequences fall out of it directly, and they are the ones a host will
+meet:
+
+- A one-million-row backfill of a single slow index is roughly 18 core-hours.
+- A write path that maintains two slow indexes spends about 128 ms of CPU per
+  row, on top of the encryption itself.
+- Memory, not iterations, is where the cost sits: doubling memory at fixed
+  iterations costs about 2.1x, which is the evidence behind B4's
+  "deliberately memory-heavy rather than iteration-heavy" framing.
+
+These are per-core figures on one machine and they are inputs to a plan, not a
+guarantee: re-run the upstream harness before citing an absolute number for
+different hardware. Nothing in decision 6, in the security-properties table,
+or in Amendment C changes - the `slow: true` row still reads "recovery at
+Argon2id cost per guess", and this Note only says what that cost measures at.
+
+This Note is appended to Amendment C and carries that amendment's status.
+Amendment C was accepted on 2026-09-13.

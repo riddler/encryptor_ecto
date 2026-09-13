@@ -622,3 +622,42 @@ wrappers (decision 1) are an implementation bead. And per-field key derivation
 - distinct keys per column rather than per tenant - is out of scope here; the
 column already rides the AAD, which gets the anti-substitution property without
 a second key hierarchy.
+
+## Note (2026-09-13): the six scalar wrappers, and the widened `SerializationError` row
+
+Decision 1 names three types and calls the remaining `cloak_ecto` wrappers -
+`Integer`, `Float`, `Date`, `DateTime`, `NaiveDateTime`, `Time` - "an
+implementation bead, not a decision". That bead has landed, and this Note
+records what it produced so a reader of decision 1 is not left counting three
+types against a package that ships nine.
+
+**The six exist, and they are what decision 1 said they would be.**
+`Encryptor.Ecto.Integer`, `Encryptor.Ecto.Float`, `Encryptor.Ecto.Date`,
+`Encryptor.Ecto.Time`, `Encryptor.Ecto.NaiveDateTime` and
+`Encryptor.Ecto.DateTime` are `use`-able modules on the same seam as
+`Encryptor.Ecto.String`: a host declares one, the generated module implements
+`Ecto.ParameterizedType`, and the callbacks delegate to `Encryptor.Ecto.Binary`
+through one private mechanism module
+(`lib/encryptor/ecto/scalar.ex:4-22` and `:30-60`, ece 6027ac3). The plaintext
+each encrypts is its textual form - a decimal integer, a shortest-round-trip
+float, an ISO 8601 date, time or datetime - because ADR-0004's migration story
+re-encrypts legacy plaintext verbatim below the schema layer (ADR-0002 decision
+3), so a column arriving from the corresponding prior-scheme type is only
+readable through these if the two agree about what the bytes say. Decision 2
+is unchanged and covers them: the column is `:binary` for all nine.
+
+**Decision 6's `SerializationError` row is read wider than its literal words.**
+The row says "Serializer fails on a `Map` value". The scalar parse arm raises
+the same exception with a `{:unparsable, kind}` reason when a decrypt that
+succeeded hands back a plaintext the type cannot parse
+(`lib/encryptor/ecto/scalar.ex:199-213`, ece 6027ac3). That is the same class
+of failure the row exists to name - a serializer-layer failure on the plaintext
+side of the vault call, after the decrypt, so neither an encryption failure nor
+an integrity event - and this Note records the widening rather than leaving the
+table to be read as an exhaustive list that the code exceeds. Nothing else in
+decision 6 moves: the exception still carries the table, column and context
+keys, `cast/2` still keeps its ordinary `:error` arm, and the prohibition on
+plaintext, ciphertext and key material in any message is untouched.
+
+This Note carries ADR-0001's status; the record was accepted on 2026-09-13 and
+no decision text above changes.
