@@ -13,12 +13,22 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
   use Encryptor.Ecto.RepoCase, async: true
 
+  import Ecto.Query, only: [from: 2]
+
   alias Encryptor.Ecto.KeyStore
   alias Encryptor.Ecto.TestKeyStore
+  alias Encryptor.Ecto.TestMigrationWrappedKeys03Row
   alias Encryptor.Error
   alias Encryptor.Message
 
   @context %{"table" => "cards", "column" => "pan"}
+
+  # The 0.3.0-shaped table, its pre-upgrade row's selector, and the migrations
+  # that built both: `Encryptor.Ecto.TestMigrationWrappedKeys03`,
+  # `...03Row` and `...Shape`, run in that order from
+  # `Encryptor.Ecto.TestRepo`'s list.
+  @legacy_table "encryptor_wrapped_keys_03"
+  @legacy_selector TestMigrationWrappedKeys03Row.selector()
 
   describe "decryption_keys/2" do
     # Sabotage: dropped the `order_by` from the query. Postgres returned the
@@ -125,6 +135,123 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
       assert {:error, {:invalid_key_descriptor, :unwrap_failed}} =
                KeyStore.decryption_keys(TestKeyStore.state(), "merchant_a19")
+    end
+  end
+
+  describe "dispatch on the row's wrapping shape" do
+    # Sabotage: ignored `wrapping_shape` and sent every row down
+    # `Envelope.unwrap/2`, as 0.3.0 did. The GCP row below unwrapped perfectly -
+    # its `wrapped` really is an engine message here - and the test went red on
+    # the expected error rather than on a decrypt failure, which is the whole
+    # point: a store that guesses gets it right in the fixture and wrong in
+    # production, where the bytes are a GCP ciphertext.
+    test "a gcp_kms_ciphertext row is not unwrapped as an engine message" do
+      TestKeyStore.provision!("merchant_7f3", 1,
+        wrapping_shape: "gcp_kms_ciphertext",
+        key_id: "projects/p/locations/l/keyRings/r/cryptoKeys/k"
+      )
+
+      assert {:error, {:invalid_key_descriptor, {:unsupported_wrapping_shape, shape}}} =
+               KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
+
+      assert shape == "gcp_kms_ciphertext"
+    end
+
+    # The two shapes coexist for the length of a host's migration, which is why
+    # ADR-0005 decision 5 dispatches per row rather than per store: one setting
+    # for the whole store would make the mixed window unrepresentable. Both rows
+    # below hold byte-identical wrappings, produced the same way; the only thing
+    # that differs is the column, and the two answers differ because of it.
+    test "one store serves both shapes at once, each down its own path" do
+      wrapped = TestKeyStore.provision!("merchant_7f3", 1)
+
+      TestKeyStore.provision!("merchant_a19", 1,
+        wrapping_shape: "gcp_kms_ciphertext",
+        key_id: "projects/p/locations/l/keyRings/r/cryptoKeys/k"
+      )
+
+      state = TestKeyStore.state()
+
+      assert {:ok, [descriptor]} = KeyStore.decryption_keys(state, "merchant_7f3")
+      assert descriptor.name == wrapped.name
+
+      assert {:error, {:invalid_key_descriptor, {:unsupported_wrapping_shape, _shape}}} =
+               KeyStore.decryption_keys(state, "merchant_a19")
+    end
+
+    # Sabotage: used `String.to_existing_atom/1` on the column. A row carrying
+    # a value nobody has ever written as an atom raised `ArgumentError` from
+    # inside a provider callback, which the vault has no arm for - a crash
+    # where the contract already has a word.
+    test "a shape the record does not publish is invalid_key_descriptor, not a raise" do
+      TestKeyStore.provision!("merchant_7f3", 1, wrapping_shape: "vault_transit")
+
+      assert {:error, {:invalid_key_descriptor, {:unknown_wrapping_shape, "vault_transit"}}} =
+               KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
+    end
+
+    # The `key_id` rules are read-side because each is conditional on the other
+    # column, and a conditional constraint is not portable DDL. Neither arm
+    # carries the id out: a key id is a resource name.
+    test "a gcp row with no key_id is missing_key_id, and carries nothing" do
+      TestKeyStore.provision!("merchant_7f3", 1, wrapping_shape: "gcp_kms_ciphertext")
+
+      assert {:error, {:invalid_key_descriptor, :missing_key_id}} =
+               KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
+    end
+
+    test "an engine-message row carrying a key_id is unexpected_key_id" do
+      TestKeyStore.provision!("merchant_7f3", 1, key_id: "k1")
+
+      assert {:error, {:invalid_key_descriptor, :unexpected_key_id}} =
+               KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
+    end
+  end
+
+  describe "a table created under 0.3.0, after the additive migration" do
+    # The row this reads was written by a data migration *before* the columns
+    # existed, which is the only arrangement that can show the backfill is
+    # right. ADR-0005 decision 3: every row any adopter holds today was written
+    # for a read path with no branch in it, so `"engine_message"` is not a guess
+    # about history - it is the only value history can hold.
+    #
+    # Sabotage: backfilled `NULL` instead. The column is `null: false`, so the
+    # migration itself failed on the way up - in the host's deploy, against a
+    # populated table, which is the worst place to find out.
+    test "a row written before the columns existed still resolves" do
+      state = TestKeyStore.state(table: @legacy_table)
+
+      assert {:ok, [descriptor]} = KeyStore.decryption_keys(state, @legacy_selector)
+      assert descriptor.bits == 256
+      assert {:ok, ^descriptor} = KeyStore.encryption_key(state, @legacy_selector)
+    end
+
+    test "and it was backfilled as an engine message with no key id" do
+      assert [%{wrapping_shape: "engine_message", key_id: nil}] =
+               TestRepo.all(
+                 from(k in @legacy_table,
+                   select: %{wrapping_shape: k.wrapping_shape, key_id: k.key_id}
+                 )
+               )
+    end
+
+    # Sabotage: left the backfill default in place by dropping the second
+    # `alter`. This insert succeeded, silently, as an engine message - and
+    # ADR-0005 decision 4 is that a forgotten shape must be a write-time error,
+    # because this package writes no rows and every insert is the host's.
+    test "the backfill default does not survive the migration" do
+      assert_raise Postgrex.Error, fn ->
+        TestRepo.insert_all(@legacy_table, [
+          [
+            tenant_ref: "whatever",
+            version: 99,
+            namespace: "n",
+            name: "n/99",
+            bits: 256,
+            wrapped: <<0>>
+          ]
+        ])
+      end
     end
   end
 

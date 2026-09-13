@@ -53,6 +53,8 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigrationTest do
     assert source =~ "add(:name, :string, null: false)"
     assert source =~ "add(:bits, :integer, null: false)"
     assert source =~ "add(:wrapped, :binary, null: false)"
+    assert source =~ "add(:wrapping_shape, :string, null: false)"
+    assert source =~ "add(:key_id, :string)"
     assert source =~ "create(unique_index(:#{table}, [:tenant_ref, :version]))"
     assert source =~ "create(unique_index(:#{table}, [:namespace, :name]))"
   end
@@ -70,6 +72,19 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigrationTest do
     fixture = ddl_lines(File.read!("test/support/test_migration_wrapped_keys.ex"))
 
     assert generated == fixture
+  end
+
+  # Sabotage: gave `wrapping_shape` `default: "engine_message"` in the fresh
+  # table's DDL. A new adopter's forgotten column then became a row claiming to
+  # be an engine message, which is precisely what ADR-0005 decision 4 refuses on
+  # the write side - the default belongs to the additive migration and nowhere
+  # else, because only there is there history to backfill.
+  test "the fresh table's wrapping_shape carries no default", %{path: path} do
+    assert {0, _output} = generate(["--migrations-path", path])
+
+    [file] = Path.wildcard(Path.join(path, "*.exs"))
+
+    refute File.read!(file) =~ "default:"
   end
 
   test "the file it writes is valid Elixir and an Ecto migration", %{path: path} do

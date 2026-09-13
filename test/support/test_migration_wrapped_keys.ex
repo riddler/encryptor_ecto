@@ -10,10 +10,15 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeys do
   it here rather than mocking it is what lets the provider's query, its
   ordering, and both unique indexes be exercised against a real table.
 
-  The column set is the six fields of `Encryptor.Envelope.WrappedKey` plus
-  timestamps, and it is kept identical to
-  `Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration.source/2` by a test that
-  reads the generator's output and asserts each line of it.
+  The column set is the six fields of `Encryptor.Envelope.WrappedKey`, plus
+  ADR-0005's `wrapping_shape` and `key_id`, plus timestamps, and it is kept
+  identical to `Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration.source/2` by a
+  test that reads the generator's output and asserts each line of it.
+
+  This is the *fresh* table a new adopter gets. The one an adopter created
+  under 0.3.0, and the additive migration that brings it here, are
+  `Encryptor.Ecto.TestMigrationWrappedKeys03` and
+  `Encryptor.Ecto.TestMigrationWrappedKeysShape`.
   """
 
   use Ecto.Migration
@@ -27,6 +32,8 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeys do
       add(:name, :string, null: false)
       add(:bits, :integer, null: false)
       add(:wrapped, :binary, null: false)
+      add(:wrapping_shape, :string, null: false)
+      add(:key_id, :string)
       add(:inserted_at, :utc_datetime)
       add(:updated_at, :utc_datetime)
     end

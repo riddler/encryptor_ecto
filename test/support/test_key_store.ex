@@ -71,24 +71,32 @@ defmodule Encryptor.Ecto.TestKeyStore do
   vault's verb and the `INSERT` is this package's table. The provider under
   test performs neither.
   """
-  @spec provision!(Encryptor.Envelope.selector(), pos_integer()) :: WrappedKey.t()
-  def provision!(selector, version \\ 1) do
+  @spec provision!(Encryptor.Envelope.selector(), pos_integer(), keyword()) :: WrappedKey.t()
+  def provision!(selector, version \\ 1, overrides \\ []) do
     {:ok, wrapped} =
       Envelope.provision(__MODULE__.Root, selector,
         reference_subkey: reference_subkey(),
         version: version
       )
 
-    insert!(wrapped)
+    insert!(wrapped, overrides)
   end
 
-  @doc "Stores one wrapping, returning it."
-  @spec insert!(WrappedKey.t()) :: WrappedKey.t()
-  def insert!(%WrappedKey{} = wrapped) do
+  @doc """
+  Stores one wrapping, returning it.
+
+  `:wrapping_shape` and `:key_id` are the row's, not the wrapping's - ADR-0005
+  put them in columns rather than in `Encryptor.Envelope.WrappedKey` - so they
+  arrive as overrides here. The defaults are what every row a host has today
+  carries: an engine message, and no key id.
+  """
+  @spec insert!(WrappedKey.t(), keyword()) :: WrappedKey.t()
+  def insert!(%WrappedKey{} = wrapped, overrides \\ []) do
     now = DateTime.truncate(DateTime.utc_now(), :second)
+    table = Keyword.get(overrides, :table, KeyStore.default_table())
 
     {1, _rows} =
-      TestRepo.insert_all(KeyStore.default_table(), [
+      TestRepo.insert_all(table, [
         [
           tenant_ref: wrapped.tenant_ref,
           version: wrapped.version,
@@ -96,6 +104,8 @@ defmodule Encryptor.Ecto.TestKeyStore do
           name: wrapped.name,
           bits: wrapped.bits,
           wrapped: wrapped.wrapped,
+          wrapping_shape: Keyword.get(overrides, :wrapping_shape, "engine_message"),
+          key_id: Keyword.get(overrides, :key_id),
           inserted_at: now,
           updated_at: now
         ]
