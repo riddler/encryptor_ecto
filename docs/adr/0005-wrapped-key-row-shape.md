@@ -722,8 +722,7 @@ file. Read that row as a **SHA refresh whose anchor moved**, together with a
 one-line **narrowing**: `a0717e9:117-121` is byte-for-byte `f441f66:180-184`,
 so the corrected `:181-184` drops the lead-in line `:180` ("answer for a
 wrapping the rewrap pass has not reached yet. The") that the original span
-carried. The Note above describes this as a widening, which is the wrong
-direction.
+carried.
 
 Worth naming beside it: **two** rows of that table carry a refreshed SHA, not
 one. Row 4 - decision 1's "`postgrex` is a test-only dependency", `mix.exs`
