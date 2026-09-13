@@ -28,11 +28,14 @@ defmodule Encryptor.Ecto.DateTime do
   the plaintext is `DateTime.to_iso8601/1`, parsed back with
   `DateTime.from_iso8601/1`.
 
-  The textual form is not a choice taken here. `cloak_ecto`'s scalar types
-  write the same one, and ADR-0004's migration hands the migrator a legacy
-  plaintext and re-encrypts it verbatim below the schema layer (ADR-0002
-  decision 3), so a column arriving from `Cloak.Ecto.DateTime` is readable
-  through this type only because the two agree about what the bytes say.
+  The plaintext is exactly `DateTime.to_iso8601/1`, which writes a `T`:
+  `~U[2026-09-12 10:20:30Z]` is stored as `2026-09-12T10:20:30Z`.
+  `cloak_ecto` 1.3.0 writes `to_string/1` for the same value, which is the
+  space-separated `2026-09-12 10:20:30Z`, so the two forms are not the same
+  here. Both of them load: `DateTime.from_iso8601/1` accepts either
+  separator. That leniency is what keeps a column readable when ADR-0004's
+  migration hands the migrator a legacy plaintext and re-encrypts it verbatim
+  below the schema layer (ADR-0002 decision 3).
 
   A payload that decrypts and then does not parse raises
   `Encryptor.Ecto.SerializationError` with `{:unparsable, :utc_datetime}`: the

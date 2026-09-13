@@ -52,6 +52,29 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
     {TestTypes.VerifiedAt, :verified_at, ~U[0001-01-01 00:00:00Z]}
   ]
 
+  # Every kind, the exact plaintext this package writes for its value from
+  # `@types`, and the exact plaintext `cloak_ecto` writes for the same value.
+  #
+  # The cloak column is read from `cloak_ecto` 1.3.0, not from memory: every
+  # scalar type there serializes with `to_string/1` - `lib/cloak_ecto/type.ex`
+  # supplies it as the default `before_encrypt/1`, which `Integer` and `Float`
+  # inherit, and `types/date.ex`, `types/time.ex`, `types/naive_date_time.ex`
+  # and `types/date_time.ex` each re-state as `to_string(value)` after casting.
+  # `to_string/1` is `to_iso8601/1` for `Date` and `Time`, so four of the six
+  # agree byte for byte; for `NaiveDateTime` and `DateTime` it is the
+  # *space*-separated form, so those two do not.
+  @plaintexts [
+    {TestTypes.RetryCount, :retry_count, 3, "3", "3"},
+    {TestTypes.FeeRate, :fee_rate, 0.0275, "0.0275", "0.0275"},
+    {TestTypes.DateOfBirth, :date_of_birth, ~D[1815-12-10], "1815-12-10", "1815-12-10"},
+    {TestTypes.ContactWindowOpensAt, :contact_window_opens_at, ~T[09:30:00], "09:30:00",
+     "09:30:00"},
+    {TestTypes.AgreedAt, :agreed_at, ~N[2026-09-12 10:20:30], "2026-09-12T10:20:30",
+     "2026-09-12 10:20:30"},
+    {TestTypes.VerifiedAt, :verified_at, ~U[2026-09-12 10:20:30Z], "2026-09-12T10:20:30Z",
+     "2026-09-12 10:20:30Z"}
+  ]
+
   defp params(type, field), do: type.init(schema: Reading, field: field)
 
   describe "the option set is Binary's, and the messages name the macro" do
@@ -199,6 +222,52 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
     test "reports bytes that are not a well-formed message as an integrity event" do
       assert_raise DecryptError, fn ->
         TestTypes.RetryCount.load(<<0, 1, 2, 3>>, nil, params(TestTypes.RetryCount, :retry_count))
+      end
+    end
+  end
+
+  # The round trip above cannot see a drift that moved the encode and the
+  # decode together: a type that wrote `13/12/1815` and read it back would
+  # pass every assertion in it. These two tests are the ones that can, and
+  # they are per kind because the two forms diverge per kind.
+  describe "the plaintext bytes under the ciphertext" do
+    scope_tenant "merchant_7f3"
+
+    # sabotage: Scalar.to_plaintext/2's :naive_datetime clause ->
+    # `NaiveDateTime.to_string/1`, red here and green in the round trip.
+    test "each kind writes exactly the bytes its documentation names" do
+      for {type, field, value, plaintext, _cloak} <- @plaintexts do
+        params = params(type, field)
+        %{table: table, column: column} = params
+
+        assert {:ok, ciphertext} = type.dump(value, nil, params)
+
+        assert {:ok, ^plaintext} =
+                 TestVaults.Merchant.decrypt(ciphertext,
+                   key: "merchant_7f3",
+                   encryption_context: %{"table" => table, "column" => column}
+                 )
+      end
+    end
+
+    # What makes a migrated column readable is the parse arm, not an agreement
+    # about the written form: `Date.from_iso8601/1` and `Time.from_iso8601/1`
+    # see the same bytes either way, and `NaiveDateTime.from_iso8601/1` and
+    # `DateTime.from_iso8601/1` accept a space where this package writes a `T`.
+    # The bytes here are written through `Binary` with the scalar's own params,
+    # so the encryption context and the key are identical - the shape ADR-0002
+    # decision 3's re-encrypt below the schema layer leaves in the column when
+    # the legacy plaintext travelled as bytes.
+    #
+    # sabotage: Scalar.from_plaintext/2's :naive_datetime clause guarded to
+    # refuse a plaintext whose separator is a space, red here and green
+    # everywhere else in this file.
+    test "each kind loads the plaintext cloak_ecto writes, re-encrypted verbatim" do
+      for {type, field, value, _plaintext, cloak} <- @plaintexts do
+        params = params(type, field)
+
+        assert {:ok, ciphertext} = TestTypes.Pan.dump(cloak, nil, params)
+        assert type.load(ciphertext, nil, params) == {:ok, value}
       end
     end
   end

@@ -13,13 +13,18 @@ defmodule Encryptor.Ecto.Scalar do
   # they do not carry is six copies of the same delegation quote.
   #
   # The plaintext a scalar encrypts is its *textual* form - a decimal integer,
-  # a shortest-round-trip float, an ISO 8601 date, time or datetime - which is
-  # the form `cloak_ecto`'s own scalar types write. That is not a format choice
-  # taken here: ADR-0004's migration story hands the migrator legacy plaintext
-  # and re-encrypts it verbatim below the schema layer (ADR-0002 decision 3),
-  # so a column arriving from `Cloak.Ecto.Date` is only readable through
-  # `Encryptor.Ecto.Date` if the two agree about what the bytes say. Writing a
-  # different form would be a decision, and it would be the wrong one.
+  # a shortest-round-trip float, and `to_iso8601/1` for the four date and time
+  # kinds, which puts a `T` between a date and a time. `cloak_ecto` 1.3.0
+  # writes `to_string/1` instead (`lib/cloak_ecto/type.ex`'s default
+  # `before_encrypt/1`, re-stated in each of its date and time types): the
+  # same bytes for an integer, a float, a `Date` and a `Time`, and the
+  # *space*-separated form for a `NaiveDateTime` and a `DateTime`. Both forms
+  # load, because `NaiveDateTime.from_iso8601/1` and `DateTime.from_iso8601/1`
+  # accept either separator - and that leniency, rather than an agreement
+  # about the written form, is what keeps a column readable when ADR-0004's
+  # migration story hands the migrator legacy plaintext and re-encrypts it
+  # verbatim below the schema layer (ADR-0002 decision 3). The exact bytes of
+  # all six are pinned in `test/encryptor/ecto/scalar_types_test.exs`.
 
   alias Encryptor.Ecto.Binary
   alias Encryptor.Ecto.SerializationError

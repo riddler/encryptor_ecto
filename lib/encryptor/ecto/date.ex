@@ -30,11 +30,15 @@ defmodule Encryptor.Ecto.Date do
   `:date` column. The plaintext is `Date.to_iso8601/1` and a load parses it
   with `Date.from_iso8601/1`, accepting a calendar date and nothing else.
 
-  The textual form is not a choice taken here. `cloak_ecto`'s scalar types
-  write the same one, and ADR-0004's migration hands the migrator a legacy
-  plaintext and re-encrypts it verbatim below the schema layer (ADR-0002
-  decision 3), so a column arriving from `Cloak.Ecto.Date` is readable through
-  this type only because the two agree about what the bytes say.
+  The textual form is not a choice taken here. `Cloak.Ecto.Date` writes the
+  same bytes: `cloak_ecto` 1.3.0 serializes every scalar with `to_string/1`,
+  which for a `Date` is `Date.to_iso8601/1`. ADR-0004's migration hands the
+  migrator a legacy plaintext and re-encrypts it verbatim below the schema
+  layer (ADR-0002 decision 3), so a column arriving from `Cloak.Ecto.Date` is
+  readable through this type because the two agree about what the bytes say.
+  The two datetime types are the exception - see
+  `Encryptor.Ecto.NaiveDateTime` - and every kind's exact bytes are pinned in
+  `test/encryptor/ecto/scalar_types_test.exs`.
 
   A payload that decrypts and then does not parse raises
   `Encryptor.Ecto.SerializationError` with `{:unparsable, :date}`: the decrypt
