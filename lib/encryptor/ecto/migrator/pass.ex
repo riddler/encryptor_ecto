@@ -54,12 +54,13 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   value: which tenant a row belongs to is not what the probe asks.
 
   Comparing the *whole* context rather than merely parsing the header is what
-  keeps the context-change rewrite correct - `from:` and `to:` naming the same
-  module with different params (`Encryptor.Ecto.Migration`'s "Silence is
-  allowed only where authentication is provable"). Both sides of that rewrite
-  write well-formed messages of this package's format, and a probe that read
-  no further than "it parses" would call every unrewritten row already
-  migrated and silently do nothing.
+  keeps a context-change rewrite correct - a rewrite whose `from:` is one of
+  this package's own declarations, whether that is the same module as `to:`
+  under another vault or the earlier declaration a two-declaration edit keeps
+  (`Encryptor.Ecto.Migration`'s "Silence is allowed only where authentication
+  is provable"). Both sides of that rewrite write well-formed messages of this
+  package's format, and a probe that read no further than "it parses" would
+  call every unrewritten row already migrated and silently do nothing.
 
   **Step two is a proof, because a context and a suite do not identify a
   key.** ADR-0002's R3 rewrites a column whose "format, algorithm, library, or
