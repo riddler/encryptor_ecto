@@ -14,8 +14,8 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigration do
   have. Run this migration before deploying the new version, not after: until
   it runs, every read of that table raises the `Postgrex.Error` naming the
   column that is missing, which is a permanent condition and reports itself as
-  one (ADR-0005 decision 7, whose open question 3 `ece-y0i` answered - the
-  bare rescue that used to report this as a retryable
+  one (ADR-0005 decision 7, and its open question 3, now answered - the bare
+  rescue that used to report this as a retryable
   `{:key_unavailable, selector}` is gone).
 
   ## Why this is a second task

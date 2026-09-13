@@ -73,9 +73,9 @@ def deps do
 end
 ```
 
-Pin an exact version and read the changelog before upgrading: until 1.0.0,
-public APIs, storage formats, and derivation constants may change between
-releases. **Do not depend on the 0.1.0 versions** - `encryptor_ecto 0.1.0`
+Read the changelog before upgrading: the pre-1.0 banner at the top of this
+file is the stability claim, and it says what a release may change and how to
+pin against it. **Do not depend on the 0.1.0 versions** - `encryptor_ecto 0.1.0`
 and `encryptor 0.1.0` are name reservations that predate the API this README
 describes; 0.2.0 is the first release of either package that holds the
 implementation.
@@ -370,11 +370,13 @@ the backfill leg is the only part of that dance the migrator performs.
 ## Documentation
 
 The pages under [`docs/`](https://github.com/riddler/encryptor_ecto/blob/main/docs/README.md) are organized by
-[Diataxis](https://diataxis.fr) quadrant. They live in the repository and are
-**not** currently published to HexDocs - link them at their GitHub paths:
+[Diataxis](https://diataxis.fr) quadrant. The three pages below ship with the
+package documentation - `mix.exs`'s `docs()` lists them as extras, so they are
+on HexDocs beside the module documentation and link to each other by relative
+path. The index is not an extra and links at its GitHub path:
 
 - [`docs/README.md`](https://github.com/riddler/encryptor_ecto/blob/main/docs/README.md) - the index, including why there is
-  deliberately no tutorial.
+  deliberately no tutorial. Repository-only; it is not published to HexDocs.
 - [What changes when you move off cloak_ecto](docs/explanation/moving-off-cloak.md) -
   per-tenant keys where cloak had one, the encryption context and the
   substitution it forbids, fail-closed tenant scope and the boundary audit that

@@ -57,6 +57,14 @@ defmodule Encryptor.Ecto.DateTime do
   in, exactly as it does for a plain `:utc_datetime` column - before any
   encryption, and visibly in the changeset rather than only on the next read.
 
+  The read is lenient where the write is strict, and that asymmetry is
+  deliberate rather than an oversight. `DateTime.from_iso8601/1` accepts a
+  plaintext carrying any offset, resolves it to the equivalent UTC instant,
+  and discards the offset - the very thing the `dump/3` refusal above exists
+  to prevent on the write side. It is unreachable through this type's own
+  writes, which always store `Z`; it is reachable through a plaintext that
+  arrived from somewhere else, and there a readable instant beats a refusal.
+
   ## Everything else
 
   `nil` is `NULL` and is not encrypted (decision 7). The column is `:binary`,

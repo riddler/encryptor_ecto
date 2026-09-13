@@ -82,10 +82,13 @@ read it.
 
 ## Step 3. Know which refusals you have just bought
 
-The vault composes the context on every `dump/3`, so a declaration that
-composes to something it refuses fails on the first write - as an exception
-rather than a changeset error (`Encryptor.Ecto.Binary`,
-"Failures raise; they never return `:error`"):
+The vault composes the context on every `dump/3`, so a *declared* `:context`
+pair that composes to something it refuses fails on the first write - as an
+exception rather than a changeset error (`Encryptor.Ecto.Binary`,
+"Failures raise; they never return `:error`"). The vault's own
+`:static_encryption_context` is checked earlier and elsewhere: a reserved key
+there fails the vault's start-time configuration validation, so it never
+reaches a write at all. The table below is about the declaration:
 
 | What you declared | What you get |
 |---|---|
@@ -148,9 +151,11 @@ Encryptor.Ecto.Declarations.list(apps: [:payments])
 
 One caveat worth knowing before you lean on a `:context` pair for separation:
 `Encryptor.Ecto.Declarations.check_unique!/1` compares the declared
-`{table, column}` pair alone and does not credit your extra pairs. Two fields
-that differ only in `:context` are cryptographically non-substitutable and
-will still be reported as a collision. Fix such a pair by giving the fields
+`{table, column}` pair and the physical column behind it, and does not credit
+your extra pairs. Two schemas over the *same* physical column are exempt -
+that is what keeps a read model or a partial schema from colliding with the
+schema it mirrors - but two fields that differ only in `:context` are
+cryptographically non-substitutable and will still be reported as a collision. Fix such a pair by giving the fields
 distinct declared `"table"`/`"column"` values - that is the property the check
 is defending, and the extra context is additional binding rather than a
 substitute for it.

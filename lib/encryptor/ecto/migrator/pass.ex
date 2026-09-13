@@ -96,8 +96,12 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   `describe/1`'s answer is an unverified claim by whoever wrote the bytes, and
   that is the right strength here: nothing downstream of the probe is an
   authorization decision (`Encryptor.Message`'s own warning). The worst a
-  forged header can do is have the pass leave a row alone, which is also what
-  the load probe does with a row it cannot read.
+  forged header can do is have the pass leave a row alone. That is not what
+  the load probe would have done with the same row - a load that fails sends
+  the row to the source reader, which rewrites it from the intact source - so
+  the header probe trades a rewrite the load probe would have performed for
+  the decrypts it saves, and the row waits until a `mode: :verify` run, which
+  always loads, reports it.
 
   Two cases keep the load attempt:
 
@@ -562,6 +566,12 @@ defmodule Encryptor.Ecto.Migrator.Pass do
       |> declared_pairs()
       |> Map.pop(Context.tenant_ref_key())
 
+    # The `tenant_ref` presence comparison is a fast path rather than a guard:
+    # ADR-0001 decision 5e forbids a global field on a `:tenant`-profile vault,
+    # so a tenant-bearing and a global declaration cannot coexist over one
+    # vault, and a header that disagreed could only change the answer for a row
+    # `against_proof/4`'s load would have accepted anyway. Kept because it
+    # settles the common case without a decrypt.
     if context == header.context and is_binary(tenant_ref) == header.tenant_ref? and
          info.algorithm_suite_id == header.suite do
       {:claims, %{suite: info.algorithm_suite_id, keys: info.encrypted_data_keys}}

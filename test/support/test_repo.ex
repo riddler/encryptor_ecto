@@ -62,6 +62,16 @@ defmodule Encryptor.Ecto.TestRepo do
   version already in `schema_migrations`, so a developer running the suite
   twice against the same container gets the same result as the first run and
   as CI's fresh one.
+
+  One exception, and it is a one-time cost rather than a standing one.
+  Migration 4 (`Encryptor.Ecto.TestMigrationWrappedKeys`) gained
+  `wrapping_shape` and `key_id` *in place* rather than as a new migration, so
+  a local `encryptor_ecto_test` database that already recorded version 4
+  skips it and never gets the columns - every wrapped-key test then fails with
+  `column wrapping_shape does not exist`. Drop that database once
+  (`MIX_ENV=test mix ecto.drop -r Encryptor.Ecto.TestRepo`, or
+  `dropdb encryptor_ecto_test`) and the next run rebuilds it. CI, which starts
+  from an empty server, never sees this.
   """
   @spec setup!() :: :ok
   def setup! do

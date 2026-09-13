@@ -53,9 +53,11 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       assert [v3.name, v2.name, v1.name] == ["t/#{ref}/v3", "t/#{ref}/v2", "t/#{ref}/v1"]
     end
 
-    # Sabotage: resolved every selector to one partition's rows. Both the name
-    # and the material comparisons below went red, which is the same mutation
-    # the acceptance property catches and the cheapest place to see it.
+    # Sabotage: resolved every selector to one partition's rows. Each of the
+    # name and material comparisons below goes red on its own - ExUnit stops
+    # this test at the first failing assertion, so a single run shows only the
+    # first of them - which is the same mutation the acceptance property
+    # catches and the cheapest place to see it.
     test "never answers another tenant's versions" do
       TestKeyStore.provision!("merchant_7f3", 1)
       TestKeyStore.provision!("merchant_a19", 1)
@@ -434,8 +436,8 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # refused as `{:encryption_context_mismatch, "tenant_ref"}` with the
     # keyring never consulted. Both are authentication failures and both are
     # `:decrypt_failed` to a caller; which guard fires first is the vault's
-    # business and not this provider's. The stale detail in the record is
-    # raised in `encryptor` rather than worked around here.
+    # business and not this provider's. The stale detail belongs to the
+    # upstream record and was raised there rather than worked around here.
     #
     # That guard alone would refuse the read even against a store handing
     # every partition one shared key, so it does not on its own show that this
