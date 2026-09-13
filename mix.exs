@@ -83,15 +83,7 @@ defmodule Encryptor.Ecto.MixProject do
       # any pre-1.0 releases, so a range here would let a host's deps.update
       # change what stored rows mean; the pin widens when the vault's
       # guarantees do.
-      #
-      # INTERIM, ece-3lc: pinned to an `encryptor` commit rather than to a Hex
-      # release, because `Encryptor.Kdf.slow_hash/3` - the Argon2id surface
-      # ADR-0003 amendment C's decision C5 hashes through - landed after
-      # `0.2.0`, and the blind index's `:slow` option cannot be wired to a
-      # release that does not carry it. The pin is a SHA rather than a branch
-      # so the build stays reproducible, and `ece-1gy` swaps it back to
-      # `{:encryptor, "== 0.3.0"}` once that release is published.
-      {:encryptor, github: "riddler/encryptor", ref: "e17f55d30f546da40424f445fc09f239660ba031"},
+      {:encryptor, "== 0.3.0"},
 
       # The serializer `Encryptor.Ecto.Map` defaults to (ADR-0001 decision 8).
       # A direct dependency rather than a transitive one: the vault happens to
