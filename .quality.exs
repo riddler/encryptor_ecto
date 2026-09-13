@@ -12,23 +12,27 @@
 #
 # Deliberately smaller than statifier-ex's gate. That repo's custom stages -
 # the gate guard, the ADR guard and judge, the regression ratchet - all exist
-# to protect a conformance corpus and an accepted ADR set this package does
-# not have. Adopting any of them here is a decision to record when there is
-# something for it to protect, not a default to inherit.
+# to protect a conformance corpus this package does not have, and to police an
+# ADR set large enough to need policing. Adopting any of them here is a
+# decision to record when there is something for it to protect, not a default
+# to inherit.
 #
 # There is deliberately no .credo.exs either: credo's own defaults under
 # --strict are the gate until this package has a reason to deviate from one.
 #
 # Recorded deviation from the satellite shape - coveralls.json carries
 # "treat_no_relevant_lines_as_covered": true on top of the shared
-# minimum_coverage: 90. The satellites do not need it because they all have
-# executable code; this package is currently a moduledoc-only scaffold, so
-# excoveralls sees zero relevant lines and, by default, reports that as 0.0%
-# rather than "nothing to cover" - which would fail the 90% bar with no way
-# to fix it short of lowering the bar. The flag keeps the threshold at the
-# fleet's 90% and only changes the empty-file case. Drop it once the package
-# has real code if the fleet prefers strict parity. Carried from the same
-# deviation statifier_blocks recorded under sb-p6s.
+# minimum_coverage: 90. The flag is display-only, and the earlier claim here
+# that it kept the gate off the 90% floor was wrong: excoveralls checks
+# minimum_coverage against the run TOTAL, and a file with zero relevant lines
+# contributes nothing to that total either way. Measured on this package at
+# 2026-09-13: 95.4% with the flag on and 95.4% with it off, green both times.
+# What the flag does change is the per-file column for the two modules that
+# compile no executable lines - Encryptor.Ecto (moduledoc only) and
+# Encryptor.Ecto.TenantContext (typedocs and one @callback) - which read
+# 100.0% with the flag and 0.0% without it. It is kept so those two rows do
+# not read as uncovered code. Carried from the same deviation statifier_blocks
+# recorded under sb-p6s.
 
 [
   format: [
