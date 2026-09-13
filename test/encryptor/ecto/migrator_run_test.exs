@@ -833,6 +833,55 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     end
   end
 
+  describe "an in-place declaration edit, expressed as two declarations" do
+    # ADR-0002 decision 3's 2026-09-13 amendment: a same-module spec does not
+    # describe bytes written under a declaration that module no longer has, so
+    # the old declaration is kept as a module of its own and named `from:`.
+    # Sabotage: made `source_params/3` answer `nil` - the source side got the
+    # migrator's identifying map instead of the old declaration's own params,
+    # raised inside the source type and classified `:undecryptable`, which is
+    # the two-declaration form not running at all.
+    #
+    # Not a sabotage: pointing this plan's `from:` at the edited declaration
+    # (`Pinned` on both sides) leaves the test green. A declared context pair is
+    # composed into the message at encrypt and is not enforced at decrypt, so
+    # the edited declaration's params still open the old declaration's bytes;
+    # what a same-module spec loses for a context-pair edit is the description,
+    # not the read. The edits it cannot read at all are the ones that change
+    # which key wrapped the bytes.
+    test "the rows are rewritten and read back through the edited declaration" do
+      id = insert_card(pan: pan_declared(@pan))
+      before = raw(:cards, id, :pan)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.InPlaceEdit, mode: :write)
+
+      assert report.counts.migratable == 1
+      assert report.counts.undecryptable == 0
+      refute raw(:cards, id, :pan) == before
+
+      Tenant.put(@merchant)
+      params = Pinned.init(schema: TestSchemas.Card, field: :pan)
+      assert {:ok, @pan} = Pinned.load(raw(:cards, id, :pan), &Ecto.Type.load/2, params)
+    end
+
+    # The other half of the amendment's rule: the two sides' params differ
+    # because the two declarations do, so the pass is idempotent - the second
+    # run recognises the edited declaration's own bytes and the old
+    # declaration's reader is not asked again.
+    test "a second run finds every row already in the target state" do
+      id = insert_card(pan: pan_declared(@pan))
+
+      assert {:ok, _first} = Migrator.run(TestEnginePlans.InPlaceEdit, mode: :write)
+      written = raw(:cards, id, :pan)
+
+      assert {:ok, second} = Migrator.run(TestEnginePlans.InPlaceEdit, mode: :write)
+
+      assert second.counts.already_target == 1
+      assert second.counts.migratable == 0
+      assert raw(:cards, id, :pan) == written
+    end
+  end
+
   defp insert_card(attrs) do
     row =
       attrs
@@ -862,6 +911,15 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   defp signup(id) do
     Tenant.put(@merchant)
     TestRepo.get(TestSchemas.Signup, id)
+  end
+
+  # The column written under the declaration an in-place edit replaces: the
+  # ordinary `Pan`, before the context pair `Pinned` adds.
+  defp pan_declared(plaintext) do
+    Tenant.put(@merchant)
+    params = Pan.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = Pan.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
   end
 
   # The same column, written through a *different* declaration of ours: same

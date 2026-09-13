@@ -292,6 +292,33 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule InPlaceEdit do
+    @moduledoc """
+    An in-place declaration edit, spelled the way ADR-0002 decision 3's
+    2026-09-13 amendment says it is spelled: two declarations.
+
+    `Encryptor.Ecto.TestTypes.Pan` is the declaration the bytes in the column
+    were written under; `Encryptor.Ecto.TestTypes.Pinned` is the same column
+    declared again with one more context pair, which is the edit. Naming
+    `Pinned` on both sides could not describe those bytes - both sides would
+    read the edited declaration - so the old declaration is kept as a module
+    of its own and named `from:`.
+
+    Like the re-key plan it needs no `source_authenticated:`: the `from:` type
+    is one of this package's own.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      tenant_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestTypes.Pan,
+        to: Encryptor.Ecto.TestTypes.Pinned
+    end
+  end
+
   defmodule StaticContext do
     @moduledoc """
     A target whose vault writes a context pair no declaration composed.

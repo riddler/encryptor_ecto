@@ -64,13 +64,31 @@ defmodule Encryptor.Ecto.Migration do
 
   ## `from:` and `to:` may be the same module
 
-  A field moving from `tenant: :none` to `tenant: :scope`, or gaining a
-  `:context` pair, is a context change and therefore a full rewrite even
-  though no type module changed. The migrator constructs both sides' params
-  itself (ADR-0002 decision 3), so the plan expresses this by naming the same
-  module on both sides; a migrator built on schema declarations could only
-  ever express the type-module case. Nothing here rejects `from:` equal to
-  `to:` for that reason.
+  The migrator constructs both sides' params itself (ADR-0002 decision 3), so
+  a plan may name one of this package's own types on both sides and nothing
+  here rejects `from:` equal to `to:`: a data-key rotation under an unchanged
+  declaration is that shape.
+
+  What the same-module spelling does not *describe* is an **in-place
+  declaration edit**. A field moving from `tenant: :none` to `tenant: :scope`,
+  or gaining a `:context` pair, is a context change and therefore a full
+  rewrite even though no type module changed - but both sides of a same-module
+  spec read that module's *current* declaration, so the spec says a rewrite
+  from the edited declaration into itself. It says nothing about the bytes
+  already in the column, which were written under the form the module no
+  longer has; and where the edit changed which key wrapped them - a tenant
+  strategy, a vault - the source side cannot read them at all.
+
+  **An in-place declaration edit is migrated as two declarations** (ADR-0002
+  decision 3, as amended 2026-09-13). Keep the old declaration as a module of
+  its own - a second declaration of the same column, under the old params -
+  and name it `from:`; the edited declaration is `to:`. The source side reads
+  the old module's own declaration and the target side the new one, so the two
+  params values differ because the two declarations do. That is the shape a
+  cloak-to-encryptor plan's `from:` module already takes, so the migrator
+  needs nothing new to run it and the field spec gains no source-side params
+  or context option. The rewrite is pinned in
+  `test/encryptor/ecto/migrator_run_test.exs`.
 
   ## Adopting encryption on a plaintext column
 
@@ -108,8 +126,10 @@ defmodule Encryptor.Ecto.Migration do
   `from:` is one of this package's own vault-backed types needs no
   declaration, because the package that wrote those bytes authenticates them
   and `Encryptor.Ecto.Migrator.Source.vault_backed?/2` can prove it - that is
-  the context-change case above, where `from:` and `to:` name the same module
-  with different params. Every other `from:` is the host's own legacy reader:
+  the case above where `from:` names one of this package's declarations,
+  whether it is the same module as `to:` or the earlier declaration a
+  two-declaration edit keeps. Every other `from:` is the host's own legacy
+  reader:
   a cloak cipher module, a legacy `load/1`, an unknown `Source`. This
   package's correctness obligation on that format is nil (decision 1) and it
   cannot tell an AEAD cipher from a stream cipher by looking, so it asks - at
