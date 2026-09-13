@@ -1264,3 +1264,56 @@ unaffected and stand as recorded.
 
 This Note carries the status of the sections it annotates; Amendment C's
 Status line and the capacity-planning Note are not touched.
+
+## Note (2026-09-13): three readings in the accuracy Note above, corrected
+
+Three sentences in the Note above are imprecise as written. Each is corrected
+here by addition; no decision text, no amendment text, no capacity figure and
+no status word changes. Code cites read at `encryptor_ecto` `6592581`.
+
+**1. C5's block is schematic for a different reason than C1's.** Item 2 of the
+Note above closes "C5's block is schematic in the same way and for the same
+reason". C1's block is schematic because it binds a name to
+`Encryptor.Vault.derive/3` as though the call returned bytes when it returns a
+tagged tuple. C5's block contains no `derive/3` call at all: it writes
+`index_salt  = <C1, C2, C3, C4>`, a back-reference to the four clauses that
+define the salt rather than a call of any kind (the fenced block is
+`docs/adr/0003-blind-index.md:931-936`, with its lead-in sentence at `:929`). It is schematic for the plainer
+reason that one of its four lines is a reference and not an expression, and it
+has no executable form to give because it is not a call sequence. Read item 2's
+closing sentence as "C5's block is schematic too, for its own reason: it names
+the salt rather than deriving it." Both blocks remain statements of *what is
+derived and under what*, which is what item 2 is for.
+
+**2. "Unwrapped by nothing here" is about the function, not about its caller.**
+Item 2 supports its point with "this package's own caller unwraps the tagged
+tuple rather than the value", quoting
+`lib/encryptor/ecto/blind_index/derivation.ex:433-435`. The quoted sentence -
+"The result is the vault's tagged tuple, unwrapped by nothing here" - says the
+opposite of what the paraphrase says: it is `Derivation.derive/3`'s own
+`@doc` declaring that the function unwraps **nothing**, passing the vault's
+`{:ok, binary()} | {:error, Encryptor.Error.t()}` straight out so that the
+vault's reasons stay the vault's to phrase. It is the doc's *example* that
+destructures the tuple, two lines above the sentence (`:434` is blank)
+(`{:ok, index_key} = Derivation.derive(Payments.Vault, derivation, selector)`,
+`:433`). Read item 2's supporting clause as "this package's own function
+returns the vault's tagged tuple and unwraps nothing, and its documented caller
+destructures the tuple rather than being handed the value". Item 2's conclusion
+is unaffected: C1's block still does not type-check as written, and the
+executable form item 2 gives is still the executable form.
+
+**3. Item 4 corrects the capacity Note's attribution and leaves its opening
+clause standing.** Item 4 establishes that B4's "deliberately memory-heavy
+rather than iteration-heavy" framing rests on both upstream figures - 2.1x for
+doubling memory and 3.2x for tripling iterations - and is a claim about where
+B4's chosen point sits relative to the published floor. It does not touch the
+clause that prompted it: the capacity Note's third bullet still opens "Memory,
+not iterations, is where the cost sits". Read that clause as **withdrawn as a
+per-unit claim.** The pair of figures does not say memory is the dearer knob
+per unit; taken per unit of change they say the two knobs are roughly linear,
+which is item 4's own conclusion. The bullet's remaining content - 2.1x for
+doubling memory at fixed iterations, and that this is part of the evidence
+behind B4's framing - stands as corrected by item 4, and every operational
+figure in that Note (64.24 ms per hash, 15.6 hashes per second per core, ~18
+core-hours per million rows, ~128 ms per row for two slow indexes) is
+unaffected.

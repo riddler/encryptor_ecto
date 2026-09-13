@@ -151,11 +151,11 @@ defmodule Encryptor.Ecto.KeyStore do
   | `key_id` | `NULL` for an engine message; the `CryptoKey` id a GCP ciphertext was produced under |
   | `inserted_at`, `updated_at` | nullable `:utc_datetime` timestamps the generator emits. This module neither writes nor reads them |
 
-  The generated DDL is those eleven columns and nothing else
-  (`Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration.source/2`). The timestamps
-  are nullable and carry no default because this package writes no rows: a
-  host that inserts them gets them, and one that does not gets `NULL` rather
-  than a `NOT NULL` violation on its own insert.
+  The generated DDL is those eleven columns and nothing else - see the
+  migration the `mix encryptor.ecto.gen.key_store_migration` task writes. The
+  timestamps are nullable and carry no default because this package writes no
+  rows: a host that inserts them gets them, and one that does not gets `NULL`
+  rather than a `NOT NULL` violation on its own insert.
 
   `wrapping_shape` and `key_id` are ADR-0005's, and they are the reason a
   reader never guesses.
@@ -558,9 +558,10 @@ defmodule Encryptor.Ecto.KeyStore do
 
   # ADR-0005 open question 2: which of a second provider option, a delegation
   # to `Encryptor.Provider.GcpKms` or a composite provider supplies this
-  # branch's client is undecided, and the module it would delegate to is not
-  # shipped upstream (the record's assumption A4). Decision 5 is written so
-  # that this is an answer rather than a crash.
+  # branch's client is undecided. The record's assumption A4 is unmet rather
+  # than unshipped: the module exists upstream, and the public unwrap a store
+  # could delegate to does not. Decision 5 is written so that this is an
+  # answer rather than a crash.
   defp unwrap_row(_state, :gcp_kms_ciphertext, _row),
     do: {:error, {:invalid_key_descriptor, {:unsupported_wrapping_shape, "gcp_kms_ciphertext"}}}
 

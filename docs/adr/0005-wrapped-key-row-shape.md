@@ -640,3 +640,167 @@ implemented in `lib/encryptor/ecto/key_store.ex` and in the two generator
 tasks at `32b503e`, and the one claim the code overtook - decision 7's
 bare-rescue sentence - was already recorded as stale in the Note above,
 together with the answer to open question 3.
+
+## Note (2026-09-13): assumption A4 is unmet rather than unshipped, open question 2's interim answer, and five accuracy corrections
+
+Every upstream cite below was read at `encryptor` `efd71c5`, and every cite
+into this package at `encryptor_ecto` `6592581`. Line anchors into
+`lib/encryptor/ecto/key_store.ex` are given as that file stands in the commit
+this Note ships in, because the same commit rewrites one of its comments and
+moves everything below it by a line. No decision, assumption, open question or
+consequence is withdrawn, reworded or reopened; no Status word flips. This Note
+carries the status the accepted record already has.
+
+### 1. A4's status cell is right about the consequence and wrong about the cause
+
+The "Upstream API assumptions" table records A4 - "`Encryptor.Provider.GcpKms`
+exists as a module a store can delegate an unwrap to" - as **not shipped**
+(`:312`). Read that cell as **assumption unmet: the module exists, the public
+unwrap does not.**
+
+`Encryptor.Provider.GcpKms` is shipped
+(`enc lib/encryptor/provider/gcp_kms.ex`, read at `efd71c5`). What it does not
+expose is an unwrap a store could call: its public surface is `init/1`,
+`encryption_key/2`, `decryption_keys/2`, `provision/2` and `crypto_key_name/1`
+(`:246`, `:284`, `:300`, `:325` with a second clause at `:337`, and `:375`),
+and the function that turns a
+stored row back into key material is `defp unwrap/3` (`:471`). A store holding
+a GCP-shaped row therefore has no callable entry point, which is the same
+practical position "not shipped" described - but the fix is a public function
+on an existing module rather than a new module, and a reader planning open
+question 2's answer should know which.
+
+The consequence the cell was drawn for is unchanged: A4 is still the one
+assumption that is not code, and decision 5 is still written so that a store
+which cannot serve such a row answers rather than crashes.
+
+The same loose phrasing sits in the implementation's comment, which said "the
+module it would delegate to is not shipped upstream". It now reads with this
+Note's wording (`lib/encryptor/ecto/key_store.ex:559-564`).
+
+### 2. Open question 2's interim answer, and the term it publishes
+
+Open question 2 - which of a second provider option, a delegation to
+`Encryptor.Provider.GcpKms` or a composite provider supplies the GCP branch's
+client - is **still open, and its owner is unchanged**. What this Note records
+is that the code already holds a deliberate interim answer, and that the answer
+is a published term rather than an internal detail:
+
+    {:invalid_key_descriptor, {:unsupported_wrapping_shape, "gcp_kms_ciphertext"}}
+
+A well-formed GCP row that this store cannot serve answers with that reason
+(`lib/encryptor/ecto/key_store.ex:566`), and the moduledoc
+already lists it beside the other `:invalid_key_descriptor` arms (`:224-229`).
+Decision 5's own table lists four arms and this is the fifth; read the table as
+those four plus this one. The arm is not a fifth *decision* - decision 5
+already decides that an unrecognized or unservable shape answers rather than
+crashes, and this is that answer for the one shape the record names and the
+store cannot serve.
+
+Two properties of the term are decisions rather than accidents, and are the
+reason it is written down here:
+
+- The string inside it is the **stored** `wrapping_shape` value, not an atom.
+  Decision 5 forbids `String.to_existing_atom/1`, so the reason carries the
+  column's own bytes and a caller matching on it matches a binary.
+- It sits **inside** `:invalid_key_descriptor` rather than beside it, so it
+  adds no term to `t:Encryptor.Provider.reason/0` - the same property that made
+  open question 3 settleable in this record rather than upstream.
+
+Whichever way open question 2 lands, this term is what a host sees until it
+does. If the answer is a public upstream unwrap, this arm becomes unreachable
+for a store configured with the client and keeps its meaning for one that is
+not.
+
+### 3. The ride-along row in the anchor table is a SHA refresh, not an over-run
+
+The Note above collects four rows under "Anchors that run past or short of what
+they quote". The third row - decision 5's ride-along rule, `key_store.ex:117-121`
+at `a0717e9` corrected to `:181-184` at `f441f66` - does not belong under that
+heading. The original span quoted what it said it quoted; what changed is the
+file. Read that row as a **SHA refresh whose anchor moved**, together with a
+one-line **narrowing**: `a0717e9:117-121` is byte-for-byte `f441f66:180-184`,
+so the corrected `:181-184` drops the lead-in line `:180` ("answer for a
+wrapping the rewrap pass has not reached yet. The") that the original span
+carried. The Note above describes this as a widening, which is the wrong
+direction.
+
+Worth naming beside it: **two** rows of that table carry a refreshed SHA, not
+one. Row 4 - decision 1's "`postgrex` is a test-only dependency", `mix.exs`
+`:107-123` at `a0717e9` corrected to `:115-116` at `f441f66` - is a pure span
+correction that re-labelled the SHA along with it: `mix.exs` is byte-identical
+at the two SHAs, so `a0717e9:115-116` are the same two lines and the refresh
+buys nothing.
+
+The rest of this record's `a0717e9` cites were not refreshed, and the list
+below is illustrative rather than exhaustive - the file carries 23 of them.
+Decision 5's own read-side arms table still cites `key_store.ex:267` (`:220`
+of this file); decision 3 cites `:262-274` (`:171`); decision 4 cites `:57`
+(`:188`). Decision 6's body cite,
+`encryptor.ecto.gen.key_store_migration.ex:182-196` (`:251`), still reads
+`a0717e9` in the decision itself, and is separately re-anchored at `f441f66`
+by the trailing paragraph of the Note above, for attribution rather than for
+the SHA - so it belongs on neither list cleanly, and this sentence is where it
+is accounted for. All of them are historical cites to a historical SHA, which
+is legitimate; what they are not is a set that has been checked against
+today's file, and a reader refreshing one should not read the table above as
+having refreshed them.
+
+### 4. The two upstream span corrections are right, and their stated reasons are not
+
+Rows 1 and 2 of that same table give the correct spans and describe the
+boundary lines loosely. Both spans stand; read the reasons as follows
+(`enc docs/adr/0007-gcp-kms-wrap-provider.md`, read at `efd71c5`).
+
+- The consequences quote: `650-656` is right. Line `657` is not "the sentence
+  after the quote". The sentence it belongs to begins on `654` ("That is a
+  schema question ..."), and what the quote cuts is that sentence mid-`656`,
+  after its first word (`"it"`); `657` carries the end of the clause that
+  follows the semicolon. The original `650-657` therefore over-ran by part of
+  one sentence, not by a whole one, and this record quotes that same tail
+  deliberately elsewhere (`enc 0007:656-657` at `:199`).
+- Open question 1: `852-855` is right. Line `851` is not "the question's own
+  heading line" alone - it carries the bolded question **and** the first two
+  words of the prose that follows it, and the quote begins mid-`852`.
+  Symmetrically, `855` is included only as far as "not a decision"; the rest of
+  that line continues the sentence.
+
+### 5. Item 1 records the task's name; it does not write it into decision 6
+
+Item 1 of the Note above closes "Decision 6 is read as naming this task".
+Decision 6 names no task, which is what item 1's own lead-in says. Read that
+closing sentence as **"the name is recorded here"**: the record forces a second
+generator task, the code half chose what to call it, and this file is where the
+choice is written down. Nothing is read back into decision 6, and a later
+decision may rename the task without contradicting the record.
+
+### 6. The exit-codes row understates the second exit-2 arm
+
+Item 1's table gives the shape generator's exit codes as "`0` on a written
+file, `2` on a usage failure". `2` has a second arm the task's own moduledoc
+states and its own code implements: an additive migration for this table
+already exists in the migrations directory, in which case the generator writes
+nothing and never overwrites or duplicates one. The moduledoc row is
+`lib/mix/tasks/encryptor.ecto.gen.key_store_shape_migration.ex:51` and the
+arm is `defp unwritten/2` at `:195-200`, which globs
+`*_add_wrapping_shape_to_<table>.exs` (ece `6592581`). Read the row as "`2` on
+a usage failure, or on an additive migration for this table that already
+exists". The routing is unchanged: `main/1` (`:90-97`) sends both arms to
+`Encryptor.Ecto.Migrator.CLI.usage_error/1` (`:95`).
+
+### 7. Item 8's `:prefix` sentence and its anchor name different functions
+
+Item 8 says `Encryptor.Ecto.KeyStore` "takes a `:prefix` option in `init/1`"
+and anchors it at `key_store.ex:598-605` at `f441f66`, which is the private
+validator rather than `init/1`. Both halves are true of different lines, and at
+ece `6592581` both have moved. The cite is:
+
+| what | where |
+|---|---|
+| `init/1` reads the option | `lib/encryptor/ecto/key_store.ex:327` and `:332` (`{:ok, prefix} <- prefix(opts)`) |
+| the option is validated | `:624-631` (`defp prefix/1` and its `@spec`) |
+| the option is documented | `:50`, with the singular-placement argument at `:52` |
+| it is passed as a query option, not spelled into the source | `:441-446` (the comment and `defp query_opts/1`) |
+
+Nothing item 8 claims about the option changes, and item 8's disclaimer stands:
+no decision in this record names `:prefix`, and nothing here decides it.
