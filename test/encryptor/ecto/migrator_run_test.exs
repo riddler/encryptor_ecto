@@ -30,8 +30,10 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   alias Encryptor.Ecto.TestSchemas
   alias Encryptor.Ecto.TestTypes.Pan
   alias Encryptor.Ecto.TestTypes.PanRekeyed
+  alias Encryptor.Ecto.TestTypes.PanRotating
   alias Encryptor.Ecto.TestTypes.PanSigned
   alias Encryptor.Ecto.TestTypes.Pinned
+  alias Encryptor.Ecto.TestVaults
   alias Encryptor.Message
 
   @merchant "merchant_7f3"
@@ -882,6 +884,261 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     end
   end
 
+  describe "a rotation (`writing_key:`)" do
+    # This is the defect the option exists to remove, pinned as a fact rather
+    # than as a wish: the row below is one key version behind and every probe
+    # this package has answers "already in the target state" for it.
+    #
+    # Sabotage: made the rotation predicate answer `false` where no
+    # `writing_key:` was given - every already-migrated row of every plan in
+    # the suite went back to the source reader, eleven tests over, which is
+    # what makes the predicate's `nil` arm the whole of "not a rotation".
+    test "without the option, an outgoing-version row is counted already migrated" do
+      id = insert_card(pan: outgoing(@pan))
+
+      assert {:ok, report} =
+               Migrator.run(TestEnginePlans.Rotation,
+                 mode: :dry_run,
+                 only_tenants: [@merchant]
+               )
+
+      assert report.counts.already_target == 1
+      assert report.counts.migratable == 0
+      assert key_names(raw(:cards, id, :pan)) == [outgoing_key()]
+    end
+
+    # Sabotage: had the predicate accept any name the header carried - the row
+    # was counted already migrated again and the dry run reported a scope with
+    # nothing to do, which is the pass rewriting nothing while exiting zero.
+    test "the option classifies an outgoing-version row migratable" do
+      id = insert_card(pan: outgoing(@pan))
+      bytes = raw(:cards, id, :pan)
+
+      assert {:ok, report} =
+               Migrator.run(TestEnginePlans.Rotation,
+                 mode: :dry_run,
+                 only_tenants: [@merchant],
+                 writing_key: current_key()
+               )
+
+      assert report.counts.migratable == 1
+      assert report.counts.already_target == 0
+      assert report.counts.undecryptable == 0
+      assert raw(:cards, id, :pan) == bytes
+    end
+
+    # The rewrite itself, and A10 with it: the pass names no version, it only
+    # causes a re-encrypt, and what comes out is whatever the vault's current
+    # encryption key is.
+    #
+    # Sabotage: had the predicate accept any name - nothing was rewritten and
+    # the column kept the outgoing version's bytes.
+    test "a write pass rewrites it under the current version, and reads back" do
+      id = insert_card(pan: outgoing(@pan))
+
+      assert {:ok, report} =
+               Migrator.run(TestEnginePlans.Rotation,
+                 mode: :write,
+                 only_tenants: [@merchant],
+                 writing_key: current_key()
+               )
+
+      assert report.counts.migratable == 1
+      assert key_names(raw(:cards, id, :pan)) == [current_key()]
+      assert through_rotation(raw(:cards, id, :pan)) == @pan
+    end
+
+    # The acceptance check the record gives a rotation, rather than `verify/2`:
+    # a second `mode: :dry_run` carrying the same option, reporting an empty
+    # migratable count over the whole scope. The key-name assertion in the
+    # middle is what keeps the clean answer from being a clean answer about
+    # rows nothing touched.
+    #
+    # Sabotage: inverted the comparison - the first pass rewrote nothing and
+    # the second reported the same clean scope over the outgoing version's own
+    # bytes.
+    test "a second dry run under the same option reports a clean scope" do
+      id = insert_card(pan: outgoing(@pan))
+
+      assert {:ok, _first} =
+               Migrator.run(TestEnginePlans.Rotation,
+                 mode: :write,
+                 only_tenants: [@merchant],
+                 writing_key: current_key()
+               )
+
+      written = raw(:cards, id, :pan)
+      assert key_names(written) == [current_key()]
+
+      assert {:ok, second} =
+               Migrator.run(TestEnginePlans.Rotation,
+                 mode: :dry_run,
+                 only_tenants: [@merchant],
+                 writing_key: current_key()
+               )
+
+      assert second.counts.migratable == 0
+      assert second.counts.already_target == 1
+      assert raw(:cards, id, :pan) == written
+    end
+
+    # `mode:` is unchanged (decision 7), and so is every pass that sets no
+    # option: the same fixture under the same plan is the no-op it was.
+    #
+    # Sabotage: made the predicate answer `false` for a pass with no
+    # `writing_key:` - this row was rewritten by a plain pass, which is a
+    # rotation happening because nobody asked for one.
+    test "a plain write pass over the same fixture behaves as before" do
+      id = insert_card(pan: outgoing(@pan))
+      bytes = raw(:cards, id, :pan)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Rotation, mode: :write)
+
+      assert report.counts.already_target == 1
+      assert report.counts.migratable == 0
+      assert raw(:cards, id, :pan) == bytes
+    end
+
+    # The record's self-correcting case: the operator states the name of the
+    # version the rows have already left. Every row is classified migratable
+    # and rewritten, each rewrite encrypts under whatever version is actually
+    # current, and a second pass under the right name reports a clean scope -
+    # expensive, and not dangerous.
+    #
+    # Sabotage: had the predicate accept any name - the stale name was
+    # indistinguishable from the right one and the pass reported a clean scope
+    # it had not established.
+    test "a stale name classifies every row migratable and a second pass is clean" do
+      id = insert_card(pan: current(@pan))
+
+      assert {:ok, first} =
+               Migrator.run(TestEnginePlans.Rotation,
+                 mode: :write,
+                 only_tenants: [@merchant],
+                 writing_key: outgoing_key()
+               )
+
+      assert first.counts.migratable == 1
+      assert key_names(raw(:cards, id, :pan)) == [current_key()]
+
+      assert {:ok, second} =
+               Migrator.run(TestEnginePlans.Rotation,
+                 mode: :dry_run,
+                 only_tenants: [@merchant],
+                 writing_key: current_key()
+               )
+
+      assert second.counts.migratable == 0
+      assert second.counts.already_target == 1
+    end
+
+    # Sabotage: dropped the `:tenant`-profile arm of `rotatable!/5` - one
+    # merchant's key name was compared against every merchant's rows, which
+    # classifies all of them migratable and rewrites the other tenants' rows
+    # for nothing.
+    test "a tenant-profile vault requires a tenant filter with the option" do
+      id = insert_card(pan: outgoing(@pan))
+      bytes = raw(:cards, id, :pan)
+
+      message =
+        assert_raise ArgumentError, fn ->
+          Migrator.run(TestEnginePlans.Rotation, mode: :write, writing_key: current_key())
+        end
+
+      assert Exception.message(message) =~ "only_tenants:"
+      assert Exception.message(message) =~ ":tenant`-profile vault"
+      assert raw(:cards, id, :pan) == bytes
+    end
+
+    # The half of the scope rule that is a fact about the option list, so it is
+    # refused before any plan is resolved.
+    #
+    # Sabotage: dropped the check from `options!/1` - a two-tenant filter was
+    # accepted and the second tenant's rows were classified migratable.
+    test "a tenant filter beside the option names exactly one tenant" do
+      message =
+        assert_raise ArgumentError, fn ->
+          Migrator.run(TestEnginePlans.Rotation,
+            mode: :write,
+            only_tenants: [@merchant, @other_merchant],
+            writing_key: current_key()
+          )
+        end
+
+      assert Exception.message(message) =~ "exactly one tenant"
+    end
+
+    # Sabotage: dropped the `:single`-profile arm - the run continued to the
+    # existing unfilterable refusal, which is a message about the rewrite's
+    # tenant column rather than about the option that is wrong here.
+    test "a single-profile vault permits no tenant filter with the option" do
+      message =
+        assert_raise ArgumentError, fn ->
+          Migrator.run(TestEnginePlans.Global,
+            mode: :write,
+            only_tenants: [@merchant],
+            writing_key: current_key()
+          )
+        end
+
+      assert Exception.message(message) =~ ":single`-profile vault"
+    end
+
+    # The refusal rather than the behaviour: a target this package cannot read
+    # a header claim out of takes the load attempt, the load attempt cannot
+    # answer the rotation question at all, and silence one field at a time is
+    # not acceptable either.
+    #
+    # Sabotage: dropped the no-header arm of `rotatable!/5` - the pass ran and
+    # counted every row of that field already in the target state, which is
+    # the defect this option exists to remove, reinstated for one field.
+    test "a field with no readable target header is refused rather than run" do
+      message =
+        assert_raise ArgumentError, fn ->
+          Migrator.run(TestEnginePlans.PlainTarget,
+            mode: :write,
+            only_tenants: [@merchant],
+            writing_key: current_key()
+          )
+        end
+
+      assert Exception.message(message) =~ "Card.pan"
+      assert Exception.message(message) =~ "load attempt"
+    end
+
+    # Sabotage: had `writing_key!/1` take whatever it was given - a list of
+    # names compared unequal to every header's name and the whole scope was
+    # classified migratable.
+    test "the option is a single key name" do
+      message =
+        assert_raise ArgumentError, fn ->
+          Migrator.run(TestEnginePlans.Rotation,
+            mode: :write,
+            only_tenants: [@merchant],
+            writing_key: [current_key()]
+          )
+        end
+
+      assert Exception.message(message) =~ "a single wrapping key name"
+    end
+
+    # `verify/2`'s options stay the closed pair (decision 10). It could not use
+    # this one: a verification takes the load attempt by design and the
+    # outgoing version loads (A12).
+    #
+    # Sabotage: added `:writing_key` to `@verify_options` - the option was
+    # accepted and then ignored, which is a verification silently answering a
+    # question other than the one it was asked.
+    test "`verify/2` does not take the option" do
+      message =
+        assert_raise ArgumentError, fn ->
+          Migrator.verify(TestEnginePlans.Rotation, writing_key: current_key())
+        end
+
+      assert Exception.message(message) =~ "unknown options"
+    end
+  end
+
   defp insert_card(attrs) do
     row =
       attrs
@@ -957,6 +1214,50 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     params = PanSigned.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = PanSigned.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
+  end
+
+  # A row written under the outgoing key version: `Encryptor.Ecto.TestTypes.Pan`
+  # rides the vault whose only key is `MerchantRotating`'s v1, and every pair
+  # the header probe compares is identical across the two, so these bytes
+  # differ from the rotation target's own in the wrapping key name and in
+  # nothing else. The mid-rotation vault decrypts them, which is what makes
+  # both probes answer "already in the target state" without the option.
+  defp outgoing(plaintext) do
+    Tenant.put(@merchant)
+    params = Pan.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = Pan.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
+
+  # The two wrapping key names the fixture merchant has, as the header carries
+  # them: read off the descriptors the providers resolve to rather than spelled
+  # out here, so a change to the fixture's naming cannot leave these tests
+  # asserting against a name nothing writes.
+  # A row already under the current version, for the case where the name the
+  # operator states is the stale one: the pass rewrites every row it sees,
+  # each rewrite encrypts under whatever version is actually current, and the
+  # second pass under the right name reports a clean scope.
+  defp current(plaintext) do
+    Tenant.put(@merchant)
+    params = PanRotating.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = PanRotating.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
+
+  defp through_rotation(bytes) do
+    Tenant.put(@merchant)
+    params = PanRotating.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, loaded} = PanRotating.load(bytes, &Ecto.Type.load/2, params)
+    loaded
+  end
+
+  defp current_key, do: TestVaults.rekeyed_descriptor(@merchant).name
+
+  defp outgoing_key, do: TestVaults.merchant_descriptor(@merchant).name
+
+  defp key_names(bytes) do
+    {:ok, info} = Message.describe(bytes)
+    Enum.map(info.encrypted_data_keys, & &1.key_name)
   end
 
   # A message whose header still describes itself and whose body no longer

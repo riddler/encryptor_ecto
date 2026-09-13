@@ -81,6 +81,7 @@ defmodule Encryptor.Ecto.Migrator do
   | `:only_tenants` | `nil` | Visit only these tenants |
   | `:except_tenants` | `[]` | Visit every tenant but these |
   | `:only` | `nil` | `[{Schema, [:field]}]`, to narrow the plan |
+  | `:writing_key` | `nil` | The wrapping key name a rotation's rows must claim |
   | `:progress` | no-op | Called with the report after each batch |
 
   `:prefix` is singular and the plan carries none, per ADR-0002 proposed
@@ -91,6 +92,51 @@ defmodule Encryptor.Ecto.Migrator do
 
   `checkpoint: :none` with `resume: true` is an `ArgumentError`: resuming from
   a checkpoint that was never written is a request with no meaning.
+
+  ## A rotation is a pass with `writing_key:` set
+
+  A single tenant's data-key rotation is this same tool with `from:` and `to:`
+  naming one declaration under one vault - and, without this option, it
+  rewrites nothing. Assumptions A11 and A12 leave the outgoing key version
+  decryptable, so both probes answer "already in the target state" for a row
+  written under the previous version and the pass writes nothing at all.
+  `:writing_key` supplies the one fact that fixes it: the name of the wrapping
+  key the rows in scope are supposed to claim. A row whose header names any
+  other key is rewritten - under whatever version is current, which this
+  package never selects (A10) - and a row already claiming it is left alone.
+
+  The name is the message's own, as `Encryptor.Message.describe/1` reports it
+  for each of the header's encrypted data keys, and the operator running the
+  plan is where it comes from: nothing keyless can ask a vault for "this
+  tenant's current version", and the operator who minted the version knows its
+  name. It is a comparison target and never an authorization input. A stale
+  name is self-correcting rather than dangerous - every row is classified
+  migratable and rewritten, each rewrite encrypts under whatever version is
+  actually current, and a second pass under the right name reports a clean
+  scope.
+
+  There is no rotation mode. `mode:` is still exactly one of `:dry_run` or
+  `:write` (decision 7): a rotation is one of those two with the option set,
+  the dry run being the census and the write the rewrite. A rotation adds no
+  report class either. A row whose header names another key is `:migratable`,
+  because both halves of that class are literally true of it - the probe
+  failed and the `from` load succeeded.
+
+  One literal key name belongs to one key holder, so `writing_key:` against a
+  `:tenant`-profile vault requires `only_tenants:` naming exactly one tenant,
+  and against a `:single`-profile vault - whose scope holds one key holder
+  already - it requires no tenant filter and permits none. `only:` stays
+  orthogonal: a rotation narrowed to some of the plan's columns is a partial
+  rotation. A field whose target this package cannot read a header claim out
+  of takes the load attempt instead, and the load attempt cannot answer the
+  rotation question at all, so a `writing_key:` pass whose scope holds such a
+  field is refused rather than run with that field silently answering "already
+  in the target state" for every row.
+
+  A rotation is verified by a second `mode: :dry_run` pass carrying the same
+  `writing_key:`, which reports an empty migratable count over the whole
+  scope. It is not verified by `verify/2`: a verification takes the load
+  attempt by design, and by A12 the outgoing version loads.
 
   ## Which failures are exceptions and which are reports
 
@@ -160,6 +206,7 @@ defmodule Encryptor.Ecto.Migrator do
           only_tenants: [String.t()] | nil,
           except_tenants: [String.t()],
           only: [{module(), [atom()]}] | nil,
+          writing_key: String.t() | nil,
           progress: (Report.t() -> any())
         ]
 
@@ -175,6 +222,7 @@ defmodule Encryptor.Ecto.Migrator do
            only_tenants: [String.t()] | nil,
            except_tenants: [String.t()],
            only: [{module(), [atom()]}] | nil,
+           writing_key: String.t() | nil,
            progress: (Report.t() -> any())
          }
 
@@ -189,6 +237,7 @@ defmodule Encryptor.Ecto.Migrator do
     :only_tenants,
     :except_tenants,
     :only,
+    :writing_key,
     :progress
   ]
 
@@ -343,6 +392,8 @@ defmodule Encryptor.Ecto.Migrator do
     target_column = Keyword.get(spec, :into) || field
     to = Keyword.fetch!(spec, :to)
     {arity, params} = target!(to, rewrite, target_column)
+    header = target_header(arity, params)
+    :ok = rotatable!(rewrite.schema, field, header, vault_profile(arity, params), options)
 
     %Pass{
       repo: plan.repo,
@@ -361,8 +412,9 @@ defmodule Encryptor.Ecto.Migrator do
       to: to,
       to_arity: arity,
       to_params: params,
-      target_header: target_header(arity, params),
+      target_header: header,
       mode: options.mode,
+      writing_key: options.writing_key,
       batch_size: options.batch_size,
       sample: options.sample,
       on_error: options.on_error,
@@ -419,6 +471,44 @@ defmodule Encryptor.Ecto.Migrator do
 
   @spec filtering?(options()) :: boolean()
   defp filtering?(options), do: options.only_tenants != nil or options.except_tenants != []
+
+  # The two refusals a rotation forces (ADR-0002's "the rotation pass"), both
+  # of them knowable only here: the vault's context profile, and whether this
+  # package can read a header claim out of the target, are facts about the
+  # resolved declaration rather than about the option list. That is why the
+  # option-shape half of the tenant rule lives in `options!/1` and this half
+  # lives beside `unfilterable_message/2`.
+  #
+  # The first is the scope rule. A tenant's wrapping key name belongs to one
+  # tenant, so one literal name compared against another tenant's rows would
+  # classify every one of them migratable: a `:tenant`-profile vault needs
+  # `only_tenants:` naming exactly one tenant, and a `:single`-profile one,
+  # whose scope holds a single key holder already, needs no tenant filter and
+  # permits none.
+  #
+  # The second is the probe rule. A target this package cannot read a header
+  # claim out of takes the load attempt, and the load attempt answers "already
+  # in the target state" for every row of a rotation by A12 - the silence this
+  # option exists to remove. Refused for the whole pass rather than tolerated
+  # one field at a time.
+  @spec rotatable!(module(), atom(), Pass.target_header() | nil, atom() | nil, options()) :: :ok
+  defp rotatable!(_schema, _field, _header, _profile, %{writing_key: nil}), do: :ok
+
+  defp rotatable!(schema, field, nil, _profile, _options) do
+    raise ArgumentError, unreadable_rotation_message(schema, field)
+  end
+
+  defp rotatable!(schema, _field, _header, :tenant, %{only_tenants: nil}) do
+    raise ArgumentError, untenanted_rotation_message(schema)
+  end
+
+  defp rotatable!(schema, _field, _header, :single, options) do
+    if filtering?(options), do: raise(ArgumentError, filtered_rotation_message(schema))
+
+    :ok
+  end
+
+  defp rotatable!(_schema, _field, _header, _profile, _options), do: :ok
 
   # -- the source type ------------------------------------------------------
 
@@ -532,6 +622,25 @@ defmodule Encryptor.Ecto.Migrator do
     end
   end
 
+  # The context profile of the vault this field's target writes through, read
+  # at the same point and from the same frozen configuration as
+  # `target_header/2`, for the one caller that needs it: `rotatable!/5`'s scope
+  # rule is a question about how many key holders the vault's scope holds,
+  # which is exactly what the profile says (`Encryptor.Vault.Config`'s
+  # `:context_profile`). `nil` has the same three causes the header's `nil`
+  # has, and the header refusal reaches those fields first.
+  @spec vault_profile(1 | 3, term()) :: Encryptor.Vault.Config.profile() | nil
+  defp vault_profile(1, _params), do: nil
+
+  defp vault_profile(3, params) do
+    with true <- ours?(params),
+         {:ok, config} <- params.vault.config() do
+      config.context_profile
+    else
+      _no_profile -> nil
+    end
+  end
+
   # A foreign `Ecto.ParameterizedType` gets its own params untouched: its
   # `:tenant` key, if it has one, means whatever that module decided it means,
   # and writing ours over it would be this package reaching into a contract it
@@ -579,11 +688,22 @@ defmodule Encryptor.Ecto.Migrator do
       only_tenants: tenants!(opts, :only_tenants, nil),
       except_tenants: tenants!(opts, :except_tenants, []),
       only: only!(opts),
+      writing_key: writing_key!(opts),
       progress: progress!(opts)
     }
 
     if options.checkpoint == :none and options.resume do
       raise ArgumentError, resume_without_checkpoint_message()
+    end
+
+    # The half of the rotation scope rule that is a fact about the option list:
+    # whatever the vault's profile turns out to be, a tenant filter given
+    # beside `writing_key:` names exactly one tenant or it is wrong, because
+    # one literal key name belongs to one key holder. Which of "one" and "none"
+    # a given vault requires is `rotatable!/5`'s.
+    if options.writing_key != nil and is_list(options.only_tenants) and
+         length(options.only_tenants) != 1 do
+      raise ArgumentError, rotation_tenants_message(options.only_tenants)
     end
 
     options
@@ -617,6 +737,10 @@ defmodule Encryptor.Ecto.Migrator do
       only_tenants: nil,
       except_tenants: [],
       only: nil,
+      # A verification cannot use it: it takes the load attempt by design and
+      # the outgoing key version loads (A12), so a rotation's acceptance check
+      # is a second dry run carrying the option rather than this function.
+      writing_key: nil,
       progress: fn _report -> :ok end
     }
   end
@@ -749,6 +873,15 @@ defmodule Encryptor.Ecto.Migrator do
     if valid?, do: list, else: raise(ArgumentError, only_message(list))
   end
 
+  @spec writing_key!(keyword()) :: String.t() | nil
+  defp writing_key!(opts) do
+    case Keyword.get(opts, :writing_key) do
+      nil -> nil
+      name when is_binary(name) and name != "" -> name
+      other -> raise ArgumentError, bad_writing_key_message(other)
+    end
+  end
+
   @spec progress!(keyword()) :: (Report.t() -> any())
   defp progress!(opts) do
     case Keyword.get(opts, :progress, fn _report -> :ok end) do
@@ -827,6 +960,47 @@ defmodule Encryptor.Ecto.Migrator do
       "is nothing to filter on. `only_tenants:` and `except_tenants:` are a " <>
       "`where` on the tenant column (ADR-0002 decision 11); narrow the run " <>
       "with `only:` instead, or give the rewrite a `tenant_from`."
+  end
+
+  defp bad_writing_key_message(given) do
+    "writing_key: expects a single wrapping key name as a non-empty string, " <>
+      "got #{inspect(given)}. It is the name the rows in scope are supposed " <>
+      "to claim - the one the operator minted for this rotation - and it is " <>
+      "compared against every encrypted data key the header names."
+  end
+
+  defp rotation_tenants_message(given) do
+    "writing_key: was given with `only_tenants: #{inspect(given)}`, and a " <>
+      "tenant filter beside it names exactly one tenant. One literal wrapping " <>
+      "key name belongs to one key holder, so comparing it against a second " <>
+      "tenant's rows would classify every one of them migratable and rewrite " <>
+      "them for nothing."
+  end
+
+  defp untenanted_rotation_message(schema) do
+    "writing_key: was given for a rewrite of #{inspect(schema)} whose target " <>
+      "rides a `:tenant`-profile vault, so `only_tenants:` naming exactly one " <>
+      "tenant is required with it. A tenant's wrapping key name belongs to " <>
+      "that tenant alone; a pass comparing it against every tenant's rows " <>
+      "would classify all of them migratable."
+  end
+
+  defp filtered_rotation_message(schema) do
+    "writing_key: was given for a rewrite of #{inspect(schema)} whose target " <>
+      "rides a `:single`-profile vault, together with a tenant filter. That " <>
+      "vault's scope holds one key holder already, so the rotation needs no " <>
+      "tenant filter and takes none. Narrow the run with `only:` instead."
+  end
+
+  defp unreadable_rotation_message(schema, field) do
+    "writing_key: was given, and #{inspect(schema)}.#{field} has a target " <>
+      "this package cannot read a header claim out of - a plain `Ecto.Type`, " <>
+      "someone else's parameterized type, or a vault that is not running - so " <>
+      "its probe is the load attempt. The load attempt cannot answer the " <>
+      "rotation question: the outgoing key version still decrypts (ADR-0002 " <>
+      "A12), so every row of that field would be counted already in the " <>
+      "target state and rewritten never. Narrow the run with `only:` to the " <>
+      "fields whose target is one of this package's own types."
   end
 
   defp unvalidated_write_message(schema, field) do

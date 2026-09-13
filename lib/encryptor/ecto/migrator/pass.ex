@@ -119,6 +119,32 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   `Encryptor.Ecto.Migrator.verify/2` means by borrowing the pass's probe
   rather than reimplementing it.
 
+  ## What a rotation adds, and nothing else
+
+  A rotation - `Encryptor.Ecto.Migrator.run/2` with `writing_key:` set - is
+  the one pass whose `from:` and `to:` are a single declaration under a single
+  vault, and every pair step one compares is therefore identical across it.
+  Both probes would answer "already in the target state" for a row written
+  under the outgoing key version, the load probe because that version still
+  decrypts (ADR-0002 A11 and A12) and the header probe because a key version
+  is not one of the three things step one compares.
+
+  The version comparison is the only thing rotation adds. It is one predicate
+  inside the header probe's claim check, before the claim is handed on: a row
+  is in the target state when every encrypted data key the header names claims
+  the `writing_key:` name, and a row claiming any other name makes `claimed/3`
+  answer `:no` and is rewritten without a load being attempted. Nothing else
+  moves. `against_proof/4` is untouched and needs no touching, because a
+  stale-version header makes a different identity and so never reaches a proof
+  entry a current-version row made. `load_probe/2` is untouched, and is not
+  consulted for a row the comparison has already rejected, so a rotation costs
+  no decrypt it did not already cost. The cursor, the batching, the
+  concurrent-write re-probe and the write path are untouched too.
+
+  A rotation adds no class to the report either: a row whose header names
+  another key is `:migratable`, because the probe failed and the `from` load
+  succeeded - which by A11 it does.
+
   ## The third mode reads and stops
 
   `mode: :verify` (decision 10) does steps 1 to 3 and stops there. It does not
@@ -234,6 +260,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
           to_params: term(),
           target_header: target_header() | nil,
           mode: Encryptor.Ecto.Migrator.pass_mode(),
+          writing_key: String.t() | nil,
           batch_size: pos_integer(),
           sample: pos_integer() | :all,
           on_error: :halt | :continue,
@@ -264,6 +291,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     :to_params,
     :target_header,
     :mode,
+    :writing_key,
     :batch_size,
     :sample,
     :on_error,
@@ -516,7 +544,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     do: {load_probe(pass, bytes), proven}
 
   defp probe(%__MODULE__{target_header: header} = pass, proven, bytes) do
-    case claimed(header, bytes) do
+    case claimed(header, bytes, pass.writing_key) do
       :no -> {:not_target, proven}
       {:claims, identity} -> against_proof(pass, proven, identity, bytes)
     end
@@ -550,15 +578,51 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # the row is rewritten, which is the answer a decrypt would also have given.
   # What survives this comparison is not yet an answer: it is a claim to hand
   # to `against_proof/4` under the identity it makes.
-  @spec claimed(target_header(), binary()) :: {:claims, identity()} | :no
-  defp claimed(header, bytes) do
+  #
+  # A rotation's predicate is the second half, and it is applied to the claim
+  # rather than folded into the declaration comparison: which key version wrote
+  # a row is a fact about the row, while everything `against_declaration/2`
+  # compares is a fact about the declaration, and a rotation is a property of
+  # the pass rather than of the column.
+  @spec claimed(target_header(), binary(), String.t() | nil) :: {:claims, identity()} | :no
+  defp claimed(header, bytes, writing_key) do
     case Message.describe(bytes) do
-      {:ok, info} -> against_declaration(header, info)
+      {:ok, info} -> claimed_by(header, info, writing_key)
       _unreadable -> :no
     end
   rescue
     _exception -> :no
   end
+
+  @spec claimed_by(target_header(), Message.Info.t(), String.t() | nil) ::
+          {:claims, identity()} | :no
+  defp claimed_by(header, info, writing_key) do
+    with {:claims, identity} <- against_declaration(header, info) do
+      if written_under?(info, writing_key), do: {:claims, identity}, else: :no
+    end
+  end
+
+  # Name equality over every encrypted data key the header names, and only
+  # where the option asked for it: `nil` is every pass that is not a rotation,
+  # and answers `true` without reading anything. The name is a version identity
+  # travelling in the clear and a pseudonym rather than a tenant identifier
+  # (`Encryptor.Message.Info`), so it is a comparison target here and nothing
+  # else - a forged one can only have the pass leave a row alone, which is what
+  # a header claim can always do.
+  #
+  # A header naming no keys at all is not the target either. "Every entry
+  # matches" is vacuously true of an empty list, and a message of this format
+  # carries at least one entry, so the arm is unreachable rather than
+  # load-bearing - but a rotation's whole job is that no row in scope still
+  # claims another version, and a row claiming nothing has not been shown to
+  # claim this one.
+  @spec written_under?(Message.Info.t(), String.t() | nil) :: boolean()
+  defp written_under?(_info, nil), do: true
+
+  defp written_under?(%{encrypted_data_keys: [_first | _rest] = keys}, writing_key),
+    do: Enum.all?(keys, &(&1.key_name == writing_key))
+
+  defp written_under?(_info, _writing_key), do: false
 
   @spec against_declaration(target_header(), Message.Info.t()) :: {:claims, identity()} | :no
   defp against_declaration(header, info) do

@@ -23,6 +23,15 @@ defmodule Encryptor.Ecto.TestTypes do
       column: "pan"
   end
 
+  defmodule PanRotating do
+    @moduledoc "`Pan`'s declaration over the mid-rotation vault: same context, two versions."
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.MerchantRotating,
+      table: "cards",
+      column: "pan"
+  end
+
   defmodule PanSigned do
     @moduledoc "`Pan`'s declaration over the other algorithm suite."
 
