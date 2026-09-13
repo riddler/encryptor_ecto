@@ -11,11 +11,13 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
   use ExUnit.Case, async: true
 
   import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.TestTelemetry, only: [capture_legacy_load: 1]
 
   alias Encryptor.Ecto.DecryptError
   alias Encryptor.Ecto.MissingTenantError
   alias Encryptor.Ecto.SerializationError
   alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.TestLegacy
   alias Encryptor.Ecto.TestSchemas.Reading
   alias Encryptor.Ecto.TestTypes
   alias Encryptor.Ecto.TestVaults
@@ -320,6 +322,41 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
 
       assert {:ok, ciphertext} = TestTypes.GlobalRetryCount.dump(3, nil, params)
       assert TestTypes.GlobalRetryCount.load(ciphertext, nil, params) == {:ok, 3}
+    end
+  end
+
+  # ADR-0004 decision 4's migration window, for a type whose legacy reader has
+  # already parsed. These two live here rather than beside the rest of the
+  # `:legacy` arms because what they hold is a claim about the *scalar*
+  # wrappers, and the telemetry hook they share is scoped to the test that
+  # attached it (`Encryptor.Ecto.TestTelemetry`), so an async neighbour's
+  # `legacy_load` can no longer be read as one of theirs.
+  describe "the migration window, for a type that parses" do
+    setup :capture_legacy_load
+    scope_tenant "merchant_7f3"
+
+    # A legacy date type has already parsed: it answers with a `Date`, not
+    # with bytes. sabotage: Scalar.load/5's {:legacy, loaded} arm routed
+    # through parse!/4, red - the parse then chokes on a struct.
+    test "a scalar type returns the legacy reader's value without parsing it again" do
+      params = params(TestTypes.DateOfBirthLegacy, :date_of_birth)
+      bytes = TestLegacy.Format.encode("1815-12-10")
+
+      assert TestTypes.DateOfBirthLegacy.load(bytes, nil, params) == {:ok, ~D[1815-12-10]}
+
+      assert_received {:telemetry, [:encryptor_ecto, :legacy_load], _measurements, metadata}
+      assert metadata == %{table: "readings", column: "date_of_birth"}
+    end
+
+    # The window is load-only (ADR-0004 decision 4). sabotage: the generated
+    # dump/3 routed through the legacy module, red.
+    test "a scalar type still writes, and reads its own writes, through the vault" do
+      params = params(TestTypes.DateOfBirthLegacy, :date_of_birth)
+
+      assert {:ok, ciphertext} = TestTypes.DateOfBirthLegacy.dump(~D[1815-12-10], nil, params)
+      assert TestTypes.DateOfBirthLegacy.load(ciphertext, nil, params) == {:ok, ~D[1815-12-10]}
+
+      refute_received {:telemetry, [:encryptor_ecto, :legacy_load], _measurements, _metadata}
     end
   end
 end

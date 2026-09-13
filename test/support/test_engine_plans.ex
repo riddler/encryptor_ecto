@@ -292,6 +292,59 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule StaticContext do
+    @moduledoc """
+    A target whose vault writes a context pair no declaration composed.
+
+    The other half of what the probe compares: `Encryptor.Ecto.Migrator`
+    merges the vault's `:static_encryption_context` over the declared pairs
+    once per pass, and this plan is the only thing in the suite that has a
+    static pair to merge. A probe that dropped the merge would find its own
+    rows unrecognisable.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      tenant_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestSources.LegacyType,
+        to: Encryptor.Ecto.TestTypes.PanStatic,
+        source_authenticated: true
+    end
+  end
+
+  defmodule LegacyWindow do
+    @moduledoc """
+    A target that declares `legacy:` - the mixed window, from the engine's
+    side.
+
+    ADR-0001's acceptance amendment 4 lets the target type read the prior
+    scheme's bytes for as long as the window is open, which is exactly what
+    makes the *load* probe the wrong question here: the target loads an
+    un-migrated row successfully, and a probe that read success as "already in
+    the target state" would count every remaining row migrated and rewrite
+    none of them. The header probe cannot make that mistake - bytes that are
+    not one of this package's messages carry no claim to compare - and this
+    plan is where the difference is observable.
+
+    `from:` is the same legacy reader the type names, because the two are the
+    same host module doing the same job on either side of the window.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      tenant_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestLegacy.Binary,
+        to: Encryptor.Ecto.TestTypes.PanLegacy,
+        source_authenticated: true
+    end
+  end
+
   defmodule Composite do
     @moduledoc "A rewrite of a composite-key schema, which the engine refuses to page."
 
