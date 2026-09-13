@@ -24,14 +24,27 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
 
   It writes one file. Nothing here opens a database connection, and nothing in
   this package issues `CREATE TABLE` at runtime or from a task (ADR-0002
-  decision 9) - `Encryptor.Ecto.KeyStore` reads the table and reports
-  `{:key_unavailable, selector}` where creating it would have been convenient.
+  decision 9) - `Encryptor.Ecto.KeyStore` reads the table and lets the
+  adapter's "relation does not exist" raise where creating it would have been
+  convenient.
   The generated file is yours the moment it lands: review it in a diff, commit
   it, and run it with your own `mix ecto.migrate`, on your own deploy schedule
   and with your own rollback.
 
   The module name is generated from this project's application name and will
   need renaming if your repo lives in another namespace.
+
+  ## There is no `--prefix`, on purpose
+
+  A host whose wrapped-key table belongs in a non-default Postgres schema runs
+  the generated file with `mix ecto.migrate --prefix my_schema`, which is
+  Ecto's own way to place a migration and applies to the table and both
+  indexes together, and passes the same name as `prefix:` in its
+  `Encryptor.Ecto.KeyStore` provider options. A flag here would write that
+  schema name into a file the host commits, which freezes a deployment-time
+  placement decision into source that outlives it - the same argument
+  `Encryptor.Ecto.Migrator` makes for keeping `:prefix` a run option rather
+  than a fact about the plan.
 
   ## Flags
 

@@ -44,7 +44,12 @@ defmodule Encryptor.Ecto.TestRepo do
     # that was already there.
     {6, Encryptor.Ecto.TestMigrationWrappedKeys03},
     {7, Encryptor.Ecto.TestMigrationWrappedKeys03Row},
-    {8, Encryptor.Ecto.TestMigrationWrappedKeysShape}
+    {8, Encryptor.Ecto.TestMigrationWrappedKeysShape},
+    # The same table again, in a schema the default search path does not
+    # reach, so `Encryptor.Ecto.KeyStore`'s `:prefix` has something to route
+    # to. It is a migration rather than test setup because a sandboxed test's
+    # `CREATE SCHEMA` would roll back with the test.
+    {9, Encryptor.Ecto.TestMigrationWrappedKeysPrefix}
   ]
 
   @doc """

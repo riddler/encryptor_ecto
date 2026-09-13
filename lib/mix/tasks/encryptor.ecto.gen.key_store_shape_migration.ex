@@ -12,9 +12,11 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigration do
   `Encryptor.Ecto.KeyStore` now also selects `wrapping_shape` and `key_id`
   (ADR-0005 decisions 1 and 2), so it names two columns that table does not
   have. Run this migration before deploying the new version, not after: until
-  it runs, every read of that table fails as `{:key_unavailable, selector}` -
-  the reason a caller retries, for a condition that will never resolve on its
-  own (ADR-0005 decision 7).
+  it runs, every read of that table raises the `Postgrex.Error` naming the
+  column that is missing, which is a permanent condition and reports itself as
+  one (ADR-0005 decision 7, whose open question 3 `ece-y0i` answered - the
+  bare rescue that used to report this as a retryable
+  `{:key_unavailable, selector}` is gone).
 
   ## Why this is a second task
 
