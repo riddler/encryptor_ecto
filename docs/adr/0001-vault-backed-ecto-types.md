@@ -724,3 +724,111 @@ amendments at the head of this file were accepted, not the date the record was.
 Read the sentence as "this Note carries ADR-0001's status; the amendments above
 were accepted on 2026-09-13". The Status line is correct as written and is not
 touched.
+
+## Note (2026-09-13): three readings of the Note above, scoped
+
+Three sentences in the Note above are stronger or thinner than the evidence
+behind them. Each is scoped here by addition. No decision text, no amendment
+text and no status word changes. Code cites read at `encryptor_ecto`
+`6592581`.
+
+**1. "The second half is false" is false only under the byte reading.** The
+Note above says the earlier Note's second half - a column arriving from the
+corresponding prior-scheme type "is only readable through these if the two
+agree about what the bytes say" - is false for `:naive_datetime` and
+`:utc_datetime`. That holds under a reading of "agree about what the bytes
+say" as *byte identity*, which is the reading the per-kind table uses and the
+reading the correction is written against. Under the other available reading -
+agreement about what the bytes *mean* - the second half is true for all six:
+the space-separated and `T`-separated forms denote the same naive datetime and
+the same instant, and that shared meaning is why the lenient parse is a
+correct read rather than a lucky one. Read the sentence as scoped to byte
+identity. The operational claim underneath it is unaffected either way: a
+`cloak_ecto` column of those two kinds loads through these types
+(`lib/encryptor/ecto/scalar.ex:190-198`), and a round trip rewrites it into the
+`T` form.
+
+**2. The six wrappers implement no `type/1` of their own.** The Note above says
+they "do not implement `type/1` at all". They do define one; it delegates.
+The generated module's `type/1` is `def type(params), do:
+Encryptor.Ecto.Binary.type(params)`
+(`lib/encryptor/ecto/scalar.ex:63-65`), and `Encryptor.Ecto.Binary.type/1`
+returns `:binary` for every params map (`lib/encryptor/ecto/binary.ex:453`).
+The distinction matters to a host reading the generated module rather than the
+record: the callback is present, `Ecto.ParameterizedType` is satisfied by the
+wrapper itself, and what is absent is any independent choice of primitive.
+Decision 2's substance and the widening the Note above records are both
+unchanged.
+
+**3. The `cloak_ecto` 1.3.0 claim is supported in this repository, not by an
+upstream cite.** The Note immediately above describes what `cloak_ecto` 1.3.0
+writes and names `lib/cloak_ecto/type.ex` for the mechanism (`:672`, `:680`
+and `:690-691`); the Note before it makes no such claim. `cloak_ecto` is not a
+dependency of this package, so neither claim can be checked from this tree and
+neither carries a SHA or a line span; read the upstream file name as
+attribution rather than as a verifiable cite. What *is* in reach, and what the
+per-kind table actually rests on, is the fixture: the six expected prior-scheme
+plaintexts are pinned as literals beside this package's own, one row per kind,
+in `test/encryptor/ecto/scalar_types_test.exs:66-76` (ece `6592581`). A reader
+checking the table should read that list; a reader disputing it should change
+that list, and the suite will say which side moved.
+
+## Note (2026-09-13): sub-second precision truncates at the caster, and that is the contract
+
+`Encryptor.Ecto.Time`, `Encryptor.Ecto.NaiveDateTime` and
+`Encryptor.Ecto.DateTime` drop a microsecond field on the way into a
+changeset. This Note records that the truncation is the contract for the three
+time-flavoured scalars rather than a gap, and that it is **decision 1's
+contract and not this Note's**: the Note reads what decision 1 already fixes
+and adds no decision of its own, so it carries ADR-0001's status
+(`accepted (2026-08-27, with amendments)`) and no Status word flips.
+
+**What the code does, per type.** Ecto's own caster truncates a microsecond
+field to `{0, 0}` for each primitive these three types wrap, and each wrapper
+documents it rather than working around it. Anchors into `time.ex` are given
+as that file stands in the commit this Note ships in, because the same commit
+reflows one line above the section; the other two are at ece `6592581`.
+
+| type | primitive | where the moduledoc says so |
+|---|---|---|
+| `Encryptor.Ecto.Time` | `:time` | `lib/encryptor/ecto/time.ex:48-55` ("Sub-second precision is dropped at the cast") |
+| `Encryptor.Ecto.NaiveDateTime` | `:naive_datetime` | `lib/encryptor/ecto/naive_date_time.ex:48` ("Zoneless, and sub-second precision is dropped at the cast") and `:55-58` |
+| `Encryptor.Ecto.DateTime` | `:utc_datetime` | `lib/encryptor/ecto/date_time.ex:56-58` |
+
+In all three the truncation happens **before** any encryption and is visible
+in the changeset rather than only on the next read.
+
+**The contract.** Truncation at the caster is the contract, and it is decision
+1's rather than this Note's: decision 1 fixes these wrappers as
+`cloak_ecto`'s shape over Ecto's own primitives, and a type that wraps `:time`
+gets `:time`'s precision. Deciding otherwise would mean either a different
+primitive, which decision 1 forbids, or a caster of this package's own ahead of
+Ecto's, which decision 2's `:binary` column and the `Ecto.ParameterizedType`
+seam put out of reach without a new type. So the three types are precise to the
+second, that precision is documented on each of them, and a host that stores a
+truncated value is getting the primitive it declared.
+
+**The state of play on microsecond-precision variants, recorded as fact.**
+This Note decides nothing about them; it says what is true today so that a
+reader of the three moduledocs is not left wondering whether a gap was
+overlooked. No microsecond-precision variants exist in this package, and no
+host has asked for one. Nothing in this record forbids them either: such a
+family would sit over Ecto's `:time_usec` and `:utc_datetime_usec` primitives
+on the same mechanism seam `lib/encryptor/ecto/scalar.ex` already provides
+(ece `6592581`), and adding one is an implementation question rather than a
+question this record answers.
+
+One fact about the plaintext is worth recording beside it, because it is the
+part a reader is most likely to assume away. Under both serializers a
+microsecond field is rendered only when it is set: `Time.to_iso8601/1` and
+`to_string/1` both give `"09:30:00.000000"` for a `{0, 6}` field and both
+give `"09:30:00"` for a `{0, 0}` one. The two serializers therefore agree per
+value, and what differs is the two *values* - so a column that has held both a
+truncated and an untruncated value carries two plaintext forms, and reading it
+back through one type means parsing both.
+
+A host that needs sub-second precision **today** has the documented route the
+moduledocs already name: its own encoding over `Encryptor.Ecto.String`.
+
+Nothing in decision 1, decision 2 or decision 6 changes, and neither Note
+above is touched.

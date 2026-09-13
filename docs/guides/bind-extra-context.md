@@ -155,8 +155,9 @@ One caveat worth knowing before you lean on a `:context` pair for separation:
 your extra pairs. Two schemas over the *same* physical column are exempt -
 that is what keeps a read model or a partial schema from colliding with the
 schema it mirrors - but two fields that differ only in `:context` are
-cryptographically non-substitutable and will still be reported as a collision. Fix such a pair by giving the fields
-distinct declared `"table"`/`"column"` values - that is the property the check
+cryptographically non-substitutable and will still be reported as a collision.
+Fix such a pair by giving the fields distinct declared `"table"`/`"column"`
+values - that is the property the check
 is defending, and the extra context is additional binding rather than a
 substitute for it.
 
