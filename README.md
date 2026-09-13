@@ -11,7 +11,7 @@
 > callbacks, table columns, telemetry events or error vocabulary with no
 > compatibility shim. Every such change is recorded in
 > [CHANGELOG.md](CHANGELOG.md) under a bold **Breaking** heading that says what
-> to do about it. Pinning to an exact minor - `~> X.Y` - is the recommended way
+> to do about it. Pinning to an exact minor - `~> X.Y.0` - is the recommended way
 > to consume the package until 1.0.
 
 Encrypted Ecto types for the [Encryptor](https://github.com/riddler/encryptor)
@@ -68,7 +68,7 @@ type, replaceable with any module exporting `encode!/1` and `decode!/1`), and
 ```elixir
 def deps do
   [
-    {:encryptor_ecto, "== 0.4.0"}
+    {:encryptor_ecto, "~> 0.4.0"}
   ]
 end
 ```
