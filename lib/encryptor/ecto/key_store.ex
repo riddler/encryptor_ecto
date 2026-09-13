@@ -81,7 +81,17 @@ defmodule Encryptor.Ecto.KeyStore do
   | `version` | the key version. Ordering is the store's job, per ADR-0002 decision 4 |
   | `namespace`, `name` | what the encrypted data key matches on, byte for byte |
   | `bits` | `256` on this path |
-  | `wrapped` | the wrapping: a complete `Encryptor` message produced by the root vault |
+  | `wrapped` | the wrapping, whose kind the next column names |
+  | `wrapping_shape` | which kind of wrapping `wrapped` holds: `"engine_message"` or `"gcp_kms_ciphertext"` |
+  | `key_id` | `NULL` for an engine message; the `CryptoKey` id a GCP ciphertext was produced under |
+
+  The last two are ADR-0005's, and they are the reason a reader never guesses.
+  Both wrapping kinds are opaque binaries, so a reader that picks the wrong
+  unwrap path gets a failure indistinguishable from a wrong key - one `varchar`
+  per row removes the guess. The vocabulary is closed at those two values here,
+  by that record, rather than by a database enum: this module queries the table
+  schemalessly and names no adapter, so a third value is an amendment to the
+  record and a clause in this module, not a migration on every adopter.
 
   Two unique indexes carry properties nothing at runtime can:
 
@@ -119,9 +129,32 @@ defmodule Encryptor.Ecto.KeyStore do
       provider's return travels into the vault's error struct, and a wrapped
       key's failure detail is the last place a value should be allowed to ride
       along.
+    * `{:invalid_key_descriptor, {:unknown_wrapping_shape, value}}` - the row's
+      `wrapping_shape` is not one of the two ADR-0005 decision 1 publishes.
+      This one *does* carry the stored value out, and it is the only thing here
+      that does: a shape is not a failure detail but one of a closed set of
+      literals a record publishes, and an operator debugging a stray row needs
+      to know which literal it was.
+    * `{:invalid_key_descriptor, :missing_key_id}` - a `"gcp_kms_ciphertext"`
+      row whose `key_id` is `NULL`. The requirement is a read-side rule rather
+      than a `NOT NULL` because it is conditional on another column's value,
+      and a conditional constraint is not portable DDL.
+    * `{:invalid_key_descriptor, :unexpected_key_id}` - an `"engine_message"`
+      row carrying a `key_id`. An engine message names its own keyring material
+      inside the message, so a key id beside one means the row was written by
+      something that did not know which shape it was writing.
+    * `{:invalid_key_descriptor, {:unsupported_wrapping_shape,
+      "gcp_kms_ciphertext"}}` - a well-formed GCP row this store cannot serve.
+      ADR-0005's decision 5 branches per row, and its open question 2 leaves
+      *where the GCP branch's client comes from* open; until that is decided
+      this state holds a `root_vault` and nothing else, so the branch answers
+      rather than crashes. A store with no GCP-shaped rows never reaches it.
+
+  None of those four widens `t:Encryptor.Provider.reason/0`: they are new terms
+  inside `{:invalid_key_descriptor, term()}`, which is open by construction.
 
   Records: `encryptor` ADR-0002 decisions 4, 5 and 6; ADR-0003 decisions 1, 3,
-  4 and 9; this package's ADR-0002 decision 9.
+  4 and 9; this package's ADR-0002 decision 9 and ADR-0005.
   """
 
   @behaviour Encryptor.Provider
@@ -149,6 +182,27 @@ defmodule Encryptor.Ecto.KeyStore do
           reference_subkey: binary(),
           table: String.t()
         }
+
+  @typedoc "One row of the wrapped-key table, as selected by `rows/3`."
+  @type row :: %{
+          tenant_ref: String.t(),
+          version: pos_integer(),
+          namespace: String.t(),
+          name: String.t(),
+          bits: 256,
+          wrapped: binary(),
+          wrapping_shape: String.t(),
+          key_id: String.t() | nil
+        }
+
+  @typedoc """
+  The closed vocabulary of ADR-0005 decision 1, as the read side branches on it.
+
+  The stored column is a string; this is what the string is translated into
+  before anything dispatches on it, and the translation is where a value the
+  record does not publish stops being a row.
+  """
+  @type wrapping_shape :: :engine_message | :gcp_kms_ciphertext
 
   @doc """
   The table name a host gets unless it names another.
@@ -246,7 +300,9 @@ defmodule Encryptor.Ecto.KeyStore do
           namespace: k.namespace,
           name: k.name,
           bits: k.bits,
-          wrapped: k.wrapped
+          wrapped: k.wrapped,
+          wrapping_shape: k.wrapping_shape,
+          key_id: k.key_id
         }
       )
 
@@ -255,16 +311,16 @@ defmodule Encryptor.Ecto.KeyStore do
     _exception -> {:error, {:key_unavailable, selector}}
   end
 
-  @spec unwrap_all(state(), [map()], Provider.selector()) ::
+  @spec unwrap_all(state(), [row()], Provider.selector()) ::
           {:ok, [Aes.t(), ...]} | {:error, Provider.reason()}
   defp unwrap_all(_state, [], selector), do: {:error, {:unknown_key, selector}}
 
   defp unwrap_all(state, rows, _selector) do
     rows
     |> Enum.reduce_while({:ok, []}, fn row, {:ok, acc} ->
-      case Envelope.unwrap(state.root_vault, wrapped_key(row)) do
+      case descriptor(state, row) do
         {:ok, descriptor} -> {:cont, {:ok, [descriptor | acc]}}
-        {:error, _error} -> {:halt, {:error, {:invalid_key_descriptor, :unwrap_failed}}}
+        {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
     |> case do
@@ -273,7 +329,53 @@ defmodule Encryptor.Ecto.KeyStore do
     end
   end
 
-  @spec wrapped_key(map()) :: WrappedKey.t()
+  # ADR-0005 decision 5: the dispatch is per row and at read time, never per
+  # store. A host moving one tenant's wrapping from a root vault to GCP KMS has
+  # a table holding both shapes at once for the length of that migration, and a
+  # per-store setting would make the mixed window unrepresentable.
+  @spec descriptor(state(), row()) :: {:ok, Aes.t()} | {:error, Provider.reason()}
+  defp descriptor(state, row) do
+    with {:ok, shape} <- shape(row.wrapping_shape), do: unwrap_row(state, shape, row)
+  end
+
+  # One clause per value the record publishes, plus a catch-all, and
+  # deliberately not `String.to_existing_atom/1`: a stored shape is host data,
+  # and turning host data into an atom-table lookup would make an unknown value
+  # an `ArgumentError` raised from inside a provider callback rather than a
+  # reason the contract already has a word for.
+  @spec shape(String.t() | nil) :: {:ok, wrapping_shape()} | {:error, Provider.reason()}
+  defp shape("engine_message"), do: {:ok, :engine_message}
+  defp shape("gcp_kms_ciphertext"), do: {:ok, :gcp_kms_ciphertext}
+
+  defp shape(other), do: {:error, {:invalid_key_descriptor, {:unknown_wrapping_shape, other}}}
+
+  # The `key_id` rules are read-side because each is conditional on the shape,
+  # and a conditional constraint is not portable DDL. A key id is a resource
+  # name, so neither arm carries one out.
+  @spec unwrap_row(state(), wrapping_shape(), row()) ::
+          {:ok, Aes.t()} | {:error, Provider.reason()}
+  defp unwrap_row(state, :engine_message, %{key_id: nil} = row) do
+    case Envelope.unwrap(state.root_vault, wrapped_key(row)) do
+      {:ok, descriptor} -> {:ok, descriptor}
+      {:error, _error} -> {:error, {:invalid_key_descriptor, :unwrap_failed}}
+    end
+  end
+
+  defp unwrap_row(_state, :engine_message, _row),
+    do: {:error, {:invalid_key_descriptor, :unexpected_key_id}}
+
+  defp unwrap_row(_state, :gcp_kms_ciphertext, %{key_id: nil}),
+    do: {:error, {:invalid_key_descriptor, :missing_key_id}}
+
+  # ADR-0005 open question 2: which of a second provider option, a delegation
+  # to `Encryptor.Provider.GcpKms` or a composite provider supplies this
+  # branch's client is undecided, and the module it would delegate to is not
+  # shipped upstream (the record's assumption A4). Decision 5 is written so
+  # that this is an answer rather than a crash.
+  defp unwrap_row(_state, :gcp_kms_ciphertext, _row),
+    do: {:error, {:invalid_key_descriptor, {:unsupported_wrapping_shape, "gcp_kms_ciphertext"}}}
+
+  @spec wrapped_key(row()) :: WrappedKey.t()
   defp wrapped_key(row) do
     %WrappedKey{
       tenant_ref: row.tenant_ref,

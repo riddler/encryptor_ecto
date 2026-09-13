@@ -35,7 +35,16 @@ defmodule Encryptor.Ecto.TestRepo do
     {2, Encryptor.Ecto.TestMigrationSignups},
     {3, Encryptor.Ecto.TestMigrationMigrator},
     {4, Encryptor.Ecto.TestMigrationWrappedKeys},
-    {5, Encryptor.Ecto.TestMigrationScalars}
+    {5, Encryptor.Ecto.TestMigrationScalars},
+    # The three steps of a 0.3.0 adopter's upgrade, in the order they happen:
+    # the table as that version's generator wrote it, a row written into it
+    # before the columns existed, and the additive migration ADR-0005 decision 6
+    # fixes. Only a timeline like this can show that the backfill is right;
+    # a row inserted from a test after the migration proves nothing about one
+    # that was already there.
+    {6, Encryptor.Ecto.TestMigrationWrappedKeys03},
+    {7, Encryptor.Ecto.TestMigrationWrappedKeys03Row},
+    {8, Encryptor.Ecto.TestMigrationWrappedKeysShape}
   ]
 
   @doc """

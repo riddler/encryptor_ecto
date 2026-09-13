@@ -8,8 +8,17 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
 
   The table holds one row per tenant per key version: the six fields
   `Encryptor.Envelope.WrappedKey` fixes, which is the whole of the vault's
-  storage contract (`encryptor` ADR-0003 decision 9). The vault owns the
-  fields; this package owns the table, the migration and the repo.
+  storage contract (`encryptor` ADR-0003 decision 9), plus the two this
+  package's ADR-0005 adds - `wrapping_shape` and `key_id`. The vault owns the
+  six; this package owns the table, the two, the migration and the repo.
+
+  ## This task creates tables and never alters one
+
+  It is the whole-table generator, and it refuses to run where a migration for
+  the table already exists. An adopter whose table was created under 0.3.0 -
+  before `wrapping_shape` and `key_id` existed - wants
+  `mix encryptor.ecto.gen.key_store_shape_migration` instead, which writes the
+  additive `ALTER` those two columns need.
 
   ## This task issues no DDL
 
@@ -97,9 +106,14 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
       # `table:` in the provider's options.
       #
       # The columns are the six fields of `Encryptor.Envelope.WrappedKey` - the
-      # whole of the vault's storage contract - plus timestamps. `wrapped` is a
-      # complete `Encryptor` message produced by the root vault, so it is
-      # `:binary` with no length: its size is the engine's business.
+      # whole of the vault's storage contract - plus ADR-0005's two and
+      # timestamps. `wrapped` is the wrapping, `:binary` with no length because
+      # its size is the engine's business, and `wrapping_shape` says which kind
+      # of wrapping it is: `"engine_message"` or `"gcp_kms_ciphertext"`. It has
+      # no default on purpose - this package writes no rows, so a forgotten
+      # shape should fail at your insert rather than read back later as
+      # somebody else's unwrap failure. `key_id` is `NULL` for an engine
+      # message and required for a GCP ciphertext.
       #
       # The unique index on `{tenant_ref, version}` closes the race
       # `Encryptor.Envelope.provision/3` leaves open: called twice concurrently
@@ -120,6 +134,8 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
           add(:name, :string, null: false)
           add(:bits, :integer, null: false)
           add(:wrapped, :binary, null: false)
+          add(:wrapping_shape, :string, null: false)
+          add(:key_id, :string)
           add(:inserted_at, :utc_datetime)
           add(:updated_at, :utc_datetime)
         end
