@@ -12,7 +12,7 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
 
   ## The key carries the prefix
 
-  ADR-0002 proposed amendment 6 (status: proposed, `ece-l6t`) adds the prefix
+  ADR-0002 proposed amendment 6 (accepted 2026-09-13, `ece-l6t`) adds the prefix
   to the key, and this module is built to that text. Without it, a caller
   looping `run/2` over prefixes - which is exactly what the record tells a
   host with several to do - has every prefix sharing one checkpoint row, so

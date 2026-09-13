@@ -4,13 +4,13 @@
 |---|---|---|
 | [0001](0001-vault-backed-ecto-types.md) | cloak_ecto-shaped vault-backed types, with tenant context from an explicit process scope | accepted (2026-08-27, with amendments) |
 | [0002](0002-migrator.md) | The migrator: a plan-driven, resumable, compare-and-swap row rewriter | accepted (2026-08-27, with amendments) |
-| [0003](0003-blind-index.md) | keyed blind indexes, per-tenant by default, equality only | accepted (2026-08-27, with one amendment) |
-| [0004](0004-migration-from-cloak.md) | Migration from a prior encryption scheme, with cloak_ecto as the named case | accepted (2026-08-27) |
+| [0003](0003-blind-index.md) | keyed blind indexes, per-tenant by default, equality only | accepted (2026-08-27, with amendments) |
+| [0004](0004-migration-from-cloak.md) | Migration from a prior encryption scheme, with cloak_ecto as the named case | accepted (2026-08-27, with amendments) |
 
-ADR-0001, ADR-0002 and ADR-0003 each carry a **Proposed amendments
-(2026-08-27)** section, awaiting the operator's acceptance reading. The
-accepted decision text in each is unchanged; the Status column above moves
-only when those are read.
+Every amendment section in these four records - the 2026-08-27 and
+2026-08-28 sets, and ADR-0003's Amendment C of 2026-09-12 - was accepted by
+the operator's reading of 2026-09-13. Each amendment says what it changes; the
+decision text above it is unchanged.
 
 New ADRs: next number, same three-section format (Context, Decision,
 Consequences), plus the typespecs and worked-example sections this family's

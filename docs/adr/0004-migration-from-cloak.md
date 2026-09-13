@@ -2,13 +2,14 @@
 
 Status: accepted (2026-08-27)
 
-## Proposed amendments (2026-08-27)
+## Amendments (2026-08-27; accepted 2026-09-13)
 
-Status: **proposed**. Acceptance is the operator's; the decision text below is
-unchanged. These record, in the record that owns the task surface, what
-accepting ADR-0002's proposed amendments 5 and 6 (`ece-l6t`) would add to it.
-Neither carries an operator ruling behind it - both are recommendations
-drafted for the operator's read.
+Status: **accepted (2026-09-13)**, by the operator's reading; the decision
+text below is unchanged. These record, in the record that owns the task
+surface, what accepting ADR-0002's amendments 5 and 6 (`ece-l6t`) adds to it.
+Both were drafted on 2026-08-27 as recommendations for the operator's read,
+without a ruling behind them; the 2026-09-13 reading accepted them together
+with ADR-0002's amendments.
 
 **1. Decision 6's grammar gains `--prefix` and `--no-checkpoint`; the four
 verbs are unchanged.** Decision 6 fixes the task family and closes it, and
@@ -47,14 +48,15 @@ columns, and makes the name overridable. Decision 6's table row for
 `mix encryptor.ecto.gen.migration` is otherwise unchanged: it still writes one
 Ecto migration file into the host's tree and still runs no DDL itself.
 
-## Proposed amendment (2026-08-28): Q2 is answered
+## Amendment (2026-08-28; accepted 2026-09-13): Q2 is answered
 
-Status: **proposed**. Acceptance is the operator's, and the decision text
-below is unchanged except where this amendment says so. Recorded on `ece-b25`,
+Status: **accepted (2026-09-13)**, by the operator's reading, and the decision
+text below is unchanged except where this amendment says so. Recorded on `ece-b25`,
 which implements the engine; the compile-time enforcement of the rule is
 `ece-4mg`'s, and only this record's text lands with the engine.
 
-Unlike the two amendments above, this one carries an operator ruling. The
+Unlike the two amendments above, this one carried an operator ruling from
+the day it was drafted. The
 operator's words, of 2026-08-28:
 
 > dispatch ece-b25 with the amendment folded in (like you recommended) and

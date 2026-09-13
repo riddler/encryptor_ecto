@@ -4,10 +4,10 @@ Status: accepted (2026-08-27; the design is unchanged - the assumption
 table and open questions carry their acceptance resolutions, and A14 is
 reworded per enc-ADR-0005)
 
-## Proposed amendments (2026-08-27)
+## Amendments (2026-08-27; accepted 2026-09-13)
 
-Status: **proposed**. Acceptance is the operator's; the decision text below
-is unchanged. These fold ADR-0004's extensions to this record into this
+Status: **accepted (2026-09-13)**, by the operator's reading; the decision
+text below is unchanged. These fold ADR-0004's extensions to this record into this
 record, so that the field spec and the report classification are readable in
 one place rather than assembled from two.
 
