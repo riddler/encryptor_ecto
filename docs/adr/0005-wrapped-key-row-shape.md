@@ -1,6 +1,6 @@
 # ADR-0005: a wrapped-key row declares its wrapping shape, in a column of its own
 
-Status: proposed (2026-09-13)
+Status: accepted (2026-09-13)
 
 ## Context
 
@@ -610,3 +610,33 @@ Recorded here so a reader of the record is not surprised by the module.
   timestamps** beside the eight fields, which "The contract as typespecs" omits
   because `rows/3` does not select them. This module neither writes nor reads
   them.
+
+## Note (2026-09-13): the operator accepted this record
+
+The Status line at the head of this file now reads `accepted (2026-09-13)`,
+and the index row in `docs/adr/README.md` says the same. Nothing else in the
+record changes: no decision, assumption, open question or consequence is
+reopened, reworded or withdrawn by the acceptance.
+
+Two sentences elsewhere in the file name the status the flip replaced. Both
+are historical rather than wrong, and neither is edited:
+
+- The Note above closes "No Status word flips; this Note carries the record's
+  `proposed` status." That was true of that Note. The flip is this one, and it
+  happened after it - after the accuracy pass that Note records, which is the
+  order acceptance wants.
+- Assumption A5 is phrased "... before this record is accepted". That moment
+  is now, and A5 held at it: the only wrap record `encryptor` has added since
+  is its ADR-0008, which is keyring-backed - "The classification stands: AWS
+  KMS is keyring-backed, it maps to the engine's own AWS KMS keyrings"
+  (`enc docs/adr/0008-aws-kms-keyring-backed.md:39-41`, read at `6acefff`) -
+  so its wrapping is an engine message and it needs no third
+  `wrapping_shape` value.
+
+Every claim this record makes was re-verified immediately before the flip:
+this package's cites against `encryptor_ecto` main at `32b503e`, the upstream
+cites against `encryptor` main at `6acefff`. Decisions 1 through 7 are
+implemented in `lib/encryptor/ecto/key_store.ex` and in the two generator
+tasks at `32b503e`, and the one claim the code overtook - decision 7's
+bare-rescue sentence - was already recorded as stale in the Note above,
+together with the answer to open question 3.
