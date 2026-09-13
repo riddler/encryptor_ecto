@@ -319,6 +319,33 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule Rotation do
+    @moduledoc """
+    A single tenant's data-key rotation: one declaration on both sides.
+
+    The shape ADR-0002's worked example gives R2 - "the same tool with a filter
+    and `from`/`to` naming the same module" - and the one that rewrites nothing
+    until the run carries `writing_key:`. The vault decrypts both key versions,
+    so the source side reads an outgoing-version row and the target side writes
+    the current one, and the only thing that tells the probe which is which is
+    the name in the header.
+
+    Unlike `InPlaceEdit`, this is the same-module case the amendment leaves
+    standing: one declaration, unedited, under a vault whose current key
+    version has moved.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      tenant_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestTypes.PanRotating,
+        to: Encryptor.Ecto.TestTypes.PanRotating
+    end
+  end
+
   defmodule StaticContext do
     @moduledoc """
     A target whose vault writes a context pair no declaration composed.

@@ -110,6 +110,32 @@ defmodule Encryptor.Ecto.TestVaults do
      end}
   end
 
+  @doc """
+  A provider mid-rotation: it encrypts under v2 and decrypts v1 as well.
+
+  The shape ADR-0002's A11 and A12 describe, and the one a rotation pass is
+  pointed at - "old and new versions coexist in one table for the duration of
+  a pass", and "prior versions stay decryptable until an explicit shred". It
+  is what separates a rotation from the re-key `rekeyed_provider/0` stands
+  for: there, the outgoing version is gone and its rows are undecryptable;
+  here, both versions open and the outgoing one has to be found by its name.
+  """
+  @spec rotating_provider() :: {module(), keyword()}
+  def rotating_provider do
+    {Encryptor.Provider.Function,
+     encryption_key: fn
+       selector when selector in @merchants -> {:ok, rekeyed_descriptor(selector)}
+       selector -> {:error, {:unknown_key, selector}}
+     end,
+     decryption_keys: fn
+       selector when selector in @merchants ->
+         {:ok, [rekeyed_descriptor(selector), merchant_descriptor(selector)]}
+
+       selector ->
+         {:error, {:unknown_key, selector}}
+     end}
+  end
+
   @doc "The single key the application vault holds."
   @spec app_provider() :: {module(), keyword()}
   def app_provider do
@@ -174,6 +200,45 @@ defmodule Encryptor.Ecto.TestVaults do
       {:ok,
        Keyword.merge(config,
          provider: TestVaults.rekeyed_provider(),
+         reference_subkey: TestVaults.reference_subkey(),
+         derivation_salt: TestVaults.derivation_salt()
+       )}
+    end
+  end
+
+  defmodule MerchantRotating do
+    @moduledoc """
+    `Merchant`'s deployment during a data-key rotation: v2 is current, v1 still
+    opens.
+
+    Every pair the migrator's header probe compares is `Merchant`'s - the
+    namespace, the tenant references, the declared context, the required pair
+    and the algorithm suite - and the only difference between a row this vault
+    writes and one `Merchant` wrote is the wrapping key name the header
+    carries: `.../v2` rather than `.../v1`. Since this vault decrypts both,
+    both probes answer "already in the target state" for an outgoing-version
+    row unless the pass is told which name is current, which is the whole of
+    what `Encryptor.Ecto.Migrator.run/2`'s `writing_key:` is for.
+
+    It is deliberately not `MerchantRekeyed`: that vault holds v2 alone, so an
+    outgoing-version row under it is undecryptable rather than merely stale,
+    and a rotation is exactly the case where the old rows still open.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :tenant,
+      algorithm_suite_id: 0x0478,
+      required_context: ["table", "column"],
+      cache: false
+
+    alias Encryptor.Ecto.TestVaults
+
+    @doc "Layer 5: the mid-rotation provider, under `Merchant`'s own subkey."
+    def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: TestVaults.rotating_provider(),
          reference_subkey: TestVaults.reference_subkey(),
          derivation_salt: TestVaults.derivation_salt()
        )}
