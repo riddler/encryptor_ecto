@@ -61,8 +61,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Migration do
   alias Encryptor.Ecto.Migrator.Checkpoint
   alias Encryptor.Ecto.Migrator.CLI
 
-  @default_path "priv/repo/migrations"
-  @switches [table: :string, migrations_path: :string]
+  @verb "create_"
 
   @impl Mix.Task
   def run(argv) do
@@ -72,12 +71,16 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Migration do
   @doc false
   @spec main([String.t()]) :: 0 | 2
   def main(argv) do
-    with {:ok, table, path} <- parse(argv),
-         :ok <- unwritten(table, path) do
-      generate(table, path)
-    else
-      {:error, message} -> CLI.usage_error(message)
-    end
+    CLI.gen(argv,
+      verb: @verb,
+      default_table: &Checkpoint.default_table/0,
+      positional_tail:
+        "; the plan-taking verbs are `mix encryptor.ecto.migrate` and " <>
+          "`mix encryptor.ecto.verify`",
+      already_written: :create,
+      source: &__MODULE__.source/2,
+      migration_module: &__MODULE__.migration_module/1
+    )
   end
 
   @doc false
@@ -124,89 +127,5 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Migration do
 
   @doc false
   @spec migration_module(String.t()) :: module()
-  def migration_module(table) do
-    app =
-      Mix.Project.config()
-      |> Keyword.fetch!(:app)
-      |> Atom.to_string()
-      |> Macro.camelize()
-
-    Module.concat([app, "Repo", "Migrations", Macro.camelize("create_" <> table)])
-  end
-
-  @spec parse([String.t()]) :: {:ok, String.t(), String.t()} | {:error, String.t()}
-  defp parse(argv) do
-    case OptionParser.parse(argv, strict: @switches) do
-      {parsed, [], []} -> table(parsed)
-      {_parsed, [_ | _] = args, []} -> {:error, positional_message(args)}
-      {_parsed, _args, invalid} -> {:error, invalid_message(invalid)}
-    end
-  end
-
-  @spec table(keyword()) :: {:ok, String.t(), String.t()} | {:error, String.t()}
-  defp table(parsed) do
-    table = Keyword.get(parsed, :table, Checkpoint.default_table())
-    path = Keyword.get(parsed, :migrations_path, @default_path)
-
-    if table =~ ~r/^[a-z_][a-z0-9_]*$/ do
-      {:ok, table, path}
-    else
-      {:error,
-       "--table expects an unquoted table name - lowercase letters, digits and " <>
-         "underscores - and cannot use #{inspect(table)}"}
-    end
-  end
-
-  @spec positional_message([String.t()]) :: String.t()
-  defp positional_message(args) do
-    "takes no positional arguments and was given #{Enum.join(args, " ")}. This verb " <>
-      "writes a file and reads no plan; the plan-taking verbs are " <>
-      "`mix encryptor.ecto.migrate` and `mix encryptor.ecto.verify`."
-  end
-
-  @spec invalid_message([{String.t(), term()}]) :: String.t()
-  defp invalid_message(invalid) do
-    Enum.map_join(invalid, "\n", fn {flag, _value} ->
-      "#{flag} is not a flag of this task, or was given a value of the wrong type."
-    end)
-  end
-
-  @spec unwritten(String.t(), String.t()) :: :ok | {:error, String.t()}
-  defp unwritten(table, path) do
-    case Path.wildcard(Path.join(path, "*_create_#{table}.exs")) do
-      [] -> :ok
-      [existing | _rest] -> {:error, already_written_message(existing)}
-    end
-  end
-
-  @spec already_written_message(String.t()) :: String.t()
-  defp already_written_message(existing) do
-    "#{existing} already creates this table. The generator never overwrites a " <>
-      "migration and never writes a second one for the same table: a repeated " <>
-      "`CREATE TABLE` fails on the way up, and the one you have is the one your " <>
-      "database was built from."
-  end
-
-  @spec generate(String.t(), String.t()) :: 0
-  defp generate(table, path) do
-    file = Path.join(path, "#{timestamp()}_create_#{table}.exs")
-
-    File.mkdir_p!(path)
-    File.write!(file, source(table, migration_module(table)))
-    Mix.shell().info("* creating #{file}")
-
-    0
-  end
-
-  @spec timestamp() :: String.t()
-  defp timestamp do
-    now = DateTime.utc_now()
-
-    [now.year, now.month, now.day, now.hour, now.minute, now.second]
-    |> Enum.map_join(&pad/1)
-  end
-
-  @spec pad(integer()) :: String.t()
-  defp pad(number) when number < 10, do: "0#{number}"
-  defp pad(number), do: Integer.to_string(number)
+  def migration_module(table), do: CLI.migration_module(@verb, table)
 end

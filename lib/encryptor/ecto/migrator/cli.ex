@@ -42,6 +42,10 @@ defmodule Encryptor.Ecto.Migrator.CLI do
 
   @verify_switches [prefix: :string, sample: :string]
 
+  @gen_switches [table: :string, migrations_path: :string]
+
+  @gen_default_path "priv/repo/migrations"
+
   @migrate_only_flags ~w(
     --mode --batch-size --resume --no-resume --checkpoint --no-checkpoint
     --only --only-tenant --except-tenant --on-error
@@ -144,6 +148,45 @@ defmodule Encryptor.Ecto.Migrator.CLI do
         failure_lines(report),
       "\n"
     )
+  end
+
+  @doc """
+  Runs one of the file generators: parses its argv, refuses where a migration
+  for the table already exists, and writes the file.
+
+  The generators differ in five values and agree about everything else, which
+  is why the grammar lives here rather than three times over. `spec` carries
+  the five: the verb the file name and the module name are built from, the
+  table used when `--table` is absent, the clause a positional argument's
+  refusal ends with, which "already written" refusal applies, and the source
+  to render. A sixth difference would be a task that had stopped being one of
+  the family.
+  """
+  @spec gen([String.t()], keyword()) :: 0 | 2
+  def gen(argv, spec) do
+    with {:ok, table, path} <- gen_parse(argv, spec),
+         :ok <- gen_unwritten(table, path, spec) do
+      gen_write(table, path, spec)
+    else
+      {:error, message} -> usage_error(message)
+    end
+  end
+
+  @doc """
+  The module name a generated migration takes, from the host's app name.
+
+  Generated rather than asked for: the tasks' `@moduledoc`s say so, and say it
+  will need renaming where the host's repo lives in another namespace.
+  """
+  @spec migration_module(String.t(), String.t()) :: module()
+  def migration_module(verb, table) do
+    app =
+      Mix.Project.config()
+      |> Keyword.fetch!(:app)
+      |> Atom.to_string()
+      |> Macro.camelize()
+
+    Module.concat([app, "Repo", "Migrations", Macro.camelize(verb <> table)])
   end
 
   # -- parsing --------------------------------------------------------------
@@ -421,4 +464,86 @@ defmodule Encryptor.Ecto.Migrator.CLI do
     report |> render() |> IO.puts()
     code
   end
+
+  # -- generators -----------------------------------------------------------
+
+  @spec gen_parse([String.t()], keyword()) ::
+          {:ok, String.t(), String.t()} | {:error, String.t()}
+  defp gen_parse(argv, spec) do
+    case parse(argv, @gen_switches) do
+      {:ok, parsed, []} -> gen_table(parsed, spec)
+      {:ok, _parsed, args} -> {:error, positional_message(args, spec)}
+      {:error, message} -> {:error, message}
+    end
+  end
+
+  @spec gen_table(keyword(), keyword()) ::
+          {:ok, String.t(), String.t()} | {:error, String.t()}
+  defp gen_table(parsed, spec) do
+    table = Keyword.get(parsed, :table, spec[:default_table].())
+    path = Keyword.get(parsed, :migrations_path, @gen_default_path)
+
+    if table =~ ~r/^[a-z_][a-z0-9_]*$/ do
+      {:ok, table, path}
+    else
+      {:error,
+       "--table expects an unquoted table name - lowercase letters, digits and " <>
+         "underscores - and cannot use #{inspect(table)}"}
+    end
+  end
+
+  @spec positional_message([String.t()], keyword()) :: String.t()
+  defp positional_message(args, spec) do
+    "takes no positional arguments and was given #{Enum.join(args, " ")}. This verb " <>
+      "writes a file and reads no plan#{spec[:positional_tail]}."
+  end
+
+  @spec gen_unwritten(String.t(), String.t(), keyword()) :: :ok | {:error, String.t()}
+  defp gen_unwritten(table, path, spec) do
+    case Path.wildcard(Path.join(path, "*_#{spec[:verb]}#{table}.exs")) do
+      [] ->
+        :ok
+
+      [existing | _rest] ->
+        {:error, already_written_message(existing, spec[:already_written])}
+    end
+  end
+
+  @spec already_written_message(String.t(), :create | :alter) :: String.t()
+  defp already_written_message(existing, :create) do
+    "#{existing} already creates this table. The generator never overwrites a " <>
+      "migration and never writes a second one for the same table: a repeated " <>
+      "`CREATE TABLE` fails on the way up, and the one you have is the one your " <>
+      "database was built from."
+  end
+
+  defp already_written_message(existing, :alter) do
+    "#{existing} already adds these columns to this table. The generator never " <>
+      "overwrites a migration and never writes a second one for the same table: " <>
+      "a repeated `ADD COLUMN` fails on the way up, and the one you have is the " <>
+      "one your database was altered by."
+  end
+
+  @spec gen_write(String.t(), String.t(), keyword()) :: 0
+  defp gen_write(table, path, spec) do
+    file = Path.join(path, "#{gen_timestamp()}_#{spec[:verb]}#{table}.exs")
+
+    File.mkdir_p!(path)
+    File.write!(file, spec[:source].(table, spec[:migration_module].(table)))
+    Mix.shell().info("* creating #{file}")
+
+    0
+  end
+
+  @spec gen_timestamp() :: String.t()
+  defp gen_timestamp do
+    now = DateTime.utc_now()
+
+    [now.year, now.month, now.day, now.hour, now.minute, now.second]
+    |> Enum.map_join(&pad/1)
+  end
+
+  @spec pad(integer()) :: String.t()
+  defp pad(number) when number < 10, do: "0#{number}"
+  defp pad(number), do: Integer.to_string(number)
 end
