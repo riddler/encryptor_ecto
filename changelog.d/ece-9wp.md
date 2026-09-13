@@ -12,8 +12,8 @@
 
 - **Breaking.** `Encryptor.Ecto.KeyStore` now selects `wrapping_shape` and
   `key_id`, which a table created before this version does not have, and a
-  store reading one fails every lookup as `{:key_unavailable, selector}` until
-  it does. Run `mix encryptor.ecto.gen.key_store_shape_migration`, review the
+  store reading one raises the `Postgrex.Error` naming the missing column
+  until it does. Run `mix encryptor.ecto.gen.key_store_shape_migration`, review the
   file it writes, and `mix ecto.migrate` it *before* deploying this version,
   not after. A table created by `mix encryptor.ecto.gen.key_store_migration` at
   this version already has both columns and needs nothing.

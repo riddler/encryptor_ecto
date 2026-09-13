@@ -18,6 +18,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
   alias Encryptor.Ecto.KeyStore
   alias Encryptor.Ecto.TestKeyStore
   alias Encryptor.Ecto.TestMigrationWrappedKeys03Row
+  alias Encryptor.Ecto.TestMigrationWrappedKeysPrefix
   alias Encryptor.Error
   alias Encryptor.Message
 
@@ -29,6 +30,10 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
   # `Encryptor.Ecto.TestRepo`'s list.
   @legacy_table "encryptor_wrapped_keys_03"
   @legacy_selector TestMigrationWrappedKeys03Row.selector()
+
+  # The schema `Encryptor.Ecto.TestMigrationWrappedKeysPrefix` put a
+  # same-named wrapped-key table in.
+  @prefix TestMigrationWrappedKeysPrefix.prefix()
 
   describe "decryption_keys/2" do
     # Sabotage: dropped the `order_by` from the query. Postgres returned the
@@ -135,6 +140,166 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
       assert {:error, {:invalid_key_descriptor, :unwrap_failed}} =
                KeyStore.decryption_keys(TestKeyStore.state(), "merchant_a19")
+    end
+  end
+
+  describe "a version that will not unwrap" do
+    # Sabotage: put `reduce_while`'s halt back, so one failed unwrap ended the
+    # whole list. This assertion went red with `{:invalid_key_descriptor,
+    # :unwrap_failed}` - every write for the tenant refused because of a
+    # wrapping from a rotation ago, which is the outage this bead exists to
+    # remove.
+    test "an older one does not block a write" do
+      TestKeyStore.provision!("merchant_7f3", 2)
+      corrupt!("merchant_7f3", 1)
+
+      assert {:ok, current} = KeyStore.encryption_key(TestKeyStore.state(), "merchant_7f3")
+      assert current.name == "t/#{ref(current)}/v2"
+    end
+
+    # The decided read semantics: skipped, not fatal. A version that will not
+    # unwrap is already a version nothing can be decrypted under, so removing
+    # it from the candidate list costs a caller nothing - and halting would
+    # have made every value the tenant ever wrote unreadable to protect the
+    # subset written under this one.
+    test "an older one is skipped, and the versions that do unwrap still answer" do
+      TestKeyStore.provision!("merchant_7f3", 3)
+      TestKeyStore.provision!("merchant_7f3", 2)
+      corrupt!("merchant_7f3", 1)
+
+      assert {:ok, [v3, v2]} = KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
+
+      ref = ref(v3)
+      assert [v3.name, v2.name] == ["t/#{ref}/v3", "t/#{ref}/v2"]
+    end
+
+    # The newest row is the one a write would go under, so a write has to
+    # fail - but reads of everything written before it keep working. The two
+    # callbacks part company here on purpose, which is why `encryption_key/2`
+    # is no longer documented as the head of the decryption list.
+    test "the newest one blocks writes and leaves reads alone" do
+      TestKeyStore.provision!("merchant_7f3", 1)
+      corrupt!("merchant_7f3", 2)
+
+      state = TestKeyStore.state()
+
+      assert {:error, {:invalid_key_descriptor, :unwrap_failed}} =
+               KeyStore.encryption_key(state, "merchant_7f3")
+
+      assert {:ok, [only]} = KeyStore.decryption_keys(state, "merchant_7f3")
+      assert only.name == "t/#{ref(only)}/v1"
+    end
+
+    # The other half of the decision, end to end and through the vault: a
+    # value written under the version that later stopped unwrapping is the one
+    # thing that does not read back, and everything else the tenant has keeps
+    # working. That is the whole trade - the loss is scoped to the rows whose
+    # key is genuinely gone, rather than spread over every row the tenant
+    # owns, which is what halting on the bad version used to do.
+    #
+    # Sabotage: put the halt back. The value written *after* the break stopped
+    # reading back too - the tenant's whole history went dark because one
+    # wrapping from before the rotation no longer opened.
+    test "and reads of rows written under it fail, while the tenant keeps working" do
+      TestKeyStore.provision!("merchant_7f3", 1)
+
+      assert {:ok, old} =
+               TestKeyStore.Tenant.encrypt("written under the version that broke",
+                 key: "merchant_7f3",
+                 encryption_context: @context
+               )
+
+      TestKeyStore.provision!("merchant_7f3", 2)
+      break_wrapping!("merchant_7f3", 1)
+
+      assert {:error, %Error{reason: :decrypt_failed}} =
+               TestKeyStore.Tenant.decrypt(old, key: "merchant_7f3", encryption_context: @context)
+
+      assert {:ok, current} =
+               TestKeyStore.Tenant.encrypt("written after",
+                 key: "merchant_7f3",
+                 encryption_context: @context
+               )
+
+      assert {:ok, "written after"} =
+               TestKeyStore.Tenant.decrypt(current,
+                 key: "merchant_7f3",
+                 encryption_context: @context
+               )
+    end
+
+    # Nothing was skipped into silence: with no row left to answer with, the
+    # newest failing row's own reason is what arrives, which is the same term
+    # a store holding only that row returned before the skip existed.
+    test "and when no version unwraps, the newest one's reason is the answer" do
+      corrupt!("merchant_7f3", 1)
+      TestKeyStore.provision!("merchant_7f3", 2, wrapping_shape: "vault_transit")
+
+      assert {:error, {:invalid_key_descriptor, {:unknown_wrapping_shape, "vault_transit"}}} =
+               KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
+    end
+  end
+
+  describe "a permanent misconfiguration" do
+    # Sabotage: restored the bare rescue. This raised no more - it answered
+    # `{:key_unavailable, "merchant_7f3"}`, telling an operator to wait for a
+    # table that nobody is going to create by waiting, and throwing away the
+    # `Postgrex.Error` that names it.
+    test "a table that was never migrated raises rather than reporting key_unavailable" do
+      state = TestKeyStore.state(table: "encryptor_wrapped_keys_absent")
+
+      assert_raise Postgrex.Error, fn -> KeyStore.decryption_keys(state, "merchant_7f3") end
+    end
+
+    # Column drift, reproduced against a real table with real columns that are
+    # not these ones. It is the arm ADR-0005 decision 7 names: a 0.4.0 store
+    # reading a 0.3.0 table selects `wrapping_shape` and does not find it.
+    test "a table whose columns are not these ones raises" do
+      state = TestKeyStore.state(table: "schema_migrations")
+
+      assert_raise Postgrex.Error, fn -> KeyStore.encryption_key(state, "merchant_7f3") end
+    end
+
+    # A prefix naming a schema that does not exist is the same class of
+    # mistake as a table that does not: a typo in a deploy, permanent until
+    # somebody fixes it.
+    test "a prefix naming a schema that does not exist raises" do
+      state = TestKeyStore.state(prefix: "encryptor_test_no_such_schema")
+
+      assert_raise Postgrex.Error, fn -> KeyStore.decryption_keys(state, "merchant_7f3") end
+    end
+  end
+
+  describe "the schema prefix" do
+    # The prefixed table carries the *same name* as the default-schema one, so
+    # nothing here can pass on the table name alone: the only thing that can
+    # separate the two rows below is the prefix reaching the adapter.
+    #
+    # Sabotage: dropped `:prefix` from the query options. Both assertions went
+    # red at once - the prefixed row was invisible and the default-schema row
+    # answered every lookup, which is a store quietly serving another
+    # schema's keys.
+    test "routes every query to the schema the table was placed in" do
+      TestKeyStore.provision!("merchant_7f3", 1, prefix: @prefix)
+
+      state = TestKeyStore.state(prefix: @prefix)
+
+      assert {:ok, [descriptor]} = KeyStore.decryption_keys(state, "merchant_7f3")
+      assert {:ok, ^descriptor} = KeyStore.encryption_key(state, "merchant_7f3")
+    end
+
+    test "and a store without it does not see that schema's rows" do
+      TestKeyStore.provision!("merchant_7f3", 1, prefix: @prefix)
+
+      assert {:error, {:unknown_key, "merchant_7f3"}} =
+               KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
+    end
+
+    test "and a store with it does not see the default schema's rows" do
+      TestKeyStore.provision!("merchant_7f3", 1)
+
+      assert {:error, {:unknown_key, "merchant_7f3"}} =
+               KeyStore.decryption_keys(TestKeyStore.state(prefix: @prefix), "merchant_7f3")
     end
   end
 
@@ -363,6 +528,41 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       assert {:ok, "written before the rotation"} =
                TestKeyStore.Tenant.decrypt(old, key: "merchant_7f3", encryption_context: @context)
     end
+  end
+
+  # A row for this selector at this version whose `wrapped` will not open: a
+  # real wrapping, produced for another partition, filed under this one's
+  # reference and name. That is what a wrapping the root rotation has not
+  # reached looks like from the read side - the bytes are intact and the
+  # engine refuses them - and it is produced the same way the existing
+  # `:unwrap_failed` test produces its own.
+  defp corrupt!(selector, version) do
+    {:ok, wrapped} =
+      Encryptor.Envelope.provision(TestKeyStore.Root, "merchant_corrupt_source",
+        reference_subkey: TestKeyStore.reference_subkey(),
+        version: version
+      )
+
+    {:ok, ref} = tenant_ref(selector)
+
+    TestKeyStore.insert!(%{wrapped | tenant_ref: ref, name: "t/#{ref}/v#{version}"})
+  end
+
+  # Ruins a row that is already there, which `corrupt!/2` cannot do: a value
+  # has to be written under the version *before* its wrapping stops opening,
+  # and that is the order a root rotation gone wrong happens in.
+  defp break_wrapping!(selector, version) do
+    {:ok, ref} = tenant_ref(selector)
+
+    {1, _rows} =
+      TestRepo.update_all(
+        from(k in KeyStore.default_table(),
+          where: k.tenant_ref == ^ref and k.version == ^version
+        ),
+        set: [wrapped: :binary.copy(<<0>>, 64)]
+      )
+
+    :ok
   end
 
   defp ref(descriptor) do

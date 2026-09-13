@@ -34,6 +34,23 @@ defmodule Encryptor.Ecto.KeyStore do
   | `:root_vault` | required | The vault the wrappings were produced by. `Static` provider, `cache: false` |
   | `:reference_subkey` | required | 32 bytes: the pinned reference root expanded under `"tenant-ref"` |
   | `:table` | `"encryptor_wrapped_keys"` | The table to read |
+  | `:prefix` | `nil` | The schema prefix the table lives in; the repo's default when absent |
+
+  ### `:prefix` is a placement decision, and it is singular
+
+  A host that puts the wrapped-key table in a non-default Postgres schema
+  names that schema here, and every query this module issues carries it. It
+  is singular for the same reason `Encryptor.Ecto.Migrator`'s is: a prefix is
+  a deployment-time placement decision rather than a fact about the table, so
+  a host running several schemas configures one provider per schema rather
+  than asking this module to enumerate them. Nothing here reads a database
+  catalog to discover one.
+
+  The generators write no prefix into their migration source, deliberately.
+  `mix ecto.migrate --prefix` is Ecto's own way to place a migration, it
+  applies to the table and both indexes together, and baking the schema name
+  into a file the host commits would freeze a placement decision into source
+  that outlives it.
 
   ### `:reference_subkey` is required, and it is not an extra
 
@@ -50,9 +67,43 @@ defmodule Encryptor.Ecto.KeyStore do
 
   `c:Encryptor.Provider.decryption_keys/2` reads every row for the selector's
   `tenant_ref`, newest version first, and unwraps each under the root vault.
-  `c:Encryptor.Provider.encryption_key/2` is the head of that list, which is
-  the provider contract's "the encryption key is the current one" stated as
-  one query rather than two.
+  `c:Encryptor.Provider.encryption_key/2` reads the same rows in the same
+  single query and unwraps the newest one, which is the provider contract's
+  "the encryption key is the current one" stated as one query rather than two.
+
+  ### One bad row is not the whole store
+
+  The two callbacks share the query and part company on what a row that will
+  not unwrap means to each of them, because it does not mean the same thing.
+
+  `c:Encryptor.Provider.encryption_key/2` unwraps the newest row and no
+  other. A wrapping four rotations old that no longer opens - a root rotation
+  the rewrap pass has not finished, a row somebody edited, a shape this build
+  cannot serve - says nothing about whether this tenant can be written to,
+  and blocking every write for the tenant on it would turn one stale row into
+  an outage. The newest row is the one a write is going to be encrypted
+  under, so it is the only one a write's answer may depend on.
+
+  `c:Encryptor.Provider.decryption_keys/2` skips the rows that do not unwrap
+  and answers with the ones that do, newest first. The list is a candidate
+  list: a version missing from it is a version the vault cannot decrypt
+  under, and that is already true of a row that will not unwrap. Halting on
+  the first failure instead would make *every* stored value for the tenant
+  unreadable to protect the subset written under the one bad version, which
+  is the outage again, in the other direction.
+
+  When no row unwraps there is nothing to answer with, and the failure of the
+  newest row is returned - the same term, for the same row, that a store
+  holding only that row has always returned. So the arms below are unchanged
+  for a tenant whose rows are all bad, and a partially-broken tenant now
+  keeps the half that works.
+
+  A consequence worth naming: during a partial root rotation
+  `c:Encryptor.Provider.encryption_key/2` can fail while
+  `c:Encryptor.Provider.decryption_keys/2` succeeds with the older versions.
+  That is the honest report - reads work, and a write must not go under a
+  key this store cannot vouch for - and it is why the encryption key is not
+  described here as "the head of the decryption list" any more.
 
   It **mints nothing**. `c:Encryptor.Provider.init/1` resolves configuration
   and touches no database; neither callback writes. Key creation is
@@ -117,11 +168,13 @@ defmodule Encryptor.Ecto.KeyStore do
     * `{:unknown_key, selector}` - no row for this selector's `tenant_ref`. A
       settled negative answer, and the same answer for a selector a tenant
       store cannot have a reference for at all (`:default`, `""`).
-    * `{:key_unavailable, selector}` - the store could not be asked. The repo
-      is not started, the connection pool is exhausted, the database is down.
-      This is the one a caller retries, and telling it apart from the row
-      genuinely being absent is why the provider contract carves both out of
-      the decrypt path's collapse to `:decrypt_failed`.
+    * `{:key_unavailable, selector}` - the store could not be asked, *and
+      asking again later could work*. The repo is not started, the connection
+      pool is exhausted, the server is shutting down or refusing connections,
+      the query was cancelled. This is the one a caller retries, and telling
+      it apart from the row genuinely being absent is why the provider
+      contract carves both out of the decrypt path's collapse to
+      `:decrypt_failed`.
     * `{:invalid_key_descriptor, :unwrap_failed}` - a row was found and did not
       unwrap under the root vault. During a root rotation that is the expected
       answer for a wrapping the rewrap pass has not reached yet. The
@@ -150,8 +203,31 @@ defmodule Encryptor.Ecto.KeyStore do
       this state holds a `root_vault` and nothing else, so the branch answers
       rather than crashes. A store with no GCP-shaped rows never reaches it.
 
-  None of those four widens `t:Encryptor.Provider.reason/0`: they are new terms
+  None of those five widens `t:Encryptor.Provider.reason/0`: they are new terms
   inside `{:invalid_key_descriptor, term()}`, which is open by construction.
+
+  ## The failure that is not in the vocabulary
+
+  A store that was configured wrong does not answer at all: the exception
+  raises out of the callback, unchanged.
+
+  `t:Encryptor.Provider.reason/0` is a closed vocabulary and this package does
+  not get to widen it, so there is no term here for "the table was never
+  migrated", "`:repo` is not a repo" or "the columns are not the ones this
+  version reads". Reporting those as `{:key_unavailable, selector}` - which is
+  what a bare `rescue` did - is worse than having no term: it tells an
+  operator to wait for a transient condition to clear, and it never clears. A
+  host that forgot the migration would get `key_unavailable` for that tenant
+  forever, and the `Postgrex.Error` naming the missing table would be dropped
+  on the floor.
+
+  So the rescue is narrowed to the conditions a retry can actually resolve,
+  and everything else keeps its own exception - `Postgrex.Error` with
+  `undefined_table` or `undefined_column`, `UndefinedFunctionError` for a
+  `:repo` that is not one. Those are deploy-time mistakes, they are permanent
+  until somebody changes something, and a loud crash naming the real cause is
+  the report they deserve. Nothing about this is a reason a caller matches on;
+  it is the absence of one.
 
   Records: `encryptor` ADR-0002 decisions 4, 5 and 6; ADR-0003 decisions 1, 3,
   4 and 9; this package's ADR-0002 decision 9 and ADR-0005.
@@ -180,7 +256,8 @@ defmodule Encryptor.Ecto.KeyStore do
           repo: module(),
           root_vault: module(),
           reference_subkey: binary(),
-          table: String.t()
+          table: String.t(),
+          prefix: String.t() | nil
         }
 
   @typedoc "One row of the wrapped-key table, as selected by `rows/3`."
@@ -226,38 +303,54 @@ defmodule Encryptor.Ecto.KeyStore do
     with {:ok, repo} <- module_option(opts, :repo),
          {:ok, root_vault} <- module_option(opts, :root_vault),
          {:ok, subkey} <- reference_subkey(opts),
-         {:ok, table} <- table(opts) do
-      {:ok, %{repo: repo, root_vault: root_vault, reference_subkey: subkey, table: table}}
+         {:ok, table} <- table(opts),
+         {:ok, prefix} <- prefix(opts) do
+      {:ok,
+       %{
+         repo: repo,
+         root_vault: root_vault,
+         reference_subkey: subkey,
+         table: table,
+         prefix: prefix
+       }}
     end
   end
 
   @doc """
   The newest live version for this selector.
 
-  The head of `c:Encryptor.Provider.decryption_keys/2`, from the same single query, so the two
-  cannot disagree about which version is current.
+  The same single query `c:Encryptor.Provider.decryption_keys/2` runs, so the
+  two cannot disagree about which version is current - but only the newest
+  row is unwrapped. An older wrapping that no longer opens is not a reason a
+  tenant cannot be written to, and the moduledoc's "one bad row is not the
+  whole store" says why at length.
   """
   @impl Provider
   @spec encryption_key(state(), Provider.selector()) ::
           {:ok, Aes.t()} | {:error, Provider.reason()}
   def encryption_key(state, selector) do
-    with {:ok, [head | _rest]} <- descriptors(state, selector), do: {:ok, head}
+    with {:ok, ref} <- tenant_ref(state, selector),
+         {:ok, [newest | _older]} <- rows(state, ref, selector) do
+      descriptor(state, newest)
+    else
+      {:ok, []} -> {:error, {:unknown_key, selector}}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
   Every live version for this selector, newest first.
 
   Dropping a row from the table is what removes an entry from this list, and
-  that is the crypto-shred mechanism rather than a cleanup.
+  that is the crypto-shred mechanism rather than a cleanup. A row that will
+  not unwrap is skipped rather than fatal, for the reasons the moduledoc's
+  "one bad row is not the whole store" gives; the error arrives only when no
+  row unwrapped at all.
   """
   @impl Provider
   @spec decryption_keys(state(), Provider.selector()) ::
           {:ok, [Aes.t(), ...]} | {:error, Provider.reason()}
-  def decryption_keys(state, selector), do: descriptors(state, selector)
-
-  @spec descriptors(state(), Provider.selector()) ::
-          {:ok, [Aes.t(), ...]} | {:error, Provider.reason()}
-  defp descriptors(state, selector) do
+  def decryption_keys(state, selector) do
     with {:ok, ref} <- tenant_ref(state, selector),
          {:ok, rows} <- rows(state, ref, selector) do
       unwrap_all(state, rows, selector)
@@ -282,11 +375,17 @@ defmodule Encryptor.Ecto.KeyStore do
   # ordering information is the store's and not the struct's.
   #
   # The rescue is not a rescue-to-default: it is the translation an exception
-  # needs to become the event the provider contract requires. `repo.all/1`
+  # needs to become the event the provider contract requires. `repo.all/2`
   # raises when the repo is not started and when the pool cannot answer, and
   # both of those are `:key_unavailable` - the reason a caller retries. The
   # exception itself is dropped rather than carried, for the reason the
   # moduledoc gives.
+  #
+  # It is narrow on purpose. An exception `transient?/1` does not recognize is
+  # re-raised with its original stacktrace rather than translated, because
+  # `{:key_unavailable, selector}` is a promise that retrying might help and a
+  # missing table never stops missing. The moduledoc's "the failure that is
+  # not in the vocabulary" is the whole argument.
   @spec rows(state(), String.t(), Provider.selector()) ::
           {:ok, [map()]} | {:error, Provider.reason()}
   defp rows(state, ref, selector) do
@@ -306,26 +405,91 @@ defmodule Encryptor.Ecto.KeyStore do
         }
       )
 
-    {:ok, state.repo.all(query)}
+    {:ok, state.repo.all(query, query_opts(state))}
   rescue
-    _exception -> {:error, {:key_unavailable, selector}}
+    exception ->
+      if transient?(exception),
+        do: {:error, {:key_unavailable, selector}},
+        else: reraise(exception, __STACKTRACE__)
   end
 
+  # `:prefix` is passed as a query option rather than spelled into the query
+  # source, which is what lets the adapter quote it - the same shape
+  # `Encryptor.Ecto.Migrator.Pass` passes its own prefix in.
+  @spec query_opts(state()) :: keyword()
+  defp query_opts(%{prefix: nil}), do: []
+  defp query_opts(%{prefix: prefix}), do: [prefix: prefix]
+
+  # Matched as bare maps rather than as struct literals: `postgrex` and
+  # `db_connection` are `only: :test` dependencies of this package, so naming
+  # `%Postgrex.Error{}` here would not compile in a host's build. The atom in
+  # a map pattern needs no module.
+  #
+  # A `Postgrex.Error` that carries no `:postgres` map never reached the
+  # server at all, which is the connection being gone. One that does carries
+  # the server's own verdict, and only the codes below describe a condition
+  # that can clear on its own - `undefined_table`, `undefined_column`,
+  # `invalid_schema_name` and `insufficient_privilege` are all deploy-time
+  # mistakes and deliberately absent.
+  @transient_postgres_codes [
+    :admin_shutdown,
+    :cannot_connect_now,
+    :configuration_limit_exceeded,
+    :connection_does_not_exist,
+    :connection_failure,
+    :crash_shutdown,
+    :deadlock_detected,
+    :disk_full,
+    :idle_session_timeout,
+    :insufficient_resources,
+    :lock_not_available,
+    :out_of_memory,
+    :query_canceled,
+    :serialization_failure,
+    :sqlclient_unable_to_establish_sqlconnection,
+    :sqlserver_rejected_establishment_of_sqlconnection,
+    :too_many_connections
+  ]
+
+  # `Ecto.Repo.Registry` raises this, and only this, for a repo whose
+  # supervisor has not come up. It reads "or it does not exist" too, and a
+  # repo module that was never started and one that will never exist are
+  # genuinely indistinguishable from here - so the arm a retry might resolve
+  # is the one taken.
+  @unstarted_repo "could not lookup Ecto repo"
+
+  @spec transient?(Exception.t()) :: boolean()
+  defp transient?(%{__struct__: DBConnection.ConnectionError}), do: true
+
+  defp transient?(%{__struct__: Postgrex.Error, postgres: %{code: code}}),
+    do: code in @transient_postgres_codes
+
+  defp transient?(%{__struct__: Postgrex.Error}), do: true
+
+  defp transient?(%RuntimeError{message: message}) when is_binary(message),
+    do: String.contains?(message, @unstarted_repo)
+
+  defp transient?(_exception), do: false
+
+  # Every row is attempted and the failures are set aside rather than halted
+  # on: the candidate list is what a stored message might have been written
+  # under, and a version that will not unwrap is already not a version
+  # anything can be decrypted under. The reason kept is the *newest* failing
+  # row's, because `rows/3` orders newest first and a store whose only row is
+  # bad has to keep answering exactly what it answered before this split.
   @spec unwrap_all(state(), [row()], Provider.selector()) ::
           {:ok, [Aes.t(), ...]} | {:error, Provider.reason()}
   defp unwrap_all(_state, [], selector), do: {:error, {:unknown_key, selector}}
 
   defp unwrap_all(state, rows, _selector) do
-    rows
-    |> Enum.reduce_while({:ok, []}, fn row, {:ok, acc} ->
-      case descriptor(state, row) do
-        {:ok, descriptor} -> {:cont, {:ok, [descriptor | acc]}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, descriptors} -> {:ok, Enum.reverse(descriptors)}
-      {:error, reason} -> {:error, reason}
+    {descriptors, reasons} =
+      rows
+      |> Enum.map(&descriptor(state, &1))
+      |> Enum.split_with(&match?({:ok, _descriptor}, &1))
+
+    case descriptors do
+      [_ | _] -> {:ok, Enum.map(descriptors, fn {:ok, descriptor} -> descriptor end)}
+      [] -> hd(reasons)
     end
   end
 
@@ -423,6 +587,20 @@ defmodule Encryptor.Ecto.KeyStore do
 
       _other ->
         {:error, {:invalid_config, :table, :invalid_name}}
+    end
+  end
+
+  # A prefix goes to the adapter as a query option, which quotes it, so it
+  # needs no identifier grammar the way the interpolated table name does -
+  # only to be absent or a real name. An empty string is refused rather than
+  # treated as absent: it would read as "the default schema" while saying
+  # something was configured.
+  @spec prefix(keyword()) :: {:ok, String.t() | nil} | {:error, term()}
+  defp prefix(opts) do
+    case Keyword.get(opts, :prefix) do
+      nil -> {:ok, nil}
+      prefix when is_binary(prefix) and prefix != "" -> {:ok, prefix}
+      _other -> {:error, {:invalid_config, :prefix, :invalid_name}}
     end
   end
 end

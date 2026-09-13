@@ -87,5 +87,60 @@ defmodule Encryptor.Ecto.KeyStoreTest do
       assert {:error, {:invalid_config, :table, :invalid_name}} =
                KeyStore.init(TestKeyStore.provider_opts(table: :wrapped_keys))
     end
+
+    test "defaults the schema prefix to the repo's own" do
+      assert {:ok, state} = KeyStore.init(TestKeyStore.provider_opts())
+
+      assert state.prefix == nil
+    end
+
+    test "takes a schema prefix a host placed the table in" do
+      assert {:ok, state} = KeyStore.init(TestKeyStore.provider_opts(prefix: "tenant_keys"))
+
+      assert state.prefix == "tenant_keys"
+    end
+
+    # An empty prefix is refused rather than treated as absent: it would read
+    # as "the default schema" while saying something was configured, and a
+    # host that built the name by interpolation and got it wrong deserves to
+    # hear about it at start rather than to silently query the search path.
+    test "refuses a prefix that is empty or not a string" do
+      for prefix <- ["", :tenant_keys, 42] do
+        assert {:error, {:invalid_config, :prefix, :invalid_name}} =
+                 KeyStore.init(TestKeyStore.provider_opts(prefix: prefix))
+      end
+    end
+  end
+
+  # Still no database: a `:repo` that is not a repository never gets as far as
+  # one. The claim is about what the *rescue* does, and it needs no server.
+  describe "a permanent misconfiguration" do
+    # Sabotage: put the bare `rescue _exception ->` back. Both calls answered
+    # `{:key_unavailable, "merchant_7f3"}` - a reason whose entire meaning is
+    # "try again later" - for a provider option that will be wrong on every
+    # call until somebody edits the config, with the `UndefinedFunctionError`
+    # naming the real mistake dropped on the floor.
+    test "a repo that is not a repository raises rather than reporting key_unavailable" do
+      state = TestKeyStore.state(repo: __MODULE__.NotARepo)
+
+      assert_raise UndefinedFunctionError, fn ->
+        KeyStore.encryption_key(state, "merchant_7f3")
+      end
+
+      assert_raise UndefinedFunctionError, fn ->
+        KeyStore.decryption_keys(state, "merchant_7f3")
+      end
+    end
+  end
+
+  defmodule NotARepo do
+    @moduledoc """
+    A module that is a perfectly good module and not a repository.
+
+    `init/1` accepts any atom for `:repo` - it cannot do better, since a repo
+    is named at configuration time and started elsewhere - so the mistake
+    surfaces at the first query as `UndefinedFunctionError`, which is where
+    this test meets it.
+    """
   end
 end

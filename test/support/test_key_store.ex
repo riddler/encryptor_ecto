@@ -89,6 +89,10 @@ defmodule Encryptor.Ecto.TestKeyStore do
   put them in columns rather than in `Encryptor.Envelope.WrappedKey` - so they
   arrive as overrides here. The defaults are what every row a host has today
   carries: an engine message, and no key id.
+
+  `:table` and `:prefix` say where the row goes, and they are how a test
+  reaches the 0.3.0-shaped table and the one in
+  `Encryptor.Ecto.TestMigrationWrappedKeysPrefix`'s schema.
   """
   @spec insert!(WrappedKey.t(), keyword()) :: WrappedKey.t()
   def insert!(%WrappedKey{} = wrapped, overrides \\ []) do
@@ -96,20 +100,24 @@ defmodule Encryptor.Ecto.TestKeyStore do
     table = Keyword.get(overrides, :table, KeyStore.default_table())
 
     {1, _rows} =
-      TestRepo.insert_all(table, [
+      TestRepo.insert_all(
+        table,
         [
-          tenant_ref: wrapped.tenant_ref,
-          version: wrapped.version,
-          namespace: wrapped.namespace,
-          name: wrapped.name,
-          bits: wrapped.bits,
-          wrapped: wrapped.wrapped,
-          wrapping_shape: Keyword.get(overrides, :wrapping_shape, "engine_message"),
-          key_id: Keyword.get(overrides, :key_id),
-          inserted_at: now,
-          updated_at: now
-        ]
-      ])
+          [
+            tenant_ref: wrapped.tenant_ref,
+            version: wrapped.version,
+            namespace: wrapped.namespace,
+            name: wrapped.name,
+            bits: wrapped.bits,
+            wrapped: wrapped.wrapped,
+            wrapping_shape: Keyword.get(overrides, :wrapping_shape, "engine_message"),
+            key_id: Keyword.get(overrides, :key_id),
+            inserted_at: now,
+            updated_at: now
+          ]
+        ],
+        Keyword.take(overrides, [:prefix])
+      )
 
     wrapped
   end
