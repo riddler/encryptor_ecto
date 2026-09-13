@@ -32,8 +32,9 @@ defmodule Encryptor.Ecto.Date do
 
   The textual form is not a choice taken here. `Cloak.Ecto.Date` writes the
   same bytes: `cloak_ecto` 1.3.0 serializes every scalar with `to_string/1`,
-  which for a `Date` is `Date.to_iso8601/1`. ADR-0004's migration hands the
-  migrator a legacy plaintext and re-encrypts it verbatim below the schema
+  which for a `Date` is byte-identical to `Date.to_iso8601/1` on the ISO
+  calendar. ADR-0004's migration hands the migrator a legacy plaintext and
+  re-encrypts it verbatim below the schema
   layer (ADR-0002 decision 3), so a column arriving from `Cloak.Ecto.Date` is
   readable through this type because the two agree about what the bytes say.
   The two datetime types are the exception - see

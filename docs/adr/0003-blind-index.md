@@ -1189,3 +1189,78 @@ Argon2id cost per guess", and this Note only says what that cost measures at.
 
 This Note is appended to Amendment C and carries that amendment's status.
 Amendment C was accepted on 2026-09-13.
+
+## Note (2026-09-13): four accuracy corrections to Amendment C and to the capacity-planning Note
+
+Four statements in this file are imprecise as written. Each is corrected here
+by addition; no decision text, no amendment text and no status word changes,
+and Amendment C's substance is untouched.
+
+**1. C6's invalidation table is missing the row C5 implies.** C5 says that
+`:slow` "does not reach the HKDF `info` string, exactly as `:bits` does not, so
+a `slow` flip changes the stored bytes without changing which key the index
+derives". A change that changes the stored bytes is an invalidating change, and
+C6's table - which exists to show that Amendment C "introduces **no new way to
+invalidate a column**" - does not list it. The missing row is:
+
+| Change | Already invalidating because |
+|---|---|
+| `:slow` flipped on a declaration | decision 7, as the `:bits` row already is - the stored value changes and the key does not |
+
+The claim C6 makes survives the addition, which is the point of recording it:
+a `:slow` flip is not a *new* way to invalidate, it is decision 7's existing
+family - a normalizer change, a `:bits` change - with one more member. C6's
+following paragraph already names the `"slow-salt"` constant, the 32-byte
+length, the component position and C3's selector as members of that same
+family. Read the table as those six rows plus this one.
+
+**2. C1's derivation block is schematic and does not type-check as written.**
+The block binds `index_salt` to `Encryptor.Vault.derive(vault, "blind-index",
+...)` as though the call returned bytes. It does not:
+`Encryptor.Vault.derive/3` returns `{:ok, binary()} | {:error,
+Encryptor.Error.t()}`, and this package's own caller unwraps the tagged tuple
+rather than the value - "The result is the vault's tagged tuple, unwrapped by
+nothing here" (`lib/encryptor/ecto/blind_index/derivation.ex:433-435`, ece
+`f441f66`). The block is a statement of *what is derived and under what*, not
+a copyable call. The executable form is
+`{:ok, index_salt} = Encryptor.Vault.derive(vault, "blind-index", opts)`, with
+`opts` as `salt_derive_opts/2` builds them
+(`lib/encryptor/ecto/blind_index/derivation.ex:419-422`, ece `f441f66`).
+C5's block is schematic in the same way and for the same reason.
+
+**3. C2's cite names the helper and not the application.** C2's structural
+argument - "no component may contain the separator, and none may be empty" -
+is cited to `derivation.ex:422-435` at ece `33636a9`. At ece `f441f66` the
+validation helper is `validate_component!/2`
+(`lib/encryptor/ecto/blind_index/derivation.ex:592-606`), and the line that
+makes the argument structural is the one that applies it to all three
+components at once:
+
+```elixir
+Enum.each([:table, :column, :index_name], &validate_component!(struct, &1))
+```
+
+(`lib/encryptor/ecto/blind_index/derivation.ex:278`, ece `f441f66`). Both
+anchors belong in the cite: the helper says what is refused, and the `Enum.each`
+says that it is refused for every component, which is what makes the separator
+count exact rather than usual.
+
+**4. The capacity-planning Note attributes B4's framing to half its evidence.**
+That Note's third bullet reads "Memory, not iterations, is where the cost sits:
+doubling memory at fixed iterations costs about 2.1x, which is the evidence
+behind B4's 'deliberately memory-heavy rather than iteration-heavy' framing."
+The upstream addendum gives a pair of figures, not one: doubling memory at
+fixed iterations costs 2.1x (30.7 to 64.2 ms) *and* tripling iterations at
+fixed memory costs 3.2x (20.0 to 64.2 ms), from which it concludes that "the
+two knobs are roughly linear and the defaults sit where B4 says they do
+relative to the published floor"
+(`enc docs/measurements/260912-enc-anz-stated-bounds.md:343-346`, read at
+`encryptor` `ec6a84d`). So the framing is not a claim that memory is the
+cheaper knob per unit; it is a claim about where B4's chosen point sits
+relative to the floor, supported by both figures together. The bullet's
+operational numbers - 64.24 ms per hash, 15.6 hashes per second per core,
+~18 core-hours per million rows, ~128 ms per row for two slow indexes - are
+unaffected and stand as recorded.
+
+This Note carries the status of the sections it annotates; Amendment C's
+Status line and the capacity-planning Note are not touched.

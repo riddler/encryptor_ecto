@@ -909,3 +909,16 @@ and assumption A9 is unaffected.
 
 This Note carries ADR-0002's status; the record was accepted on 2026-09-13 and
 no decision text above changes.
+
+## Note (2026-09-13): the closing sentence of the Note above dates the amendments, not the record
+
+The Note above closes "This Note carries ADR-0002's status; the record was
+accepted on 2026-09-13 and no decision text above changes." This record's
+Status line reads `accepted (2026-08-27; the design is unchanged - the
+assumption ...)`, and 2026-09-13 is the date the amendments at the head of this
+file were accepted rather than the date this record was.
+
+Read the sentence as "this Note carries ADR-0002's status; the amendments above
+were accepted on 2026-09-13, and no decision text above changes." The Status
+line is correct as written, nothing in the Note's substance about the probe
+short-circuit changes, and no status word flips.

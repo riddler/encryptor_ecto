@@ -447,3 +447,153 @@ now decides the content of two columns rather than only transcribing the six
 `encryptor` fixed. That is the natural consequence of `enc` ADR-0003 decision
 9 drawing the line where it did, and it is worth naming: the next question
 about what a key row may contain comes here, not upstream.
+
+## Note (2026-09-13): the second generator's name, corrected counts and anchors, and open question 3 answered
+
+This record's decisions are unchanged. What follows is the accuracy pass its
+reviews asked for, plus the one thing the record deliberately left for the code
+half to name. Every code cite below was read at `encryptor_ecto` `f441f66` and
+every upstream cite at `encryptor` `ec6a84d`. No Status word flips; this Note
+carries the record's `proposed` status.
+
+### 1. The second generator task, named
+
+Decision 6 fixes the additive migration's shape and decides that it is a second
+task without ever saying what the task is called. The code half (`ece-9wp`)
+chose it, which is where that choice belonged - the record's decision forces the
+task, and naming it is implementation. It is:
+
+| | |
+|---|---|
+| task | `mix encryptor.ecto.gen.key_store_shape_migration` |
+| module | `Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigration` |
+| flags | `[--table NAME] [--migrations-path PATH]`, the same pair the create task takes |
+| exit codes | `0` on a written file, `2` on a usage failure, via `Encryptor.Ecto.Migrator.CLI.usage_error/1` |
+
+(`lib/mix/tasks/encryptor.ecto.gen.key_store_shape_migration.ex`, ece
+`f441f66`.) Decision 6 is read as naming this task; nothing else about it
+changes.
+
+### 2. The first Consequences bullet miscounts, twice
+
+It reads: "Four columns of decision - two of them new - and the six fields
+`enc` ADR-0003 decision 9 already fixed." Both halves are wrong against this
+record's own Context and typespecs.
+
+The row has eight fields, not ten of which four are decided here: the six
+`Encryptor.Envelope.WrappedKey` fixes, plus `wrapping_shape` and `key_id`. This
+record decides **two** columns, and both of them are new. And `enc` ADR-0003
+decision 9 does not fix six fields: its minimum list is the wrapping, the
+tenant reference and the version, the namespace and the derived name, and
+"enough ordering information to return live versions newest first" - `bits` is
+not in it (`enc docs/adr/0003-per-tenant-envelope.md:332-342`, `ec6a84d`). The
+six fields are `Encryptor.Envelope.WrappedKey`'s; decision 9's list is a subset
+of them.
+
+Read the bullet as: *Two columns of decision, both of them new, beside the six
+`Encryptor.Envelope.WrappedKey` fixes and the timestamps the generator emits.*
+The typespec in "The contract as typespecs" is correct as written and is what a
+reader should trust.
+
+### 3. Anchors that run past or short of what they quote
+
+| where | as cited | correct |
+|---|---|---|
+| Context, the consequences quote | `enc 0007:650-657` | `enc 0007:650-656` - line 657 is the sentence after the quote |
+| Context, open question 1 | `enc 0007:851-856` | `enc 0007:852-855` - 851 is the question's own heading line, and the quote stops at "not a decision" |
+| Decision 5, the ride-along rule | `key_store.ex:117-121`, at `a0717e9` | `key_store.ex:181-184`, at `f441f66` |
+| Decision 1, "`postgrex` is a test-only dependency" | `mix.exs:107-123`, at `a0717e9` | `mix.exs:115-116`, at `f441f66` - the two `only: :test` lines are the claim; 107-114 is the comment above them |
+| Decision 6, the exit-2 refusal | `encryptor.ecto.gen.key_store_migration.ex:182-196`, at `a0717e9` | `:98-105` (`main/1`, which routes an error to `CLI.usage_error/1`) and `:211-217` (`unwritten/2`, which produces it), with the `2` itself at `lib/encryptor/ecto/migrator/cli.ex:113-117`, all at `f441f66` |
+
+One quotation also re-renders its source's punctuation: Context quotes `enc`
+open question 1 as `but 'probably' is why this is a question`. Upstream has
+double quotes - `but "probably" is why this is a question` (`enc
+0007:855`, `ec6a84d`). The words are exact; only the quote marks were
+downgraded to fit an outer quotation.
+
+### 4. Decision 5's ride-along paragraph attributes an arm to the wrong decision
+
+It closes: "A `key_id` is not carried - decision 2's missing-`key_id` arm is a
+bare atom - because a key id is a resource name." The
+`{:invalid_key_descriptor, :missing_key_id}` arm is in **decision 5's own
+table**, three rows above. Decision 2 decides that `key_id` is a stored,
+nullable column and that the requirement is conditional and therefore read-side;
+it names no arm. Read the sentence as "this decision's own missing-`key_id` arm
+is a bare atom". The rule it states - a key id is a resource name and does not
+ride out of the provider - is unchanged and correct.
+
+### 5. The atom type beside the string column
+
+"The contract as typespecs" declares
+`@type wrapping_shape :: :engine_message | :gcp_kms_ciphertext` immediately
+beside a row whose `wrapping_shape` field is `String.t()`, while decision 5
+forbids `String.to_existing_atom/1`. The two are not in tension and the record
+should say which is which: **the string is the stored value and the atom is the
+branch label.** The mapping between them is the explicit one-clause-per-value
+function decision 5 requires, so an unknown stored string reaches the catch-all
+and becomes `{:invalid_key_descriptor, {:unknown_wrapping_shape, value}}` rather
+than an `ArgumentError` from an atom-table lookup. No stored string is ever
+converted to an atom.
+
+### 6. Decision 7's breaking claim, phrased without release numbers
+
+Decision 7 opens "A 0.4.0 `Encryptor.Ecto.KeyStore` reading a 0.3.0 table that
+has not run the additive migration". The claim does not depend on which
+releases those are. Read it as: **a `KeyStore` that selects `wrapping_shape`
+and `key_id` reading a table created before decision 1's columns existed, in a
+deploy that has not run the additive migration.** That is true of any pair of
+releases either side of this record, which is the property decision 7 is
+asserting.
+
+### 7. Decision 7's failure-mode sentence is stale, and open question 3 is answered
+
+Decision 7 describes *how* a pre-migration read fails: the query "raises in
+`repo.all/1`, inside `rows/3`, where the bare rescue translates every exception
+to `{:error, {:key_unavailable, selector}}`" (cited to `key_store.ex:238-255`
+at `a0717e9`). That bare rescue is gone. `rows/3` now rescues only conditions a
+retry can resolve and reraises everything else with its original stacktrace
+(`lib/encryptor/ecto/key_store.ex:408-414`, `f441f66`), so a pre-migration read
+raises the `Postgrex.Error` naming the missing column instead of reporting a
+retryable reason.
+
+**Decision 7's substance is unchanged**: the change is still breaking, and the
+upgrade step is still to run the additive migration before deploying the new
+version. What changed is only the failure a host that forgets it sees - a loud
+crash naming the real cause rather than a `key_unavailable` that never clears.
+The second Consequences bullet ("the failure mode if they forget is a retryable
+reason for an unretryable condition") is stale in the same way and for the same
+reason; the migration it describes as mandatory still is.
+
+**Open question 3 - "Does the `rescue` in `rows/3` mislabel a schema error?" -
+is answered: yes, and it is fixed.** The rescue is narrowed to
+`DBConnection.ConnectionError`, a `Postgrex.Error` whose server code is in an
+explicit transient list, a `Postgrex.Error` carrying no `:postgres` map at all
+(which means the server was never reached), and the `RuntimeError` a repo whose
+supervisor has not started raises; everything else is reraised
+(`lib/encryptor/ecto/key_store.ex:461-472`, `f441f66`). The fix **adds no term
+to `t:Encryptor.Provider.reason/0`**, which is what made it settleable here
+rather than upstream: a raise is not a reason. Two properties of the narrowing
+are worth recording because they are decisions and not accidents:
+`undefined_table`, `undefined_column`, `invalid_schema_name` and
+`insufficient_privilege` are deliberately absent from the transient list
+(`:428-452`), and a `Postgrex.Error` with no `:postgres` map is classed
+transient *by construction* - a driver error that never reached the server is
+the connection being gone.
+
+### 8. Two things the record does not name and the implementation has
+
+Recorded here so a reader of the record is not surprised by the module.
+
+- **`Encryptor.Ecto.KeyStore` takes a `:prefix` option in `init/1`**
+  (`lib/encryptor/ecto/key_store.ex:598-605`, `f441f66`), defaulting to `nil`,
+  which places the wrapped-key table in a non-default schema. It is singular by
+  the same argument `Encryptor.Ecto.Migrator`'s prefix is, it is passed as a
+  query option rather than spelled into the query source (`:416-421`), and the
+  generators deliberately write no prefix into their migration files - `mix
+  ecto.migrate --prefix` is Ecto's own way to place one. No decision in this
+  record names the option; nothing in this record forbids it either, and it
+  touches neither the row shape nor the dispatch.
+- **The generated table carries nullable `inserted_at` and `updated_at`
+  timestamps** beside the eight fields, which "The contract as typespecs" omits
+  because `rows/3` does not select them. This module neither writes nor reads
+  them.

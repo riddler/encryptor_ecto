@@ -16,15 +16,28 @@ defmodule Encryptor.Ecto.KeyStore do
         use Encryptor.Vault, otp_app: :my_app, context_profile: :tenant
 
         def init(config) do
+          # `root_subkey/2` takes the 32 root-key *bytes*, not a vault module.
+          # Expand them once and hand the same value to both keys, so the
+          # provider looks for a row under the reference the vault writes.
+          subkey = Encryptor.Envelope.root_subkey(root_key(), "tenant-ref")
+
           {:ok,
            Keyword.merge(config,
              provider:
                {Encryptor.Ecto.KeyStore,
                 repo: MyApp.Repo,
                 root_vault: MyApp.RootVault,
-                reference_subkey: Encryptor.Envelope.root_subkey(root(), "tenant-ref")},
-             reference_subkey: Encryptor.Envelope.root_subkey(root(), "tenant-ref")
+                reference_subkey: subkey},
+             reference_subkey: subkey
            )}
+        end
+
+        # The pinned reference root, wherever this host keeps key material -
+        # the same bytes `MyApp.RootVault` is configured with.
+        defp root_key do
+          :my_app
+          |> Application.fetch_env!(:root_key_base64)
+          |> Base.decode64!()
         end
       end
 
@@ -128,6 +141,7 @@ defmodule Encryptor.Ecto.KeyStore do
 
   | Column | |
   |---|---|
+  | `id` | the surrogate primary key `Ecto.Migration.create/2` adds by default. This module never selects it |
   | `tenant_ref` | `Encryptor.Envelope.tenant_ref/2` of the host's selector. The lookup key |
   | `version` | the key version. Ordering is the store's job, per ADR-0002 decision 4 |
   | `namespace`, `name` | what the encrypted data key matches on, byte for byte |
@@ -135,8 +149,16 @@ defmodule Encryptor.Ecto.KeyStore do
   | `wrapped` | the wrapping, whose kind the next column names |
   | `wrapping_shape` | which kind of wrapping `wrapped` holds: `"engine_message"` or `"gcp_kms_ciphertext"` |
   | `key_id` | `NULL` for an engine message; the `CryptoKey` id a GCP ciphertext was produced under |
+  | `inserted_at`, `updated_at` | nullable `:utc_datetime` timestamps the generator emits. This module neither writes nor reads them |
 
-  The last two are ADR-0005's, and they are the reason a reader never guesses.
+  The generated DDL is those eleven columns and nothing else
+  (`Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration.source/2`). The timestamps
+  are nullable and carry no default because this package writes no rows: a
+  host that inserts them gets them, and one that does not gets `NULL` rather
+  than a `NOT NULL` violation on its own insert.
+
+  `wrapping_shape` and `key_id` are ADR-0005's, and they are the reason a
+  reader never guesses.
   Both wrapping kinds are opaque binaries, so a reader that picks the wrong
   unwrap path gets a failure indistinguishable from a wrong key - one `varchar`
   per row removes the guess. The vocabulary is closed at those two values here,
@@ -163,7 +185,10 @@ defmodule Encryptor.Ecto.KeyStore do
 
   ## The failure vocabulary
 
-  Both callbacks answer in `t:Encryptor.Provider.reason/0` and nothing else.
+  Where either callback answers at all, it answers in
+  `t:Encryptor.Provider.reason/0` and nothing else. The conditions that are
+  not answers - a store configured wrong - raise instead, and "The failure
+  that is not in the vocabulary" below is that case.
 
     * `{:unknown_key, selector}` - no row for this selector's `tenant_ref`. A
       settled negative answer, and the same answer for a selector a tenant

@@ -762,9 +762,12 @@ defmodule Encryptor.Ecto.MigratorRunTest do
 
   describe "a `from:` that is one of this package's own types" do
     # Sabotage: handed the source side the migrator's identifying map again -
-    # every row raised `KeyError` inside the source type and classified
-    # `:undecryptable`, which is what this plan looked like before the engine
-    # constructed the source's own params.
+    # every row raised inside the source type and classified `:undecryptable`,
+    # which is what this plan looked like before the engine constructed the
+    # source's own params. The raise is a `FunctionClauseError` from
+    # `Encryptor.Ecto.Binary`'s `resolver/1` (`binary.ex:632-633`), which has
+    # a clause for `:scope` and one for a module and none for the row's tenant
+    # selector; the identifying map never reaches `params.vault` at all.
     test "a re-key rewrite classifies its rows migratable rather than undecryptable" do
       _id = insert_card(pan: rekeyed(@pan))
 
@@ -808,9 +811,14 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, theirs)
     end
 
-    # Sabotage: made the source params win over the adapter's own keys - the
-    # resolution's `:source_module` was overwritten by a field key of the same
-    # name and the adapter called the wrong module.
+    # No sabotage here: reversing the merge order in `source!/3` is not one.
+    # The frozen source params (`:vault`, `:tenant`, `:context`, `:table`,
+    # `:column`, `:legacy`) and the resolution (`:source_module`,
+    # `:source_arity`) share no key, so both orders build the same map and the
+    # test stays green either way. The merge order is written the way it is as
+    # the rule - an adapter's own keys win over a field key of the same name -
+    # rather than because this plan can tell the difference. What this test
+    # does pin is idempotence: the second run recognises its own bytes.
     test "a second run finds every row already in the target state" do
       id = insert_card(pan: rekeyed(@pan))
 

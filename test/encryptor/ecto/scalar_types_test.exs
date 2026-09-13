@@ -60,9 +60,9 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
   # supplies it as the default `before_encrypt/1`, which `Integer` and `Float`
   # inherit, and `types/date.ex`, `types/time.ex`, `types/naive_date_time.ex`
   # and `types/date_time.ex` each re-state as `to_string(value)` after casting.
-  # `to_string/1` is `to_iso8601/1` for `Date` and `Time`, so four of the six
-  # agree byte for byte; for `NaiveDateTime` and `DateTime` it is the
-  # *space*-separated form, so those two do not.
+  # `to_string/1` is byte-identical to `to_iso8601/1` for `Date` and `Time`, so
+  # four of the six agree byte for byte; for `NaiveDateTime` and `DateTime` it
+  # is the *space*-separated form, so those two do not.
   @plaintexts [
     {TestTypes.RetryCount, :retry_count, 3, "3", "3"},
     {TestTypes.FeeRate, :fee_rate, 0.0275, "0.0275", "0.0275"},

@@ -661,3 +661,66 @@ plaintext, ciphertext and key material in any message is untouched.
 
 This Note carries ADR-0001's status; the record was accepted on 2026-09-13 and
 no decision text above changes.
+
+## Note (2026-09-13): the two datetime kinds do not share cloak's bytes, and two readings of the Note above
+
+The Note above is right about four of the six scalar wrappers and too general
+about the other two. This Note corrects the over-generalisation by addition,
+and settles two smaller readings of the same Note. No decision text changes and
+nothing above is withdrawn.
+
+**Per kind, the bytes this package writes and the bytes `cloak_ecto` 1.3.0
+writes.** The Note above says the plaintext "is its textual form" and that a
+column arriving from the corresponding prior-scheme type "is only readable
+through these if the two agree about what the bytes say". The second half is
+false for `:naive_datetime` and `:utc_datetime`, and the table is the record of
+it. Every pair below is pinned as a test fixture, not asserted here
+(`test/encryptor/ecto/scalar_types_test.exs:66-76`, ece `f441f66`):
+
+| kind | this package writes | `cloak_ecto` 1.3.0 writes | same bytes |
+|---|---|---|---|
+| `:integer` | `"3"` | `"3"` | yes |
+| `:float` | `"0.0275"` | `"0.0275"` | yes |
+| `:date` | `"1815-12-10"` | `"1815-12-10"` | yes |
+| `:time` | `"09:30:00"` | `"09:30:00"` | yes |
+| `:naive_datetime` | `"2026-09-12T10:20:30"` | `"2026-09-12 10:20:30"` | **no** |
+| `:utc_datetime` | `"2026-09-12T10:20:30Z"` | `"2026-09-12 10:20:30Z"` | **no** |
+
+This package writes `to_iso8601/1` for all four date and time kinds
+(`lib/encryptor/ecto/scalar.ex:154-168`, ece `f441f66`). `cloak_ecto` 1.3.0
+serializes every scalar with `to_string/1` - `lib/cloak_ecto/type.ex` supplies
+it as the default `before_encrypt/1`, and its four date and time types each
+re-state it. For a `Date` and a `Time` on the ISO calendar `to_string/1` is
+byte-identical to `to_iso8601/1`, which is why those two agree; for a
+`NaiveDateTime` and a `DateTime` it is the *space*-separated form, which is why
+those two do not.
+
+**The mechanism that keeps the two datetime columns readable is stdlib
+leniency, not agreement.** `NaiveDateTime.from_iso8601/1` and
+`DateTime.from_iso8601/1` accept either separator, so a legacy plaintext that
+ADR-0004's migration re-encrypts verbatim below the schema layer (ADR-0002
+decision 3) loads through these types unchanged
+(`lib/encryptor/ecto/scalar.ex:190-198`, ece `f441f66`). That is a property of
+the parser rather than of the written form, and it is what the Note above
+should have said for those two kinds. The consequence worth naming: a
+round trip through this package *rewrites* such a column into the `T` form, so
+the leniency is what carries the read and not what the column settles at.
+
+**Decision 2's `:binary` claim is widened here, in the same voice decision 6's
+row was.** The Note above states that "the column is `:binary` for all nine"
+where decision 2 names three types. That is correct in substance and was
+written as a restatement rather than as a widening: the six wrappers do not
+implement `type/1` at all, they delegate to `Encryptor.Ecto.Binary`, whose
+`type/1` returns `:binary` for every params map
+(`lib/encryptor/ecto/scalar.ex:63-65` and
+`lib/encryptor/ecto/binary.ex:453`, ece `f441f66`). This Note records the
+widening explicitly so decision 2 is not read as an exhaustive list of three
+that the code exceeds.
+
+**The closing sentence of the Note above dates the wrong thing.** It reads "the
+record was accepted on 2026-09-13". The record's Status line says
+`accepted (2026-08-27, with amendments)`; 2026-09-13 is the date the
+amendments at the head of this file were accepted, not the date the record was.
+Read the sentence as "this Note carries ADR-0001's status; the amendments above
+were accepted on 2026-09-13". The Status line is correct as written and is not
+touched.
