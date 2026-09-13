@@ -10,6 +10,62 @@ fragment in [`changelog.d/`](changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
 
+## [0.4.0] - 2026-09-13
+
+### **Breaking**
+
+- **Breaking.** `Encryptor.Ecto.KeyStore` now selects `wrapping_shape` and
+  `key_id`, which a table created before this version does not have, and a
+  store reading one raises the `Postgrex.Error` naming the missing column
+  until it does. Run `mix encryptor.ecto.gen.key_store_shape_migration`, review the
+  file it writes, and `mix ecto.migrate` it *before* deploying this version,
+  not after. A table created by `mix encryptor.ecto.gen.key_store_migration` at
+  this version already has both columns and needs nothing.
+- Host code that inserts wrapped-key rows must set `wrapping_shape`:
+  `"engine_message"` for a wrapping the root vault produced, or
+  `"gcp_kms_ciphertext"` with the `key_id` it was produced under. The column
+  has no default once the migration finishes, so a forgotten shape is a write
+  that fails rather than a row that lies about itself.
+
+### Added
+
+- `mix encryptor.ecto.gen.key_store_shape_migration` writes the additive
+  migration that adds `wrapping_shape` and `key_id` to a wrapped-key table an
+  earlier version created, backfilling every existing row as an engine message.
+- A wrapped-key row declares which kind of wrapping it holds in its own
+  `wrapping_shape` column, and `Encryptor.Ecto.KeyStore` picks the unwrap path
+  from it per row, so a store can hold engine messages and GCP KMS ciphertexts
+  at once instead of guessing (ADR-0005).
+- `Encryptor.Ecto.KeyStore` takes a `:prefix` option and routes every query it
+  issues to that Postgres schema, so a wrapped-key table placed outside the
+  repo's default search path is reachable. Place the table with
+  `mix ecto.migrate --prefix`; the generators write no schema name into the
+  migration they produce.
+
+### Changed
+
+- A permanent store misconfiguration - a table that was never migrated, a
+  `:repo` that is not a repository, columns that are not the ones this version
+  reads - now raises the exception that names it instead of being reported as
+  a retryable `{:key_unavailable, selector}`. `key_unavailable` is narrowed to
+  the conditions a retry can actually resolve: the repo not started, the pool
+  or the server unable to answer, a cancelled query. A caller that rescued
+  around a resolution failure to retry it should expect the misconfiguration
+  to come through.
+
+### Fixed
+
+- A migration plan whose `from:` is one of this package's own encrypted types
+  now reads its rows: the migrator builds that side's params from the type's
+  own declaration, under the plan's tenant strategy, instead of handing it the
+  identifying map an unknown legacy reader gets, which every such row used to
+  raise on and report `:undecryptable`.
+- An older wrapped-key version that no longer unwraps no longer blocks writes
+  for the whole tenant: `encryption_key/2` unwraps only the newest row, and
+  `decryption_keys/2` skips the versions that will not open and answers with
+  the ones that will. A tenant whose rows all fail reports exactly what it
+  reported before.
+
 ## [0.3.0] - 2026-09-12
 
 ### Added
