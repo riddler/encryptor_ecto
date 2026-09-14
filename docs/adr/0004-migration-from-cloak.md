@@ -940,3 +940,33 @@ schema.
 **A tutorial is missing on purpose, and the docs index says so.** Otherwise it
 gets written, by someone reasonably observing that the documentation set has a
 hole in it.
+
+## Note (2026-09-14): the earned-silence sentence names the context-change case by a spelling ADR-0002 has since withdrawn
+
+Decision 3's "What this changes" paragraph says silence about
+`source_authenticated:` is safe "where the `from:` module is one of its own
+vault-backed types - the context-change case of ADR-0002 decision 3, where
+`from:` and `to:` name the same module with different params" (`:80-84`).
+ADR-0002's amendment of 2026-09-13 withdrew that final clause: an in-place
+declaration edit is migrated as **two declarations**, the old declaration kept
+as a module of its own and named `from:`.
+
+**The rule this record states is unchanged.** Silence is earned exactly where
+this package can prove the source authenticates, which is where the `from:`
+module is one of its own vault-backed types - and under the two-declaration
+form it still is. The `from:` module is a second declaration of the same
+column, written in this package's own vocabulary, and the migrator reads that
+declaration's own params off it rather than handing it the identifying map an
+unknown legacy reader gets
+(`lib/encryptor/ecto/migrator.ex:532-540` and `:545-557`, ece eae0fd3). Read
+the clause as "where `from:` and `to:` are two declarations of the same column
+- or one declaration named twice, which ADR-0002's amendment leaves standing
+as the data-key rotation case". The plan fixture for such an edit declares no
+`source_authenticated:` and compiles
+(`test/support/test_engine_plans.ex:295-320`, ece eae0fd3), which is that
+silence being earned.
+
+Nothing in decision 3 or decision 3a changes, the compile-time check is
+unchanged, and no status word above flips.
+
+Provenance: campaign RF048.
