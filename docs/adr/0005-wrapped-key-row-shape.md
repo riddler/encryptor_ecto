@@ -854,7 +854,7 @@ shares across the family:
 | what | where, at ece `2413470` |
 |---|---|
 | the already-written refusal | `Encryptor.Ecto.Migrator.CLI.gen_unwritten/3`, `lib/encryptor/ecto/migrator/cli.ex:502` (`@spec` at `:501`) - **`defp`, private** |
-| the glob it runs | `cli.ex:504`, built from the calling task's own `:verb` and table rather than spelled into the task |
+| the glob it runs | `cli.ex:503`, built from the calling task's own `:verb` and table rather than spelled into the task |
 | the routing | `CLI.gen/2` (`cli.ex:166`, `@spec` at `:165`), whose `else` sends `{:error, message}` to `usage_error/1` (`:171`) |
 | where `2` is returned | `CLI.usage_error/1` (`cli.ex:118`, `@spec` at `:117`) - public, and the one half of this path a caller can reach by name |
 | the task's own half | `main/1` is `lib/mix/tasks/encryptor.ecto.gen.key_store_shape_migration.ex:89`, and its whole body is the `CLI.gen/2` call at `:90-97` |
