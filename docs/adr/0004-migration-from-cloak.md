@@ -958,12 +958,12 @@ form it still is. The `from:` module is a second declaration of the same
 column, written in this package's own vocabulary, and the migrator reads that
 declaration's own params off it rather than handing it the identifying map an
 unknown legacy reader gets
-(`lib/encryptor/ecto/migrator.ex:532-540` and `:545-557`, ece eae0fd3). Read
+(`lib/encryptor/ecto/migrator.ex:532-540` and `:545-557`, ece ec26828). Read
 the clause as "where `from:` and `to:` are two declarations of the same column
 - or one declaration named twice, which ADR-0002's amendment leaves standing
 as the data-key rotation case". The plan fixture for such an edit declares no
 `source_authenticated:` and compiles
-(`test/support/test_engine_plans.ex:295-320`, ece eae0fd3), which is that
+(`test/support/test_engine_plans.ex:295-320`, ece ec26828), which is that
 silence being earned.
 
 Nothing in decision 3 or decision 3a changes, the compile-time check is

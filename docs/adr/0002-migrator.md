@@ -1258,22 +1258,22 @@ bytes written before the pair was declared. The run suite carries both halves
 `Encryptor.Ecto.TestTypes.Pan` and whose `to:` is the same column declared
 again with one more context pair
 (`test/support/test_engine_plans.ex:295-320` and
-`test/support/test_types.ex:122-130`, ece eae0fd3), and the note above its
+`test/support/test_types.ex:122-130`, ece ec26828), and the note above its
 tests recording that pointing that plan's `from:` at the edited declaration
 leaves the test green (`test/encryptor/ecto/migrator_run_test.exs:846-853`,
-ece eae0fd3).
+ece ec26828).
 
 **The cloak analogy in "The rule" is a spelling analogy and not a code-path
 identity.** That paragraph says the two-declaration form "is the shape a
 cloak-to-encryptor plan's `from:` module already takes" (`:971-972`). The
 shape is the same; the path through the migrator is not. `source_params/3`
-(`lib/encryptor/ecto/migrator.ex:545-552`, ece eae0fd3) answers `nil` for a
+(`lib/encryptor/ecto/migrator.ex:546-553`, ece ec26828) answers `nil` for a
 `from:` this package cannot prove is one of its own - a cloak reader either
-exports no `init/1` or returns params `ours?/1` rejects (`:661-665`, ece
-eae0fd3) - and `source!/3` then leaves the migrator's own identifying
-resolution in place for the source side (`:532-540`, ece eae0fd3). A
+exports no `init/1` or returns params `ours?/1` rejects (`:662-666`, ece
+ec26828) - and `source!/3` then leaves the migrator's own identifying
+resolution in place for the source side (`:533-541`, ece ec26828). A
 two-declaration `from:` is one of ours, so it takes the `from.init/1` branch
-through `ours_or_nil/2` (`:554-557`, ece eae0fd3) and the old declaration's
+through `ours_or_nil/2` (`:555-558`, ece ec26828) and the old declaration's
 own params are merged over that resolution. The `from:` module is a host
 module in both cases; only in the second does the migrator read the
 declaration it carries.
@@ -1295,18 +1295,18 @@ here, by addition.
 probe paragraph says that when the header's names do not all match, the claim
 check answers `:no` "and the row is rewritten without a load being attempted"
 (`:1161-1165`). The load it skips is the *target* probe: `probe/3`'s header
-arm (`lib/encryptor/ecto/migrator/pass.ex:546-551`, ece eae0fd3) answers
+arm (`lib/encryptor/ecto/migrator/pass.ex:546-551`, ece ec26828) answers
 `:not_target` without calling `load_probe/2` (`pass.ex:670-678`, ece
-eae0fd3), which is exactly what the two sentences after it say, and they are
+ec26828), which is exactly what the two sentences after it say, and they are
 right. The rewrite that follows still reads the source side: `migrate/6`
-(`pass.ex:700-707`, ece eae0fd3) goes through `load_source/3` (`:712-718`) to
+(`pass.ex:700-707`, ece ec26828) goes through `load_source/3` (`:712-718`) to
 `read_source/3` (`:744-747`) and `Encryptor.Ecto.Migrator.Source.load/3`. A
 rotation spends one decrypt per rewritten row rather than none.
 
 That sentence's own cite has moved with the code half: the predicate it calls
 `claimed/2` (`pass.ex:552-560`, ece 6592581) is `claimed/3` today
-(`pass.ex:587-595`, ece eae0fd3), having taken the `writing_key` argument, and
-it hands the surviving claim to `claimed_by/3` (`:597-603`, ece eae0fd3).
+(`pass.ex:587-595`, ece ec26828), having taken the `writing_key` argument, and
+it hands the surviving claim to `claimed_by/3` (`:597-603`, ece ec26828).
 
 **2. The acceptance check beneath the R2 example belongs to the cloak plan.**
 The refining line the amendment added to the worked example (`:733-735`) is
@@ -1322,11 +1322,11 @@ by `verify/2`" (`:1182-1197`) says; `verify/2` does not take the option.
 validation.** "Anything else is refused at option validation" (`:1094`) holds
 for the half that is a fact about the option list - a tenant filter given
 beside `writing_key:` names exactly one tenant or it is wrong - and that is
-where `options!/1` raises (`lib/encryptor/ecto/migrator.ex:704-707`, ece
-eae0fd3). Which of "one" and "none" a given vault requires is not knowable
+where `options!/1` raises (`lib/encryptor/ecto/migrator.ex:705-708`, ece
+ec26828). Which of "one" and "none" a given vault requires is not knowable
 until the target's params are resolved, so that half is refused at plan
-resolution instead: `rotatable!/5` (`migrator.ex:494-511`, ece eae0fd3),
-called from `pass!/5` (`:396`, ece eae0fd3). Same voice, same pass, two
+resolution instead: `rotatable!/5` (`migrator.ex:495-512`, ece ec26828),
+called from `pass!/5` (`:397`, ece ec26828). Same voice, same pass, two
 moments.
 
 **4. The worked example's R2 invocation still does not carry the option.**
@@ -1356,8 +1356,8 @@ value" (`:1102-1104`). Read literally over an empty list that is vacuously
 true, which would make a header naming no keys the target. **The rule is the
 other reading: a header naming no keys at all is not in the target state.**
 `written_under?/2` says so - its matching clause requires at least one entry
-(`pass.ex:622-623`, ece eae0fd3) and its final clause answers `false`
-(`:625`, ece eae0fd3) - and the comment above it (`:613-618`, ece eae0fd3)
+(`pass.ex:622-623`, ece ec26828) and its final clause answers `false`
+(`:625`, ece ec26828) - and the comment above it (`:613-618`, ece ec26828)
 carries the reason together with the fact that a message of this format
 carries at least one entry, so the arm is unreachable rather than
 load-bearing. A rotation's whole job is that no row in scope still claims
