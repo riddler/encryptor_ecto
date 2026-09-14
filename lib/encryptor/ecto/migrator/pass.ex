@@ -115,7 +115,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
       wearing the acceptance test's name, and the cheap census already exists
       (`Encryptor.Ecto.Migrator.Census`).
 
-  Both ways are the one `probe/2` below, which is what
+  Both ways are the one `probe/3` below, which is what
   `Encryptor.Ecto.Migrator.verify/2` means by borrowing the pass's probe
   rather than reimplementing it.
 

@@ -104,7 +104,7 @@ defmodule Encryptor.Ecto.MigrationTest do
     # Sabotage: `validate_tenant!(:none, ...)` returning something other than
     # `:none` - a global field would be resolved as if it named a resolver.
     test "records tenant :none as declared" do
-      %Plan{rewrites: [rewrite]} = TestPlans.ContextChange.__plan__()
+      %Plan{rewrites: [rewrite]} = TestPlans.SameModuleBothSides.__plan__()
 
       assert rewrite.tenant == :none
     end
@@ -146,7 +146,7 @@ defmodule Encryptor.Ecto.MigrationTest do
     # suite ran, since the fixture plan stopped compiling: the data-key rotation
     # ADR-0002 decision 3 leaves expressible had become inexpressible.
     test "accepts the same module on both sides" do
-      %Plan{rewrites: [rewrite]} = TestPlans.ContextChange.__plan__()
+      %Plan{rewrites: [rewrite]} = TestPlans.SameModuleBothSides.__plan__()
       {:pan, spec} = List.keyfind(rewrite.fields, :pan, 0)
 
       assert spec[:from] == spec[:to]
@@ -526,11 +526,11 @@ defmodule Encryptor.Ecto.MigrationTest do
     end
 
     # Sabotage: made `vault_backed?/2` answer `false` for everything - the
-    # context-change plan of ADR-0002 decision 3 stopped compiling, and the
+    # same-module plan of ADR-0002 decision 3 stopped compiling, and the
     # amendment's one silent case was gone. (Red before the suite ran: the
-    # `ContextChange` fixture is compiled by the compiler.)
+    # `SameModuleBothSides` fixture is compiled by the compiler.)
     test "one of this package's own types needs no declaration" do
-      %Plan{rewrites: [rewrite]} = TestPlans.ContextChange.__plan__()
+      %Plan{rewrites: [rewrite]} = TestPlans.SameModuleBothSides.__plan__()
       {:pan, spec} = List.keyfind(rewrite.fields, :pan, 0)
 
       assert spec[:from] == Encryptor.Ecto.TestTypes.Pan

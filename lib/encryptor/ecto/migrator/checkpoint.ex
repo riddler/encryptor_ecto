@@ -12,13 +12,13 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
 
   ## The key carries the prefix
 
-  ADR-0002 proposed amendment 6 (accepted 2026-09-13, `ece-l6t`) adds the prefix
-  to the key, and this module is built to that text. Without it, a caller
-  looping `run/2` over prefixes - which is exactly what the record tells a
-  host with several to do - has every prefix sharing one checkpoint row, so
-  the second prefix resumes at the first's cursor and **silently skips every
-  row below it**. Probe-first idempotence does not cover that: it makes a
-  re-visited row safe, and this is a row never visited.
+  ADR-0002 proposed amendment 6 (accepted 2026-09-13) adds the prefix to the
+  key, and this module is built to that text. Without it, a caller looping
+  `run/2` over prefixes - which is exactly what the record tells a host with
+  several to do - has every prefix sharing one checkpoint row, so the second
+  prefix resumes at the first's cursor and **silently skips every row below
+  it**. Probe-first idempotence does not cover that: it makes a re-visited
+  row safe, and this is a row never visited.
 
   A prefix of `nil` - the repo's own default prefix - is stored as the empty
   string rather than as `NULL`, because a `NULL` component defeats the unique
@@ -29,7 +29,7 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
 
   ADR-0002 decision 9: no `CREATE TABLE`, at runtime or from a task. The table
   arrives as generated migration source the host reads, commits, and runs with
-  its own `mix ecto.migrate` (`mix encryptor.ecto.gen.migration`, `ece-5qb`).
+  its own `mix ecto.migrate` (`mix encryptor.ecto.gen.migration`).
   So `preflight/2` *checks* and refuses, naming the generator; it is the one
   place where creating the table would be convenient, which is exactly why the
   line is drawn here.

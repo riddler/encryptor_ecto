@@ -129,8 +129,7 @@ defmodule Encryptor.Ecto.Migration do
   the case above where `from:` names one of this package's declarations,
   whether it is the same module as `to:` or the earlier declaration a
   two-declaration edit keeps. Every other `from:` is the host's own legacy
-  reader:
-  a cloak cipher module, a legacy `load/1`, an unknown `Source`. This
+  reader: a cloak cipher module, a legacy `load/1`, an unknown `Source`. This
   package's correctness obligation on that format is nil (decision 1) and it
   cannot tell an AEAD cipher from a stream cipher by looking, so it asks - at
   `mix compile`, where the question is cheap - and such a field must declare

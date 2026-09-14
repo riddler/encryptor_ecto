@@ -6,7 +6,7 @@ defmodule Encryptor.Ecto.Migrator.Plan do
   how the tenant is resolved for its rows, and the fields to rewrite. The
   macros in `Encryptor.Ecto.Migration` build it at compile time and a plan
   module hands it over through `c:Encryptor.Ecto.Migration.__plan__/0`; the
-  migrator (`ece-b25`) reads it and nothing else.
+  migrator (`Encryptor.Ecto.Migrator`) reads it and nothing else.
 
   Keeping the compiled form a plain struct rather than generated behaviour
   callbacks is what makes a plan inspectable. `MyApp.CloakMigration.__plan__()`

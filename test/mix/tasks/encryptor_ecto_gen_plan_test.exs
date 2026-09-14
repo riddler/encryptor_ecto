@@ -187,9 +187,11 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.PlanTest do
   end
 
   # Sabotage: emitted `to:` with the `from:` module repeated, on the theory
-  # that a context change names the same module on both sides. Every generated
-  # field then read as a decided one, and a reviewer approving the diff was
-  # approving a target type nobody chose.
+  # that a context change names the same module on both sides. It can - the
+  # plan format accepts that spelling - but it is one case among several and
+  # never a default a generator may pick for a field nobody has decided yet.
+  # Every generated field then read as a decided one, and a reviewer approving
+  # the diff was approving a target type nobody chose.
   test "it emits `to:` as a comment and never as a value" do
     source = Plan.source(MyApp.Encryption.Migration, MyApp.Repo, Plan.candidates(@schemas))
 

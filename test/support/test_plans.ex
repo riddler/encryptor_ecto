@@ -48,7 +48,7 @@ defmodule Encryptor.Ecto.TestPlans do
     end
   end
 
-  defmodule ContextChange do
+  defmodule SameModuleBothSides do
     @moduledoc """
     The same module on both sides, which the plan format accepts (ADR-0002
     decision 3): a rewrite may name one of this package's own types on either
