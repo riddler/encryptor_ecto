@@ -832,3 +832,35 @@ moduledocs already name: its own encoding over `Encryptor.Ecto.String`.
 
 Nothing in decision 1, decision 2 or decision 6 changes, and neither Note
 above is touched.
+
+## Note (2026-09-14): the generated `type/1` in the Note above is rendered as a paraphrase, not as a source quote
+
+Item 2 of the 2026-09-13 Note above ("The six wrappers implement no `type/1`
+of their own", `:751`) renders the generated delegation as inline code -
+`def type(params), do: Encryptor.Ecto.Binary.type(params)` (`:753-754`) - set
+beside a file-and-line cite, which reads as a quotation of a line in this
+package. It is not one. This Note says so by addition; item 2's claim is
+correct and is untouched. Cites read at `encryptor_ecto` `2413470`.
+
+The line as it stands in the source is inside `Encryptor.Ecto.Scalar`'s
+`quote` block, and it names the delegate through an unquoted binding rather
+than by module:
+
+    def type(params), do: unquote(binary).type(params)
+
+(`lib/encryptor/ecto/scalar.ex:65`; the `@doc false` and
+`@impl Ecto.ParameterizedType` above it are `:63-64`, so item 2's `:63-65`
+span is the right span). `Encryptor.Ecto.Binary` is what `binary` is bound to
+when a wrapper is generated, so item 2's rendering is the **expanded** form:
+what the generated module contains after the macro has run, not what the file
+says. Read it as a paraphrase of the generated module, and read the cite
+beside it as pointing at the macro that produces it.
+
+Nothing item 2 concludes changes. The callback is defined rather than absent,
+it delegates, `Ecto.ParameterizedType` is satisfied by the wrapper itself, and
+`Encryptor.Ecto.Binary.type/1` returns `:binary` for every params map
+(`def type(_params), do: :binary`, `lib/encryptor/ecto/binary.ex:453`). What
+is narrowed is only the typographic claim the rendering implies. No decision,
+amendment or status word above changes.
+
+Provenance: campaign RF048, bead ece-42x (folding ece-2bc).

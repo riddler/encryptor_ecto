@@ -803,3 +803,74 @@ ece `6592581` both have moved. The cite is:
 
 Nothing item 8 claims about the option changes, and item 8's disclaimer stands:
 no decision in this record names `:prefix`, and nothing here decides it.
+
+## Note (2026-09-14): the `crypto_key_name` arity, what "23 of them" counts, and the shape generator's refusal after it moved into `Migrator.CLI`
+
+Three cites in the Note above are off by an arity, by a counting scope, or by
+a commit. Each is corrected here by addition; no sentence above is withdrawn,
+reworded or removed, and no status word flips. Upstream cites were read at
+`encryptor` `v0.4.1` = `4c8fbe9`, the version this package's `mix.lock`
+resolves (`mix.lock:14`, `"encryptor", "0.4.1"`); cites into this package were
+read at `encryptor_ecto` `2413470`.
+
+### 1. `crypto_key_name` takes two arguments
+
+Item 1 above lists `Encryptor.Provider.GcpKms`'s public surface and ends the
+list with `crypto_key_name/1` (`:664`). The function is arity 2. Its `@spec`
+is `crypto_key_name(state(), Provider.selector()) :: String.t()` and its head
+is `def crypto_key_name(state, selector) when is_binary(selector)`
+(`enc lib/encryptor/provider/gcp_kms.ex:375-376`, read at enc `4c8fbe9`).
+Read the list as naming `crypto_key_name/2`.
+
+Nothing else in item 1 changes. The surface it enumerates is the same surface,
+and the point it is drawn for - that no public unwrap sits among them, so a
+store holding a GCP-shaped row has no callable entry point - does not turn on
+the arity.
+
+### 2. "23 of them" counts the record above that Note, not the whole file
+
+Item 3 above closes "the file carries 23 of them" (`:735`). Read that figure
+as **scoped to the file above the 2026-09-13 Note it sits in**, where it is
+exact: lines 1 to 643 at `2413470` - everything above that Note's heading at
+`:644` - carry 23 mentions of `a0717e9`, which is the body the sentence was
+written of.
+
+A bare count over the whole file answers higher, and answers differently over
+time: the 2026-09-13 Note names the SHA six times itself, and every later
+Note that names it - this one included - moves the number again. So a reader
+wanting today's whole-file figure should count it at a named SHA and say
+which SHA. What the sentence is doing is unaffected: the list of unrefreshed
+cites beside it is illustrative rather than exhaustive, and that remains true
+under either scope.
+
+### 3. The shape generator's second exit-2 arm now lives in `Migrator.CLI`
+
+Item 6 above anchors that arm at `defp unwritten/2` (`:195-200`) and its
+routing at `main/1` (`:90-97`), both labelled ece `6592581`. Those cites
+still resolve at their own SHA and are left standing. At `2413470` the glob
+and the routing have moved into the generator grammar the migrator CLI now
+shares across the family:
+
+| what | where, at ece `2413470` |
+|---|---|
+| the already-written refusal | `Encryptor.Ecto.Migrator.CLI.gen_unwritten/3`, `lib/encryptor/ecto/migrator/cli.ex:502` (`@spec` at `:501`) - **`defp`, private** |
+| the glob it runs | `cli.ex:504`, built from the calling task's own `:verb` and table rather than spelled into the task |
+| the routing | `CLI.gen/2` (`cli.ex:166`, `@spec` at `:165`), whose `else` sends `{:error, message}` to `usage_error/1` (`:171`) |
+| where `2` is returned | `CLI.usage_error/1` (`cli.ex:118`, `@spec` at `:117`) - public, and the one half of this path a caller can reach by name |
+| the task's own half | `main/1` is `lib/mix/tasks/encryptor.ecto.gen.key_store_shape_migration.ex:89`, and its whole body is the `CLI.gen/2` call at `:90-97` |
+
+`gen_unwritten/3` being private is the part worth naming beside the move: the
+refusal is not callable surface, and a reader looking for it by name outside
+`Encryptor.Ecto.Migrator.CLI` will not find it.
+
+The behaviour item 6 records is unchanged - where an additive migration for
+this table already exists the generator writes nothing, overwrites nothing and
+returns `2` - and so is item 6's reading of the exit-codes row. What moved is
+where the code implementing it lives.
+
+This Note corrects three cites and asserts no rule of its own. It leaves the
+enumeration of the generators' exit behaviour to the generator tasks' own
+suite. No decision, assumption, open question or consequence changes, and no
+status word above flips.
+
+Provenance: campaign RF048, bead ece-42x (folding ece-2bc and ece-8pt).
