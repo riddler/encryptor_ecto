@@ -19,11 +19,11 @@ defmodule Encryptor.Ecto.Migrator do
       MyApp.Encryption.CloakMigration
       |> Encryptor.Ecto.Migrator.verify(sample: :all)
 
-  The library function is the interface and the `mix` tasks (`ece-5qb`) are
-  thin argument parsers over it, because a production host runs releases and a
-  release has no Mix: a rotation reachable only from a developer's laptop
-  against production credentials is the opposite of the control it is supposed
-  to be (decision 1).
+  The library function is the interface and the `mix encryptor.ecto.migrate`
+  and `mix encryptor.ecto.verify` tasks are thin argument parsers over it,
+  because a production host runs releases and a release has no Mix: a rotation
+  reachable only from a developer's laptop against production credentials is
+  the opposite of the control it is supposed to be (decision 1).
 
   ## What one pass does
 
@@ -155,7 +155,8 @@ defmodule Encryptor.Ecto.Migrator do
 
   `Encryptor.Ecto.Migrator.Census` renders the SQL half of decision 10 - the
   queries a DBA runs against the database with no application and no key.
-  The `mix` task family is `ece-5qb`. `source_authenticated:` and `validate:`
+  The `mix` task family is `mix encryptor.ecto.migrate` and
+  `mix encryptor.ecto.verify`. `source_authenticated:` and `validate:`
   are declared in `Encryptor.Ecto.Migration` and applied in
   `Encryptor.Ecto.Migrator.Pass`; this module carries only the half that has
   to be decided before any row is read, which is the `--mode write` refusal
