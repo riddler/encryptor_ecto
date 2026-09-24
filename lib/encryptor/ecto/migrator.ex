@@ -164,6 +164,7 @@ defmodule Encryptor.Ecto.Migrator do
   """
 
   alias Encryptor.Ecto.Binary
+  alias Encryptor.Ecto.BlindIndex.Declaration
   alias Encryptor.Ecto.Migrator.Checkpoint
   alias Encryptor.Ecto.Migrator.Keyset
   alias Encryptor.Ecto.Migrator.Pass
@@ -410,6 +411,7 @@ defmodule Encryptor.Ecto.Migrator do
       from_source: source!(spec, rewrite, field),
       source_authenticated: Keyword.fetch!(spec, :source_authenticated),
       validate: Keyword.fetch!(spec, :validate),
+      index: index(rewrite, target_column, Keyword.get(spec, :index)),
       to: to,
       to_arity: arity,
       to_params: params,
@@ -555,6 +557,35 @@ defmodule Encryptor.Ecto.Migrator do
   @spec ours_or_nil(term(), Plan.rewrite()) :: map() | nil
   defp ours_or_nil(params, rewrite) do
     if ours?(params), do: Map.put(params, :tenant, resolver(rewrite.tenant))
+  end
+
+  # -- a folded blind index -------------------------------------------------
+
+  # ADR-0004's Note of 2026-09-24 (Q1): the declaration a folded index is
+  # computed through, resolved once per pass. The plan compiled only because
+  # the declaration exists (`Encryptor.Ecto.Migration`'s `validate_index!/4`),
+  # so `fetch!/3` here raises only for a plan compiled against a schema that
+  # has since lost it - a run that cannot start.
+  #
+  # The params are the encrypted field's own, with the tenant replaced by the
+  # plan's strategy for the reason `target_params/3` replaces it: the field's
+  # declared strategy reads a process scope the migrator never sets
+  # (`Encryptor.Ecto.Migrator.RowTenant`), so an index computed through it
+  # would raise `Encryptor.Ecto.MissingTenantError` on every row. The value is
+  # then `Encryptor.Ecto.BlindIndex.put_index/3`'s, computed by the same
+  # function over the same declaration.
+  @spec index(Plan.rewrite(), atom(), atom() | nil) :: Pass.index() | nil
+  defp index(_rewrite, _target_column, nil), do: nil
+
+  defp index(rewrite, target_column, column) do
+    declaration = Declaration.fetch!(rewrite.schema, target_column, column)
+
+    params =
+      declaration
+      |> Declaration.field_params!()
+      |> Map.put(:tenant, resolver(rewrite.tenant))
+
+    %{column: column, declaration: declaration, params: params}
   end
 
   # -- the target type ------------------------------------------------------

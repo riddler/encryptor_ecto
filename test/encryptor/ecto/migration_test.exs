@@ -4,6 +4,7 @@ defmodule Encryptor.Ecto.MigrationTest do
   alias Encryptor.Ecto.Migrator.Plan
   alias Encryptor.Ecto.Migrator.Source
   alias Encryptor.Ecto.TestChecks
+  alias Encryptor.Ecto.TestEnginePlans
   alias Encryptor.Ecto.TestPlans
   alias Encryptor.Ecto.TestSchemas.Card
 
@@ -140,6 +141,16 @@ defmodule Encryptor.Ecto.MigrationTest do
 
       assert spec[:into] == :email_encrypted
       assert spec[:source] == {Encryptor.Ecto.Migrator.Source.Plaintext, %{}}
+    end
+
+    # Sabotage: the field spec's `index:` entry written as `nil` - the plan
+    # compiled and the pass fell back to the two-pass path the host opted out
+    # of.
+    test "carries index: as the blind index column the pass folds in" do
+      %Plan{rewrites: [rewrite]} = TestEnginePlans.FoldedIndex.__plan__()
+      {:email, spec} = List.keyfind(rewrite.fields, :email, 0)
+
+      assert spec[:index] == :email_index
     end
 
     # Sabotage: added a `from == to` refusal to `__field__` - red before the
@@ -403,7 +414,7 @@ defmodule Encryptor.Ecto.MigrationTest do
         end)
 
       assert message =~ "unknown option [:source_authenticated?]"
-      assert message =~ "[:from, :to, :into, :source_authenticated, :validate]"
+      assert message =~ "[:from, :to, :into, :source_authenticated, :validate, :index]"
     end
 
     # Sabotage: `validate_into!/3`'s membership check dropped - the backfill
@@ -421,6 +432,50 @@ defmodule Encryptor.Ecto.MigrationTest do
         end)
 
       assert message =~ "into: names :pan_encrypted"
+    end
+
+    # Sabotage: `validate_index!/4`'s declaration lookup replaced by `column` -
+    # a plan naming an index the schema never declared compiled, and the pass
+    # would have had no normalization or key derivation to compute it with.
+    test "refuses an index: the schema declares no blind index for" do
+      message =
+        refusal(fn ->
+          compile_rewrite(
+            """
+                tenant_from :merchant_id
+                field :email,
+                  from: Encryptor.Ecto.TestSources.LegacyType,
+                  to: Encryptor.Ecto.TestTypes.HolderName,
+                  source_authenticated: true,
+                  index: :nickname_index
+            """,
+            "Encryptor.Ecto.TestSchemas.Cardholder"
+          )
+        end)
+
+      assert message =~ "`index: :nickname_index` names no blind index"
+      assert message =~ "Declared over :email: :email_index"
+    end
+
+    # Sabotage: `validate_index!/4`'s non-atom arm returning the value - a
+    # string reached the declaration lookup's `is_atom/1` guard instead.
+    test "refuses an index: that is not a column name" do
+      message =
+        refusal(fn ->
+          compile_rewrite(
+            """
+                tenant_from :merchant_id
+                field :email,
+                  from: Encryptor.Ecto.TestSources.LegacyType,
+                  to: Encryptor.Ecto.TestTypes.HolderName,
+                  source_authenticated: true,
+                  index: "email_index"
+            """,
+            "Encryptor.Ecto.TestSchemas.Cardholder"
+          )
+        end)
+
+      assert message =~ "`index:` expects the name of a blind index column"
     end
 
     # Sabotage: `required_module!/5`'s non-atom arm returning the value - a

@@ -22,6 +22,30 @@ defmodule Encryptor.Ecto.TestSources do
     def load(_value), do: :error
   end
 
+  defmodule CountingLegacyType do
+    @moduledoc """
+    `LegacyType`, counting its loads in the calling process.
+
+    A load is the decrypt a legacy reader performs, so the count is what a
+    folded blind index is supposed to leave at one per row: the pass runs in
+    the test's own process, which is where the count is read back.
+    """
+
+    @key :encryptor_ecto_test_legacy_loads
+
+    @doc "How many loads this process has performed."
+    def loads, do: Process.get(@key, 0)
+
+    def type, do: :binary
+    def cast(value), do: {:ok, value}
+    def dump(value), do: {:ok, value}
+
+    def load(value) do
+      _previous = Process.put(@key, loads() + 1)
+      LegacyType.load(value)
+    end
+  end
+
   defmodule LegacyParameterizedType do
     @moduledoc "An `Ecto.ParameterizedType`, whose params the migrator builds."
 

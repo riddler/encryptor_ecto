@@ -49,7 +49,8 @@ defmodule Encryptor.Ecto.TestRepo do
     # reach, so `Encryptor.Ecto.KeyStore`'s `:prefix` has something to route
     # to. It is a migration rather than test setup because a sandboxed test's
     # `CREATE SCHEMA` would roll back with the test.
-    {9, Encryptor.Ecto.TestMigrationWrappedKeysPrefix}
+    {9, Encryptor.Ecto.TestMigrationWrappedKeysPrefix},
+    {10, Encryptor.Ecto.TestMigrationCardholders}
   ]
 
   @doc """

@@ -176,6 +176,26 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   raise from it is `{:raised, Module}` like any other, so neither arm can put
   a plaintext anywhere.
 
+  ## A folded blind index rides the same write
+
+  A field whose spec names `index:` (ADR-0004's Note of 2026-09-24, answering
+  its open question Q1) adds one step between 4 and 5: the index value is
+  computed from the value step 3 loaded - the plaintext already in hand, so no
+  second decrypt - through `Encryptor.Ecto.BlindIndex.Value.compute!/4`, the
+  function `Encryptor.Ecto.BlindIndex.put_index/3` computes through, asked
+  with `:dump` under the row's own tenant. Step 5's compare-and-swap then
+  sets the index column in the same `UPDATE` as the ciphertext, so the two
+  land together or, on a lost swap, not at all.
+
+  A dry run computes it and discards it, as it does the dump. A verification
+  does not compute it: it stops at step 3. A row the probe skips is not
+  loaded, so its index is left as the application wrote it.
+
+  A failure computing it is `{:blind_index, column, reason}`, with the reason
+  reduced to a module name exactly as a raising `to:` dump is, so the report
+  says which of the rewrite and the index failed and carries neither the
+  plaintext nor an index value.
+
   ## The batch is the transaction, and a halt discards it
 
   Each batch is one transaction and the checkpoint row is written inside it,
@@ -196,6 +216,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   """
 
   alias Encryptor.Context
+  alias Encryptor.Ecto.BlindIndex.Value
   alias Encryptor.Ecto.Migrator.Checkpoint
   alias Encryptor.Ecto.Migrator.Keyset
   alias Encryptor.Ecto.Migrator.Report
@@ -232,6 +253,18 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   @type identity :: %{suite: non_neg_integer(), keys: [map()]}
 
   @typedoc """
+  A blind index folded into this pass: the column the pass writes, the
+  declaration its value is computed through, and the encrypted field's params
+  with the plan's tenant strategy installed. Resolved once, before the pass
+  starts, by `Encryptor.Ecto.Migrator`.
+  """
+  @type index :: %{
+          column: atom(),
+          declaration: Encryptor.Ecto.BlindIndex.Declaration.t(),
+          params: map()
+        }
+
+  @typedoc """
   Everything one field's pass needs, resolved once before it starts.
 
   `:validate` is typed by what it may *return* rather than by what it is
@@ -255,6 +288,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
           from_source: Source.resolved(),
           source_authenticated: boolean(),
           validate: (term() -> term()) | nil,
+          index: index() | nil,
           to: module(),
           to_arity: 1 | 3,
           to_params: term(),
@@ -286,6 +320,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     :from_source,
     :source_authenticated,
     :validate,
+    :index,
     :to,
     :to_arity,
     :to_params,
@@ -699,11 +734,31 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   defp migrate(pass, report, id, source_value, target_value, tenant) do
     with {:ok, loaded} <- load_source(pass, source_value, tenant),
-         {:ok, bytes} <- write_target(pass, loaded) do
-      swap(pass, report, id, target_value, bytes)
+         {:ok, bytes} <- write_target(pass, loaded),
+         {:ok, set} <- index_set(pass, loaded) do
+      swap(pass, report, id, target_value, [{pass.target_column, bytes} | set])
     else
       {:error, reason} -> fail(pass, report, id, reason)
     end
+  end
+
+  # The folded index, as the extra column of the swap's `set`: nothing for a
+  # field that folds none, so the default path's `UPDATE` is unchanged. There
+  # is no `NULL` arm like `put_index/3`'s (ADR-0003 decision 8): a `NULL`
+  # source is step 1's and is never loaded, and a loaded `nil` has already met
+  # `write_target/2`, which refuses a dump that yields no bytes. A `nil` that
+  # a target did dump to bytes reaches the normalizer here and is refused as
+  # an index failure, not written. The reason is wrapped with the column so
+  # the report attributes the failure to the index rather than to the
+  # rewrite, and reduced to a module name so neither the plaintext nor an
+  # index value can reach it.
+  @spec index_set(t(), term()) :: {:ok, keyword()} | {:error, term()}
+  defp index_set(%__MODULE__{index: nil}, _loaded), do: {:ok, []}
+
+  defp index_set(%__MODULE__{index: index}, loaded) do
+    {:ok, [{index.column, Value.compute!(index.declaration, loaded, :dump, index.params)}]}
+  rescue
+    exception -> {:error, {:blind_index, index.column, {:raised, exception.__struct__}}}
   end
 
   # The read and the host's check are one step: nothing downstream should have
@@ -784,14 +839,14 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   # -- the write ------------------------------------------------------------
 
-  @spec swap(t(), Report.t(), term(), binary() | nil, binary()) :: {Report.t(), :ok | :halt}
-  defp swap(%__MODULE__{mode: :dry_run} = pass, report, _id, _previous, _bytes),
+  @spec swap(t(), Report.t(), term(), binary() | nil, keyword()) :: {Report.t(), :ok | :halt}
+  defp swap(%__MODULE__{mode: :dry_run} = pass, report, _id, _previous, _set),
     do: {Report.count(report, migratable(pass)), :ok}
 
-  defp swap(pass, report, id, previous, bytes) do
+  defp swap(pass, report, id, previous, set) do
     query = Keyset.swap_query(pass.source, pass.key, id, pass.target_column, previous)
 
-    case pass.repo.update_all(query, [set: [{pass.target_column, bytes}]], query_opts(pass)) do
+    case pass.repo.update_all(query, [set: set], query_opts(pass)) do
       {1, _returned} -> {Report.count(report, migratable(pass)), :ok}
       {0, _returned} -> concurrent(pass, report, id)
     end
