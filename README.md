@@ -395,6 +395,11 @@ path. The index is not an extra and links at its GitHub path:
   `"gcp_kms_ciphertext"` row, and the shred: destroying the key version,
   deleting the row, the restore window, and what the application sees in
   between.
+- [Two vaults: a customer scope and an agreement scope](docs/guides/two-vaults-customer-and-agreement.md) -
+  a customer vault for platform data and credentials beside an agreement
+  vault for data shared under a data agreement: the two key tables, the
+  process resolver and a resolver fed from the row, and the shred of one
+  agreement, with what each vault's shred reaches.
 
 Reference material is the module documentation: `Encryptor.Ecto.Binary`,
 `Encryptor.Ecto.BlindIndex`, `Encryptor.Ecto.Migration`,
