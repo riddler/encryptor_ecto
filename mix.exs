@@ -136,7 +136,7 @@ defmodule Encryptor.Ecto.MixProject do
       # package, and present so that the slow path is exercised end to end
       # rather than asserted about.
       {:argon2_elixir, "~> 4.0", only: [:dev, :test]},
-      {:ex_quality, "~> 0.14", only: :dev, runtime: false},
+      {:ex_quality, "~> 0.15", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:excoveralls, "~> 0.18", only: :test},

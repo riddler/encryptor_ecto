@@ -54,6 +54,21 @@
   credo: [
     strict: true
   ],
+  # The two documentation stages make this gate the pre-publish check for the
+  # package's docs. The Docs stage runs `mix docs` and fails on any ExDoc
+  # warning. The doc_links stage fails on the link rules ExDoc accepts
+  # silently: a README relative link to a file not in the package files, a
+  # published relative link to a file that is not an extra, two extras
+  # sharing a basename, and a silent rewrite of a link to a different extra.
+  # They are a deliberate enlargement of this gate: a broken link on HexDocs
+  # or hex.pm is a defect in what this package publishes, and nothing else
+  # here catches it before the publish does.
+  docs: [
+    enabled: :auto
+  ],
+  doc_links: [
+    enabled: :auto
+  ],
   profiles: [
     loop: [
       stages: [:format, :compile, :credo, :test],
