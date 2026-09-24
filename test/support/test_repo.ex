@@ -50,7 +50,10 @@ defmodule Encryptor.Ecto.TestRepo do
     # to. It is a migration rather than test setup because a sandboxed test's
     # `CREATE SCHEMA` would roll back with the test.
     {9, Encryptor.Ecto.TestMigrationWrappedKeysPrefix},
-    {10, Encryptor.Ecto.TestMigrationCardholders}
+    {10, Encryptor.Ecto.TestMigrationCardholders},
+    # The migrate-from-cloak runbook's own host: one secret column and two
+    # token columns under a single legacy key.
+    {11, Encryptor.Ecto.TestMigrationRunbook}
   ]
 
   @doc """
