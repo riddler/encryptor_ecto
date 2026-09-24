@@ -1,11 +1,11 @@
 defmodule Encryptor.Ecto.StringTest do
   use ExUnit.Case, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
 
   alias Encryptor.Ecto.DecryptError
-  alias Encryptor.Ecto.MissingTenantError
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestSchemas.Card
   alias Encryptor.Ecto.TestTypes
   alias Encryptor.Ecto.TestVaults
@@ -40,7 +40,7 @@ defmodule Encryptor.Ecto.StringTest do
     test "names the macro the host actually wrote when the vault is missing" do
       assert_raise ArgumentError, ~r/use Encryptor.Ecto.String requires a :vault/, fn ->
         defmodule NoVault do
-          use Encryptor.Ecto.String, tenant: :none
+          use Encryptor.Ecto.String, scope: :none
         end
       end
     end
@@ -86,7 +86,7 @@ defmodule Encryptor.Ecto.StringTest do
   end
 
   describe "everything below cast is Binary's" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: the generated type/1 delegating to something other than
     # Binary.type/1, red.
@@ -160,20 +160,20 @@ defmodule Encryptor.Ecto.StringTest do
     end
   end
 
-  describe "the tenant rules are Binary's too" do
-    # sabotage: the generated dump/3 delegating past Binary's tenant
+  describe "the scope rules are Binary's too" do
+    # sabotage: the generated dump/3 delegating past Binary's scope
     # resolution, red.
-    test "a dump with no tenant in scope raises" do
-      Tenant.clear()
+    test "a dump with no scope set raises" do
+      Scope.clear()
 
-      assert_raise MissingTenantError, ~r/cards/, fn ->
+      assert_raise MissingScopeError, ~r/cards/, fn ->
         TestTypes.HolderName.dump(@name, nil, params(TestTypes.HolderName))
       end
     end
 
-    # sabotage: the generated init/1 not carrying `tenant: :none` through, red.
+    # sabotage: the generated init/1 not carrying `scope: :none` through, red.
     test "a field declared global asks no resolver anything" do
-      Tenant.clear()
+      Scope.clear()
       params = TestTypes.GlobalName.init(schema: Card, field: :holder_name)
 
       assert {:ok, ciphertext} = TestTypes.GlobalName.dump(@name, nil, params)

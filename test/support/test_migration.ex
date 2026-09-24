@@ -9,7 +9,7 @@ defmodule Encryptor.Ecto.TestMigration do
   Both encrypted columns are `:binary` and nothing else, which is ADR-0001
   decision 2 in DDL form - `type/1` returns `:binary` whatever the plaintext
   was, so a migration has one column type to write and no length to guess.
-  `:merchant_id` is deliberately *not* encrypted: it is the tenant selector, it
+  `:merchant_id` is deliberately *not* encrypted: it is the scope selector, it
   has to be queryable, and decision 10 says an encrypted column never is.
   """
 

@@ -22,13 +22,13 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   ## The order of operations, and why it is this one
 
   Three things happen before any plaintext is touched, and the first of them
-  is the tenant. A `slow: true` declaration adds a fourth, and it happens
+  is the scope. A `slow: true` declaration adds a fourth, and it happens
   before the plaintext too.
 
-  1. **The selector is resolved**, which is where a missing tenant raises
+  1. **The selector is resolved**, which is where a missing scope raises
      (decision 3a, ADR-0001 decision 5c). It is first because it is the only
      step that does not depend on the value, and because a blind-index
-     computation outside tenant scope has to fail the same way whether the
+     computation with no scope set has to fail the same way whether the
      value is well-formed or not. Decision 5 calls a silently-matching-nothing
      query the single worst failure this feature can have; a scope check that
      could be reached only after a normalizer succeeded would be one that a
@@ -135,13 +135,13 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
 
   alias Encryptor.Ecto.BlindIndex.Declaration
   alias Encryptor.Ecto.BlindIndex.Derivation
-  alias Encryptor.Ecto.TenantContext
+  alias Encryptor.Ecto.ScopeContext
   alias Encryptor.Kdf
 
   @doc """
   The index value for one declaration and one plaintext.
 
-  `operation` is the `Encryptor.Ecto.TenantContext` operation the resolver is
+  `operation` is the `Encryptor.Ecto.ScopeContext` operation the resolver is
   asked with, and it is the caller's: a **write-side** computation asks with
   `:dump` and a **read-side** computation asks with `:load`, matching what the
   encrypted field itself would be doing at the same moment.
@@ -151,8 +151,8 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   The result is `byte_width/1` bytes wide - the declaration's `:bits`, applied
   to the HMAC output as the moduledoc's *Width* section describes.
 
-  Raises `Encryptor.Ecto.MissingTenantError` when a `scope: :tenant` index is
-  computed outside tenant scope, and
+  Raises `Encryptor.Ecto.MissingScopeError` when a `derive: :per_scope` index is
+  computed with no scope set, and
   `Encryptor.Ecto.BlindIndex.NormalizationError` when the declared normalizer
   cannot produce a binary. A value that is not a binary is the normalizer's
   refusal rather than a separate one, so a host indexing a field this package
@@ -161,21 +161,21 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   vault it names declares no `:slow_hash` parameters (amendment C decision
   C7).
   """
-  @spec compute!(Declaration.t(), term(), TenantContext.operation()) :: binary()
+  @spec compute!(Declaration.t(), term(), ScopeContext.operation()) :: binary()
   def compute!(%Declaration{} = declaration, value, operation),
     do: compute!(declaration, value, operation, Declaration.field_params!(declaration))
 
   # The same computation over field params the caller supplies, for the one
-  # caller that must replace the tenant strategy: the migrator's rewrite pass,
+  # caller that must replace the scope strategy: the migrator's rewrite pass,
   # folding an index in (ADR-0004's Note of 2026-09-24 on Q1). It installs its
   # per-row resolver in these params exactly as it does in the target type's
   # own (`Encryptor.Ecto.Migrator`'s `target_params/3`), because the field's
   # declared strategy reads a process scope the migrator never sets. Only
-  # `:tenant` differs from what `compute!/3` reads; the normalization, the
+  # `:scope` differs from what `compute!/3` reads; the normalization, the
   # derivation identity and the width are the declaration's either way, so
   # this is the same function rather than a second implementation of it.
   @doc false
-  @spec compute!(Declaration.t(), term(), TenantContext.operation(), Derivation.field_params()) ::
+  @spec compute!(Declaration.t(), term(), ScopeContext.operation(), Derivation.field_params()) ::
           binary()
   def compute!(%Declaration{} = declaration, value, operation, params) do
     derivation = Declaration.derivation!(declaration)

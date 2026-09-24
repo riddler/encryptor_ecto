@@ -38,8 +38,8 @@ end
 
 defmodule Encryptor.Ecto.TestSchemas.Identity do
   @moduledoc """
-  The cross-tenant login path of ADR-0003's worked example: a `tenant: :none`
-  field whose index writes `scope: :global` out loud, because decision 3c
+  The cross-scope login path of ADR-0003's worked example: a `scope: :none`
+  field whose index writes `derive: :global` out loud, because decision 3c
   makes silence there an error.
   """
 
@@ -54,7 +54,7 @@ defmodule Encryptor.Ecto.TestSchemas.Identity do
   schema "identities" do
     field(:email, TestTypes.GlobalName)
     field(:email_index, :binary)
-    blind_index(:email, :email_index, scope: :global, normalize: :email)
+    blind_index(:email, :email_index, derive: :global, normalize: :email)
   end
 end
 
@@ -108,7 +108,7 @@ defmodule Encryptor.Ecto.TestSchemas.SignupEmail do
     field(:email, TestTypes.UnsaltedName)
     field(:email_index, :binary)
 
-    blind_index(:email, :email_index, scope: :global, normalize: :email)
+    blind_index(:email, :email_index, derive: :global, normalize: :email)
   end
 end
 
@@ -136,7 +136,7 @@ defmodule Encryptor.Ecto.TestSchemas.Enrollment do
     field(:email, TestTypes.GlobalName)
     field(:email_index, :binary)
 
-    blind_index(:email, :email_index, scope: :global, normalize: :email, slow: true)
+    blind_index(:email, :email_index, derive: :global, normalize: :email, slow: true)
   end
 end
 
@@ -204,8 +204,8 @@ end
 
 defmodule Encryptor.Ecto.TestSchemas.Capture do
   @moduledoc """
-  A field whose tenant resolver answers differently for a write than for a
-  read, so that which `Encryptor.Ecto.TenantContext` operation an index
+  A field whose scope resolver answers differently for a write than for a
+  read, so that which `Encryptor.Ecto.ScopeContext` operation an index
   computation asks with is observable in the bytes.
   """
 
@@ -254,7 +254,7 @@ defmodule Encryptor.Ecto.TestSchemas.Cardholder do
   A table-backed schema with blind indexes, for the migrator's folded-index
   tests (ADR-0004's Note of 2026-09-24 on Q1).
 
-  `email` is the ordinary per-tenant index; `nickname` is a global one over
+  `email` is the ordinary per-scope index; `nickname` is a global one over
   the vault that refuses to derive, so folding it into a rewrite fails at the
   index and nowhere else.
   """
@@ -276,6 +276,6 @@ defmodule Encryptor.Ecto.TestSchemas.Cardholder do
 
     field(:nickname, TestTypes.UnsaltedName)
     field(:nickname_index, :binary)
-    blind_index(:nickname, :nickname_index, scope: :global)
+    blind_index(:nickname, :nickname_index, derive: :global)
   end
 end

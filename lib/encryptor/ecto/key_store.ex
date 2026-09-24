@@ -8,12 +8,12 @@ defmodule Encryptor.Ecto.KeyStore do
   the six fields of `Encryptor.Envelope.WrappedKey` and nothing about where
   they live. This module is the other half - the table, the query, and the
   `Encryptor.Provider` implementation that turns rows into the descriptors a
-  tenant vault builds keyrings from.
+  scoped vault builds keyrings from.
 
   ## Configuring it
 
-      defmodule MyApp.TenantVault do
-        use Encryptor.Vault, otp_app: :my_app, context_profile: :tenant
+      defmodule MyApp.ScopedVault do
+        use Encryptor.Vault, otp_app: :my_app, context_profile: :scoped
 
         def init(config) do
           # `root_subkey/2` takes the 32 root-key *bytes*, not a vault module.
@@ -69,8 +69,8 @@ defmodule Encryptor.Ecto.KeyStore do
   ### `:reference_subkey` is required, and it is not an extra
 
   A row is found by `tenant_ref`, never by the selector: the selector is the
-  host's tenant identifier and putting it in a column would publish it beside
-  every ciphertext, which is the whole reason `Encryptor.Envelope.tenant_ref/2`
+  host's scope identifier and putting it in a column would publish it beside
+  every ciphertext, which is the whole reason `Encryptor.Envelope.scope_ref/2`
   is a keyed derivation rather than a hash. So resolving a selector to a row
   *is* that derivation, and the subkey it derives under has to be in provider
   state. It must be the same value the vault itself is configured with, or the
@@ -93,7 +93,7 @@ defmodule Encryptor.Ecto.KeyStore do
          gcp_kms: [
            project: "myapp-prod",
            location: "us-east1",
-           key_ring: "encryptor-tenant-keys",
+           key_ring: "encryptor-scope-keys",
            http_client: MyApp.KmsHttp,
            goth: MyApp.Goth
          ]}
@@ -125,8 +125,8 @@ defmodule Encryptor.Ecto.KeyStore do
   `c:Encryptor.Provider.encryption_key/2` unwraps the newest row and no
   other. A wrapping four rotations old that no longer opens - a root rotation
   the rewrap pass has not finished, a row somebody edited, a shape this build
-  cannot serve - says nothing about whether this tenant can be written to,
-  and blocking every write for the tenant on it would turn one stale row into
+  cannot serve - says nothing about whether this scope can be written to,
+  and blocking every write for the scope on it would turn one stale row into
   an outage. The newest row is the one a write is going to be encrypted
   under, so it is the only one a write's answer may depend on.
 
@@ -134,14 +134,14 @@ defmodule Encryptor.Ecto.KeyStore do
   and answers with the ones that do, newest first. The list is a candidate
   list: a version missing from it is a version the vault cannot decrypt
   under, and that is already true of a row that will not unwrap. Halting on
-  the first failure instead would make *every* stored value for the tenant
+  the first failure instead would make *every* stored value for the scope
   unreadable to protect the subset written under the one bad version, which
   is the outage again, in the other direction.
 
   When no row unwraps there is nothing to answer with, and the failure of the
   newest row is returned - the same term, for the same row, that a store
   holding only that row has always returned. So the arms below are unchanged
-  for a tenant whose rows are all bad, and a partially-broken tenant now
+  for a scope whose rows are all bad, and a partially-broken scope now
   keeps the half that works.
 
   A consequence worth naming: during a partial root rotation
@@ -166,7 +166,7 @@ defmodule Encryptor.Ecto.KeyStore do
   the same arrangement ADR-0002 decision 9 already makes for the migrator's
   checkpoint table.
 
-  It **adds no cache**. The tenant vault's materials cache already collapses
+  It **adds no cache**. The scoped vault's materials cache already collapses
   provider round trips to one per partition per `max_age`, and the provider
   contract names a second unbounded cache as the thing not to add.
 
@@ -175,7 +175,7 @@ defmodule Encryptor.Ecto.KeyStore do
   | Column | |
   |---|---|
   | `id` | the surrogate primary key `Ecto.Migration.create/2` adds by default. This module never selects it |
-  | `tenant_ref` | `Encryptor.Envelope.tenant_ref/2` of the host's selector. The lookup key |
+  | `tenant_ref` | `Encryptor.Envelope.scope_ref/2` of the host's selector. The lookup key. The column keeps the name it had before the scope rename, because it exists in every adopter's database; `rows/3` selects it as `:scope_ref` (ADR-0006 decision 3) |
   | `version` | the key version. Ordering is the store's job, per ADR-0002 decision 4 |
   | `namespace`, `name` | what the encrypted data key matches on, byte for byte |
   | `bits` | `256` on this path |
@@ -202,7 +202,7 @@ defmodule Encryptor.Ecto.KeyStore do
   Two unique indexes carry properties nothing at runtime can:
 
     * `{tenant_ref, version}` closes the race ADR-0003 leaves to this package -
-      "calling `provision/3` twice concurrently for one tenant can produce two
+      "calling `provision/3` twice concurrently for one scope can produce two
       rows claiming the same version; the transaction that closes that race is
       `encryptor_ecto`'s". A second row claiming a live version is a candidate
       list with two entries for one version, and the loser of the race is the
@@ -224,7 +224,7 @@ defmodule Encryptor.Ecto.KeyStore do
   that is not in the vocabulary" below is that case.
 
     * `{:unknown_key, selector}` - no row for this selector's `tenant_ref`. A
-      settled negative answer, and the same answer for a selector a tenant
+      settled negative answer, and the same answer for a selector a scoped
       store cannot have a reference for at all (`:default`, `""`).
     * `{:key_unavailable, selector}` - the store could not be asked, *and
       asking again later could work*. The repo is not started, the connection
@@ -282,7 +282,7 @@ defmodule Encryptor.Ecto.KeyStore do
   version reads". Reporting those as `{:key_unavailable, selector}` - which is
   what a bare `rescue` did - is worse than having no term: it tells an
   operator to wait for a transient condition to clear, and it never clears. A
-  host that forgot the migration would get `key_unavailable` for that tenant
+  host that forgot the migration would get `key_unavailable` for that scope
   forever, and the `Postgrex.Error` naming the missing table would be dropped
   on the floor.
 
@@ -329,7 +329,7 @@ defmodule Encryptor.Ecto.KeyStore do
 
   @typedoc "One row of the wrapped-key table, as selected by `rows/3`."
   @type row :: %{
-          tenant_ref: String.t(),
+          scope_ref: String.t(),
           version: pos_integer(),
           namespace: String.t(),
           name: String.t(),
@@ -391,14 +391,14 @@ defmodule Encryptor.Ecto.KeyStore do
   The same single query `c:Encryptor.Provider.decryption_keys/2` runs, so the
   two cannot disagree about which version is current - but only the newest
   row is unwrapped. An older wrapping that no longer opens is not a reason a
-  tenant cannot be written to, and the moduledoc's "one bad row is not the
+  scope cannot be written to, and the moduledoc's "one bad row is not the
   whole store" says why at length.
   """
   @impl Provider
   @spec encryption_key(state(), Provider.selector()) ::
           {:ok, Aes.t()} | {:error, Provider.reason()}
   def encryption_key(state, selector) do
-    with {:ok, ref} <- tenant_ref(state, selector),
+    with {:ok, ref} <- scope_ref(state, selector),
          {:ok, [newest | _older]} <- rows(state, ref, selector) do
       descriptor(state, newest, selector)
     else
@@ -420,21 +420,21 @@ defmodule Encryptor.Ecto.KeyStore do
   @spec decryption_keys(state(), Provider.selector()) ::
           {:ok, [Aes.t(), ...]} | {:error, Provider.reason()}
   def decryption_keys(state, selector) do
-    with {:ok, ref} <- tenant_ref(state, selector),
+    with {:ok, ref} <- scope_ref(state, selector),
          {:ok, rows} <- rows(state, ref, selector) do
       unwrap_all(state, rows, selector)
     end
   end
 
-  # A selector a tenant reference cannot be derived from - `:default`, an empty
+  # A selector a scope reference cannot be derived from - `:default`, an empty
   # string - is not a store failure and not a caller retrying into success. It
   # is a selector this provider does not serve, which is what `:unknown_key`
   # means, and it is the arm `Encryptor.Provider.Conformance` holds every
   # adapter to.
-  @spec tenant_ref(state(), Provider.selector()) ::
+  @spec scope_ref(state(), Provider.selector()) ::
           {:ok, String.t()} | {:error, Provider.reason()}
-  defp tenant_ref(state, selector) do
-    case Envelope.tenant_ref(state.reference_subkey, selector) do
+  defp scope_ref(state, selector) do
+    case Envelope.scope_ref(state.reference_subkey, selector) do
       {:ok, ref} -> {:ok, ref}
       {:error, _error} -> {:error, {:unknown_key, selector}}
     end
@@ -463,7 +463,7 @@ defmodule Encryptor.Ecto.KeyStore do
         where: k.tenant_ref == ^ref,
         order_by: [desc: k.version],
         select: %{
-          tenant_ref: k.tenant_ref,
+          scope_ref: k.tenant_ref,
           version: k.version,
           namespace: k.namespace,
           name: k.name,
@@ -563,7 +563,7 @@ defmodule Encryptor.Ecto.KeyStore do
   end
 
   # ADR-0005 decision 5: the dispatch is per row and at read time, never per
-  # store. A host moving one tenant's wrapping from a root vault to GCP KMS has
+  # store. A host moving one scope's wrapping from a root vault to GCP KMS has
   # a table holding both shapes at once for the length of that migration, and a
   # per-store setting would make the mixed window unrepresentable.
   @spec descriptor(state(), row(), Provider.selector()) ::
@@ -614,7 +614,7 @@ defmodule Encryptor.Ecto.KeyStore do
   # already `t:Encryptor.Provider.reason/0`.
   defp unwrap_row(state, :gcp_kms_ciphertext, row, selector) do
     provisioned = Map.delete(row, :wrapping_shape)
-    opts = Keyword.put(state.gcp_kms, :store, fn _tenant_ref -> {:ok, [provisioned]} end)
+    opts = Keyword.put(state.gcp_kms, :store, fn _scope_ref -> {:ok, [provisioned]} end)
 
     with {:ok, gcp_state} <- GcpKms.init(opts),
          {:ok, [descriptor]} <- GcpKms.decryption_keys(gcp_state, selector) do
@@ -625,7 +625,7 @@ defmodule Encryptor.Ecto.KeyStore do
   @spec wrapped_key(row()) :: WrappedKey.t()
   defp wrapped_key(row) do
     %WrappedKey{
-      tenant_ref: row.tenant_ref,
+      scope_ref: row.scope_ref,
       version: row.version,
       namespace: row.namespace,
       name: row.name,
@@ -712,7 +712,7 @@ defmodule Encryptor.Ecto.KeyStore do
   end
 
   @spec no_rows(String.t()) :: {:ok, []}
-  defp no_rows(_tenant_ref), do: {:ok, []}
+  defp no_rows(_scope_ref), do: {:ok, []}
 
   # A prefix goes to the adapter as a query option, which quotes it, so it
   # needs no identifier grammar the way the interpolated table name does -

@@ -1,6 +1,6 @@
-defmodule Encryptor.Ecto.Tenant do
+defmodule Encryptor.Ecto.Scope do
   @moduledoc """
-  The current tenant, scoped to the calling process.
+  The current scope, held by the calling process.
 
   This is a thin, documented wrapper over the process dictionary - the same
   mechanism `Logger.metadata/1` and `Ecto.Repo`'s dynamic repo use, chosen for
@@ -11,7 +11,7 @@ defmodule Encryptor.Ecto.Tenant do
 
   The host sets the scope explicitly at the edge of a unit of work:
 
-      Encryptor.Ecto.Tenant.put("merchant_7f3")
+      Encryptor.Ecto.Scope.put("merchant_7f3")
 
   ## Scope does not propagate
 
@@ -20,8 +20,8 @@ defmodule Encryptor.Ecto.Tenant do
   someone else's behalf - each starts with an empty scope. The host propagates
   explicitly (ADR-0001 decision 5b):
 
-      tenant = Encryptor.Ecto.Tenant.fetch!()
-      Task.async(fn -> Encryptor.Ecto.Tenant.wrap(tenant, &settle_batch/0) end)
+      scope = Encryptor.Ecto.Scope.fetch!()
+      Task.async(fn -> Encryptor.Ecto.Scope.wrap(scope, &settle_batch/0) end)
 
   Making this visible is the point: an invisible propagation mechanism is one
   whose gaps are also invisible.
@@ -32,16 +32,16 @@ defmodule Encryptor.Ecto.Tenant do
   that did not inherit the scope. ADR-0001 decision 5b names the first four;
   the rest are the same rule applied to the places a host meets it:
 
-    * a `Plug` pipeline, once the request's tenant is known
+    * a `Plug` pipeline, once the request's scope is known
     * an Oban worker's `perform/1`
     * a `Task` or a `Task.Supervisor` child that a request spawns
     * a `GenServer` callback doing a write on someone else's behalf
     * a `Phoenix.Channel` `join/3`, and anything the channel process runs after
-    * a test case's setup - `Encryptor.Ecto.TenantScope` ships for exactly this
+    * a test case's setup - `Encryptor.Ecto.ScopeSetup` ships for exactly this
     * a seed or a data-migration script that writes encrypted rows
 
   The list is finite because the rule is: a process that did not run the
-  `put/1` or `wrap/2` has no tenant, and a write from it raises rather than
+  `put/1` or `wrap/2` has no scope, and a write from it raises rather than
   guessing (decision 5c).
 
   ## Prefer `wrap/2` in a pooled process
@@ -49,10 +49,10 @@ defmodule Encryptor.Ecto.Tenant do
   A process that is checked out, used, and returned - a `Phoenix.Channel`
   process, a pooled worker, an `ExUnit` test process running several cases -
   must not leak its scope to the next unit of work. `wrap/2` restores whatever
-  was in scope before it rather than clearing, so nesting one unit of work
+  was set before it rather than clearing, so nesting one unit of work
   inside another is safe:
 
-      Encryptor.Ecto.Tenant.wrap("merchant_7f3", fn ->
+      Encryptor.Ecto.Scope.wrap("merchant_7f3", fn ->
         # ... one signup wizard variant's writes, scoped to this merchant
       end)
 
@@ -62,53 +62,53 @@ defmodule Encryptor.Ecto.Tenant do
 
   ## What this module does not do
 
-  It does not decide whether a field is tenant-scoped, and it does not raise
-  `Encryptor.Ecto.MissingTenantError`. A field declares its strategy at its
-  type module, and the raise for a dump or load with no tenant in scope belongs
+  It does not decide whether a field is scoped, and it does not raise
+  `Encryptor.Ecto.MissingScopeError`. A field declares its strategy at its
+  type module, and the raise for a dump or load with no scope set belongs
   to the type's `dump/3` and `load/3`, which know the table and column to name.
   This module only holds and hands back a string.
   """
 
-  @dict_key :"$encryptor_ecto_tenant"
+  @dict_key :"$encryptor_ecto_scope"
 
   @doc """
-  Puts `tenant` in scope for the calling process.
+  Sets `scope` for the calling process.
 
-  Returns `:ok`. Any tenant already in scope is replaced; the previous value is
+  Returns `:ok`. Any scope already set is replaced; the previous value is
   not returned, because a caller that needs it should be using `wrap/2`.
 
-      iex> Encryptor.Ecto.Tenant.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
       :ok
-      iex> Encryptor.Ecto.Tenant.get()
+      iex> Encryptor.Ecto.Scope.get()
       {:ok, "merchant_7f3"}
   """
   @spec put(String.t()) :: :ok
-  def put(tenant) when is_binary(tenant) do
-    _previous = Process.put(@dict_key, tenant)
+  def put(scope) when is_binary(scope) do
+    _previous = Process.put(@dict_key, scope)
     :ok
   end
 
   @doc """
-  Returns the tenant in scope for the calling process.
+  Returns the scope set for the calling process.
 
-  `{:ok, tenant}` when one is in scope, `:error` when none is - the shape of
-  `Map.fetch/2`, and never a `nil` tenant, which would be indistinguishable
-  from a tenant whose identifier is genuinely absent.
+  `{:ok, scope}` when one is set, `:error` when none is - the shape of
+  `Map.fetch/2`, and never a `nil` scope, which would be indistinguishable
+  from a scope whose identifier is genuinely absent.
 
-      iex> Encryptor.Ecto.Tenant.clear()
-      iex> Encryptor.Ecto.Tenant.get()
+      iex> Encryptor.Ecto.Scope.clear()
+      iex> Encryptor.Ecto.Scope.get()
       :error
   """
   @spec get() :: {:ok, String.t()} | :error
   def get do
     case Process.get(@dict_key) do
       nil -> :error
-      tenant when is_binary(tenant) -> {:ok, tenant}
+      scope when is_binary(scope) -> {:ok, scope}
     end
   end
 
   @doc """
-  Returns the tenant in scope, or raises when none is.
+  Returns the scope set, or raises when none is.
 
   This is the call a host makes when it is about to cross a process boundary
   and needs the value to carry across (ADR-0001 decision 5b).
@@ -117,33 +117,33 @@ defmodule Encryptor.Ecto.Tenant do
   host bug at the boundary, rather than the per-field failure the type modules
   raise, and it names no table or column because it knows none.
 
-      iex> Encryptor.Ecto.Tenant.put("merchant_7f3")
-      iex> Encryptor.Ecto.Tenant.fetch!()
+      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.fetch!()
       "merchant_7f3"
   """
   @spec fetch!() :: String.t()
   def fetch! do
     case get() do
-      {:ok, tenant} ->
-        tenant
+      {:ok, scope} ->
+        scope
 
       :error ->
-        raise "no tenant in scope; call Encryptor.Ecto.Tenant.put/1 or " <>
-                "Encryptor.Ecto.Tenant.wrap/2 at the boundary of this unit of work"
+        raise "no scope set; call Encryptor.Ecto.Scope.put/1 or " <>
+                "Encryptor.Ecto.Scope.wrap/2 at the boundary of this unit of work"
     end
   end
 
   @doc """
-  Removes the tenant from the calling process's scope.
+  Removes the scope from the calling process.
 
-  Returns `:ok`, whether or not one was in scope. Clearing is for a process
+  Returns `:ok`, whether or not one was set. Clearing is for a process
   that owns its whole unit of work; a process that runs several should use
   `wrap/2`, which restores rather than clears.
 
-      iex> Encryptor.Ecto.Tenant.put("merchant_7f3")
-      iex> Encryptor.Ecto.Tenant.clear()
+      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.clear()
       :ok
-      iex> Encryptor.Ecto.Tenant.get()
+      iex> Encryptor.Ecto.Scope.get()
       :error
   """
   @spec clear() :: :ok
@@ -153,27 +153,27 @@ defmodule Encryptor.Ecto.Tenant do
   end
 
   @doc """
-  Runs `fun` with `tenant` in scope, then restores the previous scope.
+  Runs `fun` with `scope` set, then restores the previous scope.
 
   Returns whatever `fun` returns. The previous scope is restored on the way
   out whether `fun` returns or raises, and "the previous scope" includes
-  *no scope at all* - a `wrap/2` in a process that had no tenant leaves it with
-  no tenant, not with a stale one.
+  *no scope at all* - a `wrap/2` in a process that had no scope leaves it with
+  no scope, not with a stale one.
 
   This is what makes the call safe in a pooled process and safe to nest:
 
-      iex> Encryptor.Ecto.Tenant.put("merchant_7f3")
-      iex> Encryptor.Ecto.Tenant.wrap("merchant_a19", fn ->
-      ...>   Encryptor.Ecto.Tenant.fetch!()
+      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.wrap("merchant_a19", fn ->
+      ...>   Encryptor.Ecto.Scope.fetch!()
       ...> end)
       "merchant_a19"
-      iex> Encryptor.Ecto.Tenant.fetch!()
+      iex> Encryptor.Ecto.Scope.fetch!()
       "merchant_7f3"
   """
   @spec wrap(String.t(), (-> result)) :: result when result: var
-  def wrap(tenant, fun) when is_binary(tenant) and is_function(fun, 0) do
+  def wrap(scope, fun) when is_binary(scope) and is_function(fun, 0) do
     previous = Process.get(@dict_key)
-    _replaced = Process.put(@dict_key, tenant)
+    _replaced = Process.put(@dict_key, scope)
 
     try do
       fun.()
@@ -188,8 +188,8 @@ defmodule Encryptor.Ecto.Tenant do
     :ok
   end
 
-  defp restore(tenant) do
-    _previous = Process.put(@dict_key, tenant)
+  defp restore(scope) do
+    _previous = Process.put(@dict_key, scope)
     :ok
   end
 end

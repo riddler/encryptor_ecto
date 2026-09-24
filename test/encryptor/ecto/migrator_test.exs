@@ -4,7 +4,7 @@ defmodule Encryptor.Ecto.MigratorTest do
 
   Every refusal here happens with no database in reach, which is the point:
   ADR-0002 decision 7's required mode, proposed amendment 4's primary-key
-  restriction and decision 11's tenant filter are all decided from the plan
+  restriction and decision 11's scope filter are all decided from the plan
   and the options, and discovering any of them on row one of a live pass is
   the failure the checks exist to remove.
   """
@@ -110,18 +110,18 @@ defmodule Encryptor.Ecto.MigratorTest do
       assert message =~ "the founding implementation does not support"
     end
 
-    # Sabotage: dropped `tenant_column!/2`'s raise - a tenant filter against a
-    # `tenant :none` rewrite visited every row while the operator believed the
-    # run was scoped to one tenant.
-    test "a tenant filter against a rewrite with no tenant column is refused" do
+    # Sabotage: dropped `scope_column!/2`'s raise - a scope filter against a
+    # `scope :none` rewrite visited every row while the operator believed the
+    # run was narrowed to one scope.
+    test "a scope filter against a rewrite with no scope column is refused" do
       error =
         assert_raise ArgumentError, fn ->
-          Migrator.run(TestEnginePlans.Global, mode: :dry_run, only_tenants: ["merchant_7f3"])
+          Migrator.run(TestEnginePlans.Global, mode: :dry_run, only_scopes: ["merchant_7f3"])
         end
 
       message = error.message
       assert message =~ "Signup"
-      assert message =~ "only_tenants:"
+      assert message =~ "only_scopes:"
     end
   end
 end

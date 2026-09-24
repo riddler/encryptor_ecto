@@ -135,7 +135,7 @@ defmodule Encryptor.Ecto.TestRunbook do
 
     use Encryptor.Vault,
       otp_app: :encryptor_ecto,
-      context_profile: :tenant,
+      context_profile: :scoped,
       algorithm_suite_id: 0x0478,
       required_context: ["table", "column"],
       cache: false
@@ -305,7 +305,7 @@ defmodule Encryptor.Ecto.TestRunbook do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestRunbook.Integration do
-      tenant_from :workspace_id
+      scope_from :workspace_id
 
       field :client_secret,
         from: Encryptor.Ecto.TestRunbook.Legacy.Binary,
@@ -335,7 +335,7 @@ defmodule Encryptor.Ecto.TestRunbook do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestRunbook.Integration do
-      tenant_from :workspace_id
+      scope_from :workspace_id
 
       field :client_secret,
         from: Encryptor.Ecto.TestRunbook.Encrypted.Binary,

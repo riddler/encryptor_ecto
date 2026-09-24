@@ -3,8 +3,8 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
   The Google Cloud KMS guide's lifecycle, end to end, through the key store.
 
   `docs/guides/gcp-kms-key-store.md` walks a host through provisioning a
-  tenant's key into the wrapped-key table as a `"gcp_kms_ciphertext"` row,
-  reading and writing through a tenant vault, and shredding it: destroying
+  scope's key into the wrapped-key table as a `"gcp_kms_ciphertext"` row,
+  reading and writing through a scoped vault, and shredding it: destroying
   the `CryptoKey`'s version, then deleting the row. This is that walk as one
   test, against the fake of the provider's HTTP seam, so each answer the
   guide tells a host to expect is one this package actually gives.
@@ -37,10 +37,10 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
     assert provisioned.key_id =~ ~r/^t-[a-z2-7]+$/
 
     assert {:ok, ciphertext} =
-             TestGcpKms.Tenant.encrypt("a value", key: @selector, encryption_context: @context)
+             TestGcpKms.Scope.encrypt("a value", key: @selector, encryption_context: @context)
 
     assert {:ok, "a value"} =
-             TestGcpKms.Tenant.decrypt(ciphertext, key: @selector, encryption_context: @context)
+             TestGcpKms.Scope.decrypt(ciphertext, key: @selector, encryption_context: @context)
 
     TestGcpKms.destroyed(provisioned.key_id, true)
 
@@ -48,27 +48,27 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
     assert {:error, {:key_unavailable, @selector}} = KeyStore.encryption_key(state, @selector)
 
     assert {:error, %Error{reason: {:key_unavailable, @selector}}} =
-             TestGcpKms.Tenant.decrypt(ciphertext, key: @selector, encryption_context: @context)
+             TestGcpKms.Scope.decrypt(ciphertext, key: @selector, encryption_context: @context)
 
     # Inside the scheduled-destruction window a restore, while the row still
     # holds its wrapping, makes the value readable again.
     TestGcpKms.destroyed(provisioned.key_id, false)
 
     assert {:ok, "a value"} =
-             TestGcpKms.Tenant.decrypt(ciphertext, key: @selector, encryption_context: @context)
+             TestGcpKms.Scope.decrypt(ciphertext, key: @selector, encryption_context: @context)
 
     TestGcpKms.destroyed(provisioned.key_id, true)
 
     {1, _rows} =
       TestRepo.delete_all(
-        from(k in TestGcpKms.table(), where: k.tenant_ref == ^provisioned.tenant_ref)
+        from(k in TestGcpKms.table(), where: k.tenant_ref == ^provisioned.scope_ref)
       )
 
     assert {:error, {:unknown_key, @selector}} = KeyStore.decryption_keys(state, @selector)
     assert {:error, {:unknown_key, @selector}} = KeyStore.encryption_key(state, @selector)
 
     assert {:error, %Error{reason: {:unknown_key, @selector}}} =
-             TestGcpKms.Tenant.decrypt(ciphertext, key: @selector, encryption_context: @context)
+             TestGcpKms.Scope.decrypt(ciphertext, key: @selector, encryption_context: @context)
 
     # A restore after the row is gone brings nothing back: the wrapping was
     # the only stored copy of the key, and the delete removed it.

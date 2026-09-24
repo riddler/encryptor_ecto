@@ -5,7 +5,7 @@ defmodule Encryptor.Ecto.Error do
 
   Every exception this package raises from `dump/3` and `load/3` carries the
   same four identifying values - the declared table, the declared column, the
-  encryption-context *keys*, and the upstream reason - plus the tenant
+  encryption-context *keys*, and the upstream reason - plus the scope
   identifier where one was resolved. Individual exceptions add a field or two
   of their own; none of them adds a value.
 
@@ -32,7 +32,7 @@ defmodule Encryptor.Ecto.Error do
 
   The declared table, the declared column and the context keys are *not*
   redacted: they are declaration-time strings, they are what makes a failure
-  diagnosable, and the bead's rule names them as carried. The tenant
+  diagnosable, and the bead's rule names them as carried. The scope
   identifier is likewise rendered, as the one value the prohibition exempts.
 
   ## The cost, stated
@@ -62,14 +62,14 @@ defmodule Encryptor.Ecto.Error do
   The identifying values every exception in the family carries.
 
   `:context_keys` are encryption-context key *names*; the context's values are
-  never carried. `:tenant` is the resolved tenant identifier, the single value
+  never carried. `:scope` is the resolved scope identifier, the single value
   ADR-0001 decision 6 exempts from the prohibition.
   """
   @type common :: [
           table: String.t() | nil,
           column: String.t() | nil,
           context_keys: [String.t()],
-          tenant: term(),
+          scope: term(),
           reason: term()
         ]
 
@@ -92,7 +92,7 @@ defmodule Encryptor.Ecto.Error do
     extra_fields = Keyword.get(opts, :extra_fields, [])
 
     fields =
-      [table: nil, column: nil, context_keys: [], tenant: nil, reason: nil] ++ extra_fields
+      [table: nil, column: nil, context_keys: [], scope: nil, reason: nil] ++ extra_fields
 
     quote bind_quoted: [fields: fields] do
       # Deliberately leaked into the using module: it is what lets the
@@ -175,7 +175,7 @@ defmodule Encryptor.Ecto.Error do
       {"table", inspect(error.table)},
       {"column", inspect(error.column)},
       {"context keys", inspect(error.context_keys)},
-      {"tenant", inspect(error.tenant)},
+      {"scope", inspect(error.scope)},
       {"reason", redact(error.reason)}
     ]
   end

@@ -26,7 +26,7 @@ defmodule Encryptor.Ecto.Binary do
   | Option | Required | Meaning |
   |---|---|---|
   | `:vault` | yes | The `Encryptor.Vault` module this type encrypts through |
-  | `:tenant` | no | `:scope` (default), `:none`, or a module implementing `Encryptor.Ecto.TenantContext` (see "A global field" below) |
+  | `:scope` | no | `:process` (default), `:none`, or a module implementing `Encryptor.Ecto.ScopeContext` (see "A global field" below) |
   | `:context` | no | Static extra context pairs merged into every operation |
   | `:legacy` | no | The migration window's legacy type: load through it when the primary load fails (see "The migration window" below) |
   | `:table`, `:column` | no | Overrides for the frozen declared context values, writable at the `use` or at the field |
@@ -41,8 +41,9 @@ defmodule Encryptor.Ecto.Binary do
 
   `"table"` and `"column"`, derived once at declaration time from the schema's
   source and the field's name, plus whatever `:context` adds (decision 4). The
-  tenant is **not** a context pair: it passes to the vault as `key:`, and the
-  vault derives and injects `"tenant_ref"` itself (acceptance amendment 1). A
+  scope is **not** a context pair: it passes to the vault as `key:`, and the
+  vault derives and injects `"tenant_ref"` itself (acceptance amendment 1; the
+  pair keeps the vault's v1 spelling through the scope rename). A
   declared `"table"` or `"column"` wins over a `:context` pair of the same
   name - the derived values are the anti-substitution property and a static
   pair cannot be allowed to shadow them.
@@ -89,23 +90,23 @@ defmodule Encryptor.Ecto.Binary do
 
   | Condition | Exception |
   |---|---|
-  | No tenant resolved | `Encryptor.Ecto.MissingTenantError` |
+  | No scope resolved | `Encryptor.Ecto.MissingScopeError` |
   | The vault returned an encrypt error | `Encryptor.Ecto.EncryptError` |
   | The vault returned a decrypt error, AAD mismatch included | `Encryptor.Ecto.DecryptError` |
   | The vault reports missing required context keys | `Encryptor.Ecto.MissingContextError` |
-  | A `tenant: :none` field names a `:tenant`-profile vault | `Encryptor.Ecto.VaultProfileError` |
+  | A `scope: :none` field names a `:scoped`-profile vault | `Encryptor.Ecto.VaultProfileError` |
 
   No exception message, and no `Inspect` of one, carries plaintext, ciphertext
   bytes or key material. That is structural rather than conventional: see
   `Encryptor.Ecto.Error`.
 
-  ## A missing tenant is an error, deliberately
+  ## A missing scope is an error, deliberately
 
-  With `tenant: :scope` - the default - the tenant comes from
-  `Encryptor.Ecto.Tenant`, which the host sets at the edge of each unit of
-  work. A dump with nothing in scope raises `Encryptor.Ecto.MissingTenantError`
-  naming the table and the column (decision 5c). Not a default tenant, not a
-  `nil` tenant, not a global key, not a log line: the failure that choice
+  With `scope: :process` - the default - the scope comes from
+  `Encryptor.Ecto.Scope`, which the host sets at the edge of each unit of
+  work. A dump with nothing set raises `Encryptor.Ecto.MissingScopeError`
+  naming the table and the column (decision 5c). Not a default scope, not a
+  `nil` scope, not a global key, not a log line: the failure that choice
   forbids is a row written under the wrong key because a background job
   forgot, which is durable and unrecoverable in a way an exception on the
   first test run is not.
@@ -113,38 +114,38 @@ defmodule Encryptor.Ecto.Binary do
   Loads raise the same way (decision 5d). Loading with whatever context the
   row implies and letting the AAD check fail would work, but a raise with a
   legible message beats an authentication failure that reads like data
-  corruption. Where a tenant *is* in scope but is the wrong one, the AAD check
+  corruption. Where a scope *is* set but is the wrong one, the AAD check
   is the backstop: the read fails authentication and arrives as
   `Encryptor.Ecto.DecryptError`, which is the anti-substitution property
   working rather than a missing-scope error.
 
-  ## A global field: `tenant: :none`, and what it costs
+  ## A global field: `scope: :none`, and what it costs
 
-  `tenant: :none` declares a field global. It is written at the field, in the
+  `scope: :none` declares a field global. It is written at the field, in the
   schema, where a reviewer sees it next to the column it applies to, and it
-  asks no resolver anything: nothing is read from `Encryptor.Ecto.Tenant`, and
-  a dump with no tenant in scope is the ordinary case rather than an error.
+  asks no resolver anything: nothing is read from `Encryptor.Ecto.Scope`, and
+  a dump with no scope set is the ordinary case rather than an error.
 
-  **A `:none` field's ciphertexts are not crypto-shreddable with a tenant
-  key.** The tenant key is omitted from the vault call entirely, so those
+  **A `:none` field's ciphertexts are not crypto-shreddable with a scope
+  key.** The scope key is omitted from the vault call entirely, so those
   bytes belong to the vault's single key and nothing else. Destroying one
-  tenant's key leaves every one of them readable, and removing that tenant's
+  scope's key leaves every one of them readable, and removing that scope's
   data from a `:none` column is an ordinary delete rather than a
   key-destruction. That is the trade the option is *for* - a lookup table, a
-  pricing tier, a feature flag payload that no tenant owns - and it is stated
+  pricing tier, a feature flag payload that no scope owns - and it is stated
   here rather than left to the record, because the option is declared at the
   field and its consequence is a compliance one.
 
       defmodule Payments.Encrypted.Global do
-        use Encryptor.Ecto.Binary, vault: Payments.AppVault, tenant: :none
+        use Encryptor.Ecto.Binary, vault: Payments.AppVault, scope: :none
       end
 
   ### A `:none` field must name a `:single`-profile vault
 
-  A `:tenant`-profile vault carries the tenant reference in its required
-  context set and refuses any operation without it, so "a tenant vault with
+  A `:scoped`-profile vault carries the scope reference in its required
+  context set and refuses any operation without it, so "a scoped vault with
   the pair omitted" is not a configuration that exists. A host with both kinds
-  of field runs two vaults: the per-tenant one its tenant-scoped fields point
+  of field runs two vaults: the per-scope one its scoped fields point
   at, and a second single-key one its global fields point at.
 
   The rule is checked on the first `dump/3` or `load/3` of such a field, and
@@ -183,7 +184,7 @@ defmodule Encryptor.Ecto.Binary do
   The primary load is attempted **first, always**. The legacy load is
   attempted **only** when the vault refuses the stored bytes - the failure
   that would otherwise raise `Encryptor.Ecto.DecryptError`. It is not
-  attempted for `Encryptor.Ecto.MissingTenantError` or
+  attempted for `Encryptor.Ecto.MissingScopeError` or
   `Encryptor.Ecto.MissingContextError`: those are host misconfiguration, they
   are loud on purpose, and a fallback that answered them with a successful
   legacy read would convert a configuration bug into a silent year of
@@ -237,7 +238,7 @@ defmodule Encryptor.Ecto.Binary do
 
   While `legacy:` is set, a row that has not been rewritten yet is read under
   the legacy scheme's rules: for a `cloak_ecto` host, with no encryption
-  context binding it to its row and no per-tenant key separation. No
+  context binding it to its row and no per-scope key separation. No
   *migrated* row is weakened; the guarantee is per-row until the rewrite
   finishes (decision 5). Dropping `legacy:` is the last step of the runbook,
   not a thing to remember.
@@ -248,7 +249,7 @@ defmodule Encryptor.Ecto.Binary do
         %{table: "cards", column: "pan"})
 
   and the metadata set is closed at those two keys: no value, no bytes, no
-  reason, no tenant. Widening it is a security review rather than a feature
+  reason, no scope. Widening it is a security review rather than a feature
   (decision 5). The pair is table and column precisely because the window is
   per-field: a host with twelve encrypted columns finishes eleven and still
   has one legacy reader open.
@@ -267,8 +268,8 @@ defmodule Encryptor.Ecto.Binary do
   alias Encryptor.Ecto.DecryptError
   alias Encryptor.Ecto.EncryptError
   alias Encryptor.Ecto.MissingContextError
-  alias Encryptor.Ecto.MissingTenantError
-  alias Encryptor.Ecto.TenantContext
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.ScopeContext
   alias Encryptor.Ecto.VaultProfileError
   alias Encryptor.Error
   alias Encryptor.Vault.Config
@@ -276,7 +277,7 @@ defmodule Encryptor.Ecto.Binary do
   @typedoc "The options `use Encryptor.Ecto.Binary` accepts."
   @type opts :: [
           vault: module(),
-          tenant: :scope | :none | module(),
+          scope: :process | :none | module(),
           context: %{optional(String.t()) => String.t()},
           legacy: module(),
           table: String.t(),
@@ -291,7 +292,7 @@ defmodule Encryptor.Ecto.Binary do
   """
   @type params :: %{
           vault: module(),
-          tenant: :scope | :none | module(),
+          scope: :process | :none | module(),
           context: %{optional(String.t()) => String.t()},
           table: String.t(),
           column: String.t(),
@@ -306,7 +307,7 @@ defmodule Encryptor.Ecto.Binary do
   """
   @type load_arm :: :primary | :legacy
 
-  @known_options [:vault, :tenant, :context, :legacy, :table, :column]
+  @known_options [:vault, :scope, :context, :legacy, :table, :column]
 
   @doc """
   Defines an encrypted `:binary` type on the using module.
@@ -431,7 +432,7 @@ defmodule Encryptor.Ecto.Binary do
   def init(declared, field_opts) do
     params = %{
       vault: Keyword.fetch!(declared, :vault),
-      tenant: validated_tenant(declared),
+      scope: validated_scope(declared),
       context: validated_context(declared),
       table: declared_value(declared, :table, field_opts, &derive_table/1),
       column: declared_value(declared, :column, field_opts, &derive_column/1)
@@ -477,24 +478,24 @@ defmodule Encryptor.Ecto.Binary do
   Encrypts a value on its way to the column.
 
   `nil` passes through unencrypted; everything else is handed to the vault
-  under the resolved tenant, with the declared table and column as encryption
+  under the resolved scope, with the declared table and column as encryption
   context. There is no `:error` arm: the failure paths raise (decision 6).
   """
   @spec dump(term(), function(), params()) :: {:ok, binary() | nil}
   def dump(nil, _dumper, _params), do: {:ok, nil}
 
   def dump(value, _dumper, params) when is_binary(value) do
-    tenant = resolve_tenant!(params, :dump)
+    scope = resolve_scope!(params, :dump)
 
-    case params.vault.encrypt(value, vault_opts(params, tenant)) do
+    case params.vault.encrypt(value, vault_opts(params, scope)) do
       {:ok, ciphertext} ->
         {:ok, ciphertext}
 
       {:error, %Error{reason: {:missing_required_context_keys, keys}} = error} ->
-        raise MissingContextError, common(params, tenant, error.reason) ++ [missing_keys: keys]
+        raise MissingContextError, common(params, scope, error.reason) ++ [missing_keys: keys]
 
       {:error, %Error{} = error} ->
-        raise EncryptError, common(params, tenant, error.reason)
+        raise EncryptError, common(params, scope, error.reason)
     end
   end
 
@@ -533,17 +534,17 @@ defmodule Encryptor.Ecto.Binary do
   """
   @spec load_arm(binary(), params()) :: {load_arm(), term()}
   def load_arm(value, params) when is_binary(value) do
-    tenant = resolve_tenant!(params, :load)
+    scope = resolve_scope!(params, :load)
 
-    case params.vault.decrypt(value, vault_opts(params, tenant)) do
+    case params.vault.decrypt(value, vault_opts(params, scope)) do
       {:ok, plaintext} ->
         {:primary, plaintext}
 
       {:error, %Error{reason: {:missing_required_context_keys, keys}} = error} ->
-        raise MissingContextError, common(params, tenant, error.reason) ++ [missing_keys: keys]
+        raise MissingContextError, common(params, scope, error.reason) ++ [missing_keys: keys]
 
       {:error, %Error{} = error} ->
-        legacy_arm_or_raise!(value, params, tenant, error)
+        legacy_arm_or_raise!(value, params, scope, error)
     end
   end
 
@@ -569,33 +570,33 @@ defmodule Encryptor.Ecto.Binary do
   @spec embed_as(atom(), term()) :: :self
   def embed_as(_format, _params), do: :self
 
-  # -- tenant resolution ----------------------------------------------------
+  # -- scope resolution ----------------------------------------------------
 
-  # `tenant: :none` declares a field global and asks no resolver anything. The
+  # `scope: :none` declares a field global and asks no resolver anything. The
   # rule that such a field must name a `:single`-profile vault is a check
   # against the vault's own start-time configuration rather than against this
   # package's options, which is why it runs here rather than in `init/2`.
-  @spec resolve_tenant!(params(), TenantContext.operation()) :: String.t() | :none
-  defp resolve_tenant!(%{tenant: :none} = params, _operation) do
+  @spec resolve_scope!(params(), ScopeContext.operation()) :: String.t() | :none
+  defp resolve_scope!(%{scope: :none} = params, _operation) do
     assert_single_profile_vault!(params)
     :none
   end
 
-  defp resolve_tenant!(params, operation) do
-    resolver = resolver(params.tenant)
+  defp resolve_scope!(params, operation) do
+    resolver = resolver(params.scope)
 
     case resolver.resolve(operation, resolver_params(params)) do
-      {:ok, tenant} when is_binary(tenant) ->
-        tenant
+      {:ok, scope} when is_binary(scope) ->
+        scope
 
       :none ->
         :none
 
       {:error, reason} ->
-        raise MissingTenantError, common(params, nil, reason)
+        raise MissingScopeError, common(params, nil, reason)
 
       _off_contract ->
-        raise MissingTenantError, common(params, nil, {:resolver_off_contract, resolver})
+        raise MissingScopeError, common(params, nil, {:resolver_off_contract, resolver})
     end
   end
 
@@ -615,9 +616,9 @@ defmodule Encryptor.Ecto.Binary do
   @spec assert_single_profile_vault!(params()) :: :ok
   defp assert_single_profile_vault!(params) do
     case Config.fetch(params.vault) do
-      {:ok, %{context_profile: :tenant = profile}} ->
+      {:ok, %{context_profile: :scoped = profile}} ->
         raise VaultProfileError,
-              common(params, :none, {:tenant_profile_vault, params.vault}) ++
+              common(params, :none, {:scoped_profile_vault, params.vault}) ++
                 [vault: params.vault, profile: profile]
 
       {:ok, _single_profile} ->
@@ -628,27 +629,27 @@ defmodule Encryptor.Ecto.Binary do
     end
   end
 
-  @spec resolver(:scope | module()) :: module()
-  defp resolver(:scope), do: TenantContext.Scope
+  @spec resolver(:process | module()) :: module()
+  defp resolver(:process), do: ScopeContext.Process
   defp resolver(module) when is_atom(module), do: module
 
-  @spec resolver_params(params()) :: TenantContext.params()
+  @spec resolver_params(params()) :: ScopeContext.params()
   defp resolver_params(params) do
     %{vault: params.vault, table: params.table, column: params.column}
   end
 
   # -- the vault call -------------------------------------------------------
 
-  # The tenant passes as `key:` and never as a context pair: the vault derives
-  # `tenant_ref` from the selector itself, so the routing argument and the
+  # The scope passes as `key:` and never as a context pair: the vault derives
+  # `"tenant_ref"` from the selector itself, so the routing argument and the
   # context pair are incapable of disagreeing (acceptance amendment 1). A
   # `:none` field omits `:key` entirely, which is what a `:single`-profile
   # vault expects.
   @spec vault_opts(params(), String.t() | :none) :: keyword()
   defp vault_opts(params, :none), do: [encryption_context: declared_context(params)]
 
-  defp vault_opts(params, tenant),
-    do: [key: tenant, encryption_context: declared_context(params)]
+  defp vault_opts(params, scope),
+    do: [key: scope, encryption_context: declared_context(params)]
 
   @doc """
   The encryption-context key *names* a declaration composes, sorted.
@@ -676,7 +677,7 @@ defmodule Encryptor.Ecto.Binary do
   (ADR-0002 decision 5, resolved assumption A9) - and `Encryptor.Ecto.Map`'s
   serializer is the one that needs only the names.
 
-  The tenant is not here. It passes to the vault as `key:` and the vault
+  The scope is not here. It passes to the vault as `key:` and the vault
   derives `"tenant_ref"` from the selector itself, so a declaration's context
   never carries it (acceptance amendment 1).
 
@@ -692,33 +693,33 @@ defmodule Encryptor.Ecto.Binary do
   # The fields every exception in the family carries. `context_keys` are key
   # names; the values never leave this module, and neither does the plaintext.
   @spec common(params(), term(), term()) :: keyword()
-  defp common(params, tenant, reason) do
+  defp common(params, scope, reason) do
     [
       table: params.table,
       column: params.column,
       context_keys: context_keys(params),
-      tenant: tenant_for_report(tenant),
+      scope: scope_for_report(scope),
       reason: reason
     ]
   end
 
-  defp tenant_for_report(:none), do: :none
-  defp tenant_for_report(tenant), do: tenant
+  defp scope_for_report(:none), do: :none
+  defp scope_for_report(scope), do: scope
 
   # -- the migration window -------------------------------------------------
 
   # ADR-0004 decision 4a: the fallback hangs off the vault's refusal of the
-  # stored bytes and nothing else. `MissingTenantError` never reaches here at
+  # stored bytes and nothing else. `MissingScopeError` never reaches here at
   # all (it is raised before the vault is called) and `MissingContextError`
   # has its own arm above, which is what keeps a host misconfiguration from
   # being answered by a successful legacy read.
   @spec legacy_arm_or_raise!(binary(), params(), String.t() | :none, Error.t()) ::
           {:legacy, term()}
-  defp legacy_arm_or_raise!(_value, %{legacy: nil} = params, tenant, error) do
-    raise DecryptError, common(params, tenant, error.reason) ++ [engine: error.engine]
+  defp legacy_arm_or_raise!(_value, %{legacy: nil} = params, scope, error) do
+    raise DecryptError, common(params, scope, error.reason) ++ [engine: error.engine]
   end
 
-  defp legacy_arm_or_raise!(value, params, tenant, error) do
+  defp legacy_arm_or_raise!(value, params, scope, error) do
     case legacy_load(params.legacy, value) do
       {:ok, loaded} ->
         emit_legacy_load(params)
@@ -730,7 +731,7 @@ defmodule Encryptor.Ecto.Binary do
       # integrity event would send an operator to the wrong investigation.
       {:error, reason} ->
         raise DecryptError,
-              common(params, tenant, error.reason) ++
+              common(params, scope, error.reason) ++
                 [engine: {:legacy_load_also_failed, error.engine, reason}]
     end
   end
@@ -769,7 +770,7 @@ defmodule Encryptor.Ecto.Binary do
   defp unwrap_deferred(loaded), do: loaded
 
   # ADR-0004 decision 5, and its metadata set is closed at these two keys. No
-  # value, no bytes, no reason, no tenant: widening this map is a security
+  # value, no bytes, no reason, no scope: widening this map is a security
   # review rather than a feature. Emitted only where a legacy read *answered*,
   # because the event exists to count rows still in the old format and a load
   # that failed both ways raises instead.
@@ -862,10 +863,10 @@ defmodule Encryptor.Ecto.Binary do
 
   # -- validation and messages ----------------------------------------------
 
-  @spec validated_tenant(keyword()) :: :scope | :none | module()
-  defp validated_tenant(declared) do
-    case Keyword.get(declared, :tenant, :scope) do
-      strategy when strategy in [:scope, :none] ->
+  @spec validated_scope(keyword()) :: :process | :none | module()
+  defp validated_scope(declared) do
+    case Keyword.get(declared, :scope, :process) do
+      strategy when strategy in [:process, :none] ->
         strategy
 
       module when is_atom(module) and not is_nil(module) ->
@@ -873,8 +874,8 @@ defmodule Encryptor.Ecto.Binary do
 
       other ->
         raise ArgumentError,
-              "expected :tenant to be :scope, :none, or a module implementing " <>
-                "Encryptor.Ecto.TenantContext, got: #{inspect(other)}"
+              "expected :scope to be :process, :none, or a module implementing " <>
+                "Encryptor.Ecto.ScopeContext, got: #{inspect(other)}"
     end
   end
 

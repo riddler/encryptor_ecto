@@ -16,8 +16,8 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
   alias Ecto.Changeset
   alias Encryptor.Ecto.BlindIndex
   alias Encryptor.Ecto.BlindIndex.NormalizationError
-  alias Encryptor.Ecto.MissingTenantError
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestSchemas.Authorization
   alias Encryptor.Ecto.TestSchemas.Customer
   alias Encryptor.Ecto.TestSchemas.Identity
@@ -28,7 +28,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
   @other_merchant "merchant_a19"
 
   setup do
-    on_exit(&Tenant.clear/0)
+    on_exit(&Scope.clear/0)
     :ok
   end
 
@@ -54,7 +54,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # computed HMAC, red - the plaintext lands in the index column, which is
     # both a wrong value and the leak the whole feature exists to prevent.
     test "a changed source is fingerprinted into the index column" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       changeset =
         %{phone: "+1 (555) 0100"}
@@ -70,16 +70,16 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # `normalized`, red - the two spellings stop agreeing and the index answers
     # byte equality instead of equality over `norm(plaintext)`.
     test "the declared normalizer is applied before the HMAC" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert put_phone("+1 (555) 0100") == put_phone("1 555 0100")
     end
 
     # sabotage: `Changeset.fetch_change/2` -> `Changeset.fetch_field/2`, red -
     # an untouched source is recomputed, so an update that never cast the field
-    # rewrites the column (and raises where no tenant is in scope).
+    # rewrites the column (and raises where no scope is set).
     test "a source that was not changed is not recomputed" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       changeset =
         %{}
@@ -92,7 +92,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: the `{:ok, nil}` arm falling through to the compute arm, red -
     # normalizing nil raises instead of writing NULL.
     test "a source set to nil sets the index to nil (decision 8)" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       changeset =
         %{phone: nil}
@@ -103,8 +103,8 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     end
 
     # sabotage: the `{:ok, nil}` arm moved below the compute arm, red - writing
-    # NULL starts requiring a tenant it does not need.
-    test "writing nil needs no tenant, because it derives no key" do
+    # NULL starts requiring a scope it does not need.
+    test "writing nil needs no scope, because it derives no key" do
       changeset =
         %{phone: nil}
         |> phone_changeset(%Customer{phone: "5550100", phone_index: <<0, 1, 2>>})
@@ -116,7 +116,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: Normalizer.normalize!/3's `:digits` arm returning `nil` for an
     # empty result, red - the empty string stops producing a value.
     test "an empty source produces a real value over norm(\"\") (decision 8)" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert byte_size(put_phone("")) == 32
     end
@@ -124,7 +124,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: Declaration.derivation!/1 dropping `index_name`, red - two
     # indexes over one field collapse onto one key and one value.
     test "two indexes over one field are written independently" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       changeset =
         %Authorization{}
@@ -139,8 +139,8 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     end
 
     # sabotage: Derivation.selector!/3's `:global` clause resolving through the
-    # tenant strategy, red - a global index starts demanding a tenant.
-    test "a scope: :global index needs no tenant" do
+    # scope strategy, red - a global index starts demanding a scope.
+    test "a derive: :global index needs no scope" do
       changeset =
         %Identity{}
         |> Changeset.cast(%{email: "bob@example.com"}, [:email])
@@ -156,7 +156,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # nothing. Decision 5 calls that the single worst failure this feature can
     # have, and it is exactly what one truncation site prevents.
     test "a truncated index is written at its declared width, and the read side agrees" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       changeset =
         %Wizard{}
@@ -173,8 +173,8 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: Value.compute!/3 resolving the selector after normalizing, red
     # only for the ordering arm below; this one stays green either way and is
     # here because a write outside scope must raise at all.
-    test "a scope: :tenant index outside tenant scope raises" do
-      assert_raise MissingTenantError, fn ->
+    test "a derive: :per_scope index with no scope set raises" do
+      assert_raise MissingScopeError, fn ->
         %{phone: "5550100"}
         |> phone_changeset()
         |> BlindIndex.put_index(:phone, :phone_index)
@@ -206,7 +206,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: equality/3 pinning `declaration.source` instead of
     # `declaration.column`, red - the query constrains the ciphertext column.
     test "the constraint names the index column, pinned to the computed value" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       query = BlindIndex.where_eq(Customer, :phone, "+1 (555) 0100")
 
@@ -218,7 +218,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # for a resolver that answers differently; this arm asserts the pairing the
     # two helpers must have, which no mutation of one side alone survives.
     test "the write side and the read side agree on the bytes" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       written = put_phone("+1 (555) 0100")
 
@@ -228,20 +228,20 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: the normalizer skipped on the read side, red - a query built
     # from the spelling a host has finds nothing the write side stored.
     test "the value is normalized before it is fingerprinted" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert pinned(BlindIndex.where_eq(Customer, :phone, "+1 (555) 0100")) ==
                pinned(BlindIndex.where_eq(Customer, :phone, "1-555-0100"))
     end
 
     # sabotage: Derivation.derive_opts/2's `key:` option dropped, red - every
-    # tenant derives under the vault's default key and the index becomes
-    # cross-tenant correlatable, which is decision 3b's whole argument.
-    test "two tenants pin different constants for one plaintext" do
-      Tenant.put(@merchant)
+    # scope derives under the vault's default key and the index becomes
+    # cross-scope correlatable, which is decision 3b's whole argument.
+    test "two scopes pin different constants for one plaintext" do
+      Scope.put(@merchant)
       first = pinned(BlindIndex.where_eq(Customer, :phone, "5550100"))
 
-      Tenant.put(@other_merchant)
+      Scope.put(@other_merchant)
       second = pinned(BlindIndex.where_eq(Customer, :phone, "5550100"))
 
       refute first == second
@@ -252,7 +252,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # query is where a wrong binding would first constrain somebody else's
     # table rather than the schema the declaration was read from.
     test "the constraint binds the query's own source, not a joined one" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       query =
         Customer
@@ -266,7 +266,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # the query, red - the helper builds an unconstrained query, which is the
     # "matches everything" mirror of the failure decision 5 names.
     test "the constraint is added to an existing query" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       query =
         Customer
@@ -279,11 +279,11 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
 
   describe "where_eq/3 raises rather than matching nothing" do
     # sabotage: Derivation.selector!/3's `{:error, reason}` arm returning
-    # `{:tenant, ""}`, red - a query built outside scope is executable and
+    # `{:scope, ""}`, red - a query built outside scope is executable and
     # matches nothing, which decision 5 calls the worst failure this feature
     # can have because it reads as "the record does not exist".
-    test "a query built outside tenant scope raises at build time" do
-      assert_raise MissingTenantError, fn ->
+    test "a query built with no scope set raises at build time" do
+      assert_raise MissingScopeError, fn ->
         BlindIndex.where_eq(Customer, :phone, "5550100")
       end
     end
@@ -292,7 +292,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # index answers through the helper that promises matches, and the caller
     # never learns it has to filter after decrypting.
     test "a truncated index is refused by name (decision 6)" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert_raise ArgumentError, ~r/where_eq_candidates\/3/, fn ->
         BlindIndex.where_eq(Customer, :email, :email_short_index, "bob@example.com")
@@ -303,7 +303,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # `hd(declarations)`, red - the helper silently picks one of two keys, so
     # half the rotation window queries the wrong column.
     test "a field carrying two indexes is refused, naming the four-argument form" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert_raise ArgumentError, ~r/where_eq\/4/, fn ->
         BlindIndex.where_eq(Authorization, :card_number, "4111111111111111")
@@ -313,7 +313,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: sole_declaration!/4's `[]` clause returning a new Declaration,
     # red - a source with no index builds a query over a column nobody wrote.
     test "a field carrying no index is refused" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert_raise ArgumentError, ~r/declares no blind index on :merchant_id/, fn ->
         BlindIndex.where_eq(Customer, :merchant_id, "acct_a")
@@ -323,7 +323,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: query_schema!/1's fallback returning the table binary, red -
     # the failure becomes an UndefinedFunctionError on "customers".__schema__/2.
     test "a query over a table name rather than a schema is refused" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert_raise ArgumentError, ~r/needs a queryable over a schema module/, fn ->
         BlindIndex.where_eq(Ecto.Query.from(c in "customers"), :phone, "5550100")
@@ -336,7 +336,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # fetch!/3, red - naming the column stops being able to disambiguate, and
     # decision 7 step 4 has no expression.
     test "where_eq/4 names one index of a rotation pair" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       v1 = BlindIndex.where_eq(Authorization, :card_number, :card_number_index, "4111")
       v2 = BlindIndex.where_eq(Authorization, :card_number, :card_number_v2_index, "4111")
@@ -349,7 +349,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: where_eq_candidates/4 calling refuse_truncated!/1, red - the
     # helper named for truncated indexes refuses the only indexes it is for.
     test "where_eq_candidates accepts a truncated index" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       query = BlindIndex.where_eq_candidates(Customer, :email, :email_short_index, "bob@x.com")
 
@@ -361,7 +361,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # writes, and the only surface that answers a truncated index is the one
     # that names the column.
     test "where_eq_candidates/3 resolves a truncated index by source alone" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       query = BlindIndex.where_eq_candidates(Wizard, :email, "bob@example.com")
 
@@ -371,7 +371,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: refuse_truncated!/1 accepting every width, red - the arity a
     # host writes stops steering a truncated index to the candidates helper.
     test "where_eq/3 refuses a truncated index at the same arity" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert_raise ArgumentError, ~r/where_eq_candidates\/3/, fn ->
         BlindIndex.where_eq(Wizard, :email, "bob@example.com")
@@ -381,17 +381,17 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: where_eq_candidates/3 delegating to where_eq/3, red - the
     # weaker contract stops being available over a full-width index.
     test "where_eq_candidates accepts a full-width index" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert pinned(BlindIndex.where_eq_candidates(Customer, :phone, "5550100")) ==
                pinned(BlindIndex.where_eq(Customer, :phone, "5550100"))
     end
 
     # sabotage: where_eq_candidates/3 resolving the schema before checking the
-    # tenant - it cannot; this asserts the raise reaches the candidates helper
+    # scope - it cannot; this asserts the raise reaches the candidates helper
     # at all, which a delegation that skipped selector!/3 would lose.
-    test "where_eq_candidates raises outside tenant scope too" do
-      assert_raise MissingTenantError, fn ->
+    test "where_eq_candidates raises with no scope set too" do
+      assert_raise MissingScopeError, fn ->
         BlindIndex.where_eq_candidates(Customer, :phone, "5550100")
       end
     end
@@ -400,7 +400,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # `Value.compute!/3`, green here and red on the put_index arm below - which
     # is why both sides are asserted rather than only the read one.
     test "where_eq_candidates pins the truncated width" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert [pinned_value] = pinned(BlindIndex.where_eq_candidates(Wizard, :email, "bob@x.com"))
       assert byte_size(pinned_value) == 8
@@ -412,7 +412,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # `Encryptor.Ecto.BlindIndex.ValueTest`'s operation arm, which is where the
     # two are told apart; this arm pins the width and the agreement.
     test "compute/3 returns the 32 bytes where_eq pins" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       value = BlindIndex.compute(Customer, :phone, "5550100")
 
@@ -423,7 +423,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: Declaration.derivation!/1 reading `declaration.source` for the
     # info string's column, red - two indexes over one field derive one key.
     test "compute/4 derives a different value per index name" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       refute BlindIndex.compute(Authorization, :card_number, :card_number_index, "4111") ==
                BlindIndex.compute(Authorization, :card_number, :card_number_v2_index, "4111")
@@ -432,19 +432,19 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # sabotage: sole_declaration!/4's ambiguity clause dropped, red - compute/3
     # picks a key for the caller.
     test "compute/3 refuses an ambiguous field, naming compute/4" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert_raise ArgumentError, ~r/compute\/4/, fn ->
         BlindIndex.compute(Authorization, :card_number, "4111")
       end
     end
 
-    # sabotage: Value.compute!/3 skipping selector!/3 for a `scope: :global`
+    # sabotage: Value.compute!/3 skipping selector!/3 for a `derive: :global`
     # declaration's sibling - i.e. resolving the selector last, red: the
-    # normalizer's refusal arrives before the missing tenant does, and the host
+    # normalizer's refusal arrives before the missing scope does, and the host
     # is told about their value rather than about their scope.
     test "the scope check precedes normalization" do
-      assert_raise MissingTenantError, fn ->
+      assert_raise MissingScopeError, fn ->
         BlindIndex.compute(Customer, :phone, :not_a_binary)
       end
     end
@@ -453,7 +453,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # red - a value this package cannot fingerprint is silently indexed as the
     # empty string, so every such row collides.
     test "a value that is not a binary is the normalizer's refusal" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       assert_raise NormalizationError, fn ->
         BlindIndex.compute(Customer, :phone, :not_a_binary)
@@ -476,7 +476,7 @@ defmodule Encryptor.Ecto.BlindIndexHelpersTest do
     # value in - these are the family's own tests elsewhere; this arm holds the
     # line at the surface the host actually calls.
     test "no failure message carries the plaintext or the index value" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       plaintext = "5550100"
       value = BlindIndex.compute(Customer, :phone, plaintext)

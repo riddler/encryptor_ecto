@@ -37,7 +37,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   | Option | Default | Meaning |
   |---|---|---|
   | `:name` | the index column's name | The `index_name` component of the HKDF `info` string (decision 2) |
-  | `:scope` | `:tenant` | `:tenant` or `:global` key derivation (decision 3) |
+  | `:derive` | `:per_scope` | `:per_scope` or `:global` key derivation (decision 3) |
   | `:normalize` | `:none` | What the HMAC is computed over (decision 4) |
   | `:bits` | `256` | Stored width; `64`/`128`/`192` truncate the HMAC |
   | `:slow` | `false` | `true` runs Argon2id before the HMAC (decision 6, amendment C) |
@@ -66,7 +66,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   one Argon2id hash per candidate rather than one HMAC. ADR-0003 amendment C
   fixes the whole construction - the parameters are the vault's frozen
   `:slow_hash` set and never this package's, and the salt is derived per
-  index, per tenant and per deployment through the same vault call the index
+  index, per scope and per deployment through the same vault call the index
   key comes from. `Encryptor.Ecto.BlindIndex.Value`'s *Slow hashing* section
   documents the pipeline and
   `Encryptor.Ecto.BlindIndex.Derivation`'s *The Argon2id salt* section
@@ -101,14 +101,14 @@ defmodule Encryptor.Ecto.BlindIndex do
   value, and how many distinct values the column holds. It does not mean the
   values themselves.
 
-  | An attacker holding | Learns from a `scope: :tenant` index | Learns from a `scope: :global` index |
+  | An attacker holding | Learns from a `derive: :per_scope` index | Learns from a `derive: :global` index |
   |---|---|---|
-  | the dump, and no key material | equality structure within each tenant, and nothing across tenants | equality structure across the whole table, and across every table whose index derives under the same `info` components |
+  | the dump, and no key material | equality structure within each scope, and nothing across scopes | equality structure across the whole table, and across every table whose index derives under the same `info` components |
   | the dump, and a guess at a plaintext they think is present | nothing: a candidate value cannot be computed without the index key | nothing: the same |
-  | the dump and one tenant's index key | which rows *in that tenant* hold any plaintext they can guess, and nothing about any other tenant | which rows anywhere hold any plaintext they can guess |
-  | the same, over a low-entropy column | full recovery of that column over the guessable space, at HMAC speed | the same, across every tenant at once |
+  | the dump and one scope's index key | which rows *in that scope* hold any plaintext they can guess, and nothing about any other scope | which rows anywhere hold any plaintext they can guess |
+  | the same, over a low-entropy column | full recovery of that column over the guessable space, at HMAC speed | the same, across every scope at once |
   | the dump and the encryption key | everything; the index adds nothing once the column itself is readable | the same |
-  | a retained dump, after the tenant's key material is destroyed | nothing: the column is unusable noise, because no candidate value can be computed to compare against it | equality structure **survives the shred**, and guessable values stay recoverable to anyone holding the index key |
+  | a retained dump, after the scope's key material is destroyed | nothing: the column is unusable noise, because no candidate value can be computed to compare against it | equality structure **survives the shred**, and guessable values stay recoverable to anyone holding the index key |
 
   Three rows are worth reading twice.
 
@@ -128,9 +128,9 @@ defmodule Encryptor.Ecto.BlindIndex do
   budget rather than a different outcome. The row is written at HMAC speed
   because that is what a declaration that says nothing gets.
 
-  **The last row is why `scope: :global` has to be written out loud**, and
-  why declaring nothing on a `tenant: :none` field is a compile-time error
-  rather than a silent fallback. A tenant whose key material has been
+  **The last row is why `derive: :global` has to be written out loud**, and
+  why declaring nothing on a `scope: :none` field is a compile-time error
+  rather than a silent fallback. A scope whose key material has been
   destroyed still has its `:global` index columns answering equality
   questions about its data, which is not a shred in any sense a compliance
   conversation will accept.
@@ -143,15 +143,15 @@ defmodule Encryptor.Ecto.BlindIndex do
   the column. What survives in full is the structural half - an index key is
   never an encryption key (`Encryptor.Ecto.BlindIndex.Derivation` documents
   the two-label nesting that makes that so), and the index shreds with the
-  tenant key. Independently wrapped per-tenant index keys are the recorded
+  scope key. Independently wrapped per-scope index keys are the recorded
   upgrade path if a genuine search-only consumer ever materializes.
 
-  ### Per-tenant is the default, and it is what stops cross-tenant correlation
+  ### Per-scope is the default, and it is what stops cross-scope correlation
 
-  A `scope: :tenant` index keys off the tenant's own key material, resolved
-  through the field's declared tenant strategy. The behaviour the suite pins:
-  the same plaintext, in the same column, under two different tenants derives
-  under different keys and therefore stores unrelated bytes. Two tenants
+  A `derive: :per_scope` index keys off the scope's own key material, resolved
+  through the field's declared scope strategy. The behaviour the suite pins:
+  the same plaintext, in the same column, under two different scopes derives
+  under different keys and therefore stores unrelated bytes. Two scopes
   sharing a customer are not visible as sharing one, to anyone reading the
   dump or a backup.
 
@@ -192,8 +192,8 @@ defmodule Encryptor.Ecto.BlindIndex do
   written and observe the index column learns the index value of a plaintext
   of their choosing. A public signup form over an indexed column is that
   attacker. It is inherent to any deterministic index and cannot be designed
-  away here; what bounds it is the scope, since the oracle a `scope: :tenant`
-  index gives away is one tenant's, and the oracle a `scope: :global` index
+  away here; what bounds it is the scope, since the oracle a `derive: :per_scope`
+  index gives away is one scope's, and the oracle a `derive: :global` index
   gives away is everybody's. That is one more argument for the default.
 
   A related consequence of decision 8: a `""` plaintext produces a real index
@@ -235,7 +235,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   ### Every invalidating change is a reindex
 
   Five things change the bytes a column must hold, and each one requires
-  decision 7's two-column sequence over rows decrypted in tenant scope.
+  decision 7's two-column sequence over rows decrypted under their scope.
   There is no in-place recomputation, because recomputing requires the
   plaintext.
 
@@ -245,20 +245,20 @@ defmodule Encryptor.Ecto.BlindIndex do
   | `:bits` | the same value is stored at a different width |
   | `:version` | it participates in the HKDF `info`, so the key changes |
   | the vault's `:derivation_salt` | it sits at the extract under every derivation, so every index key changes |
-  | a tenant's key material rotating | the derivation consults the current key, so that tenant's index keys change without any declaration changing |
+  | a scope's key material rotating | the derivation consults the current key, so that scope's index keys change without any declaration changing |
 
   The last row is the one with no supported sequence today, and it is stated
   as today's truth rather than as a promise. Decision 7's dance covers a
-  change to a *declaration*; a tenant key rotation changes no declaration,
-  and during the window between the rotation and a reindex of that tenant's
+  change to a *declaration*; a scope key rotation changes no declaration,
+  and during the window between the rotation and a reindex of that scope's
   index columns, `where_eq/3` matches nothing and raises nothing.
   `where_eq_candidates/3` does not help: it is the truncation surface, not a
-  multi-key candidate surface. A host rotating a tenant key must reindex that
-  tenant's index columns, and what this package should do about it is an open
+  multi-key candidate surface. A host rotating a scope key must reindex that
+  scope's index columns, and what this package should do about it is an open
   question for the record rather than a default invented here.
 
   Rotating `:derivation_salt` has the same shape and reaches further: it is a
-  full reindex of every index column in the deployment, for every tenant. The
+  full reindex of every index column in the deployment, for every scope. The
   salt is effectively permanent from the first stored index value.
 
   ### The index can be forgotten, and nothing prevents it
@@ -284,7 +284,7 @@ defmodule Encryptor.Ecto.BlindIndex do
 
   ## Two indexes over one field
 
-  A field may declare more than one index - decision 3d's per-tenant and
+  A field may declare more than one index - decision 3d's per-scope and
   global pair, or decision 7's rotation pair - and they are distinct because
   their `index_name`s are. The default `:name` is **the index column's** name
   rather than the source field's, so two indexes over one field are distinct
@@ -307,14 +307,14 @@ defmodule Encryptor.Ecto.BlindIndex do
 
   Both are decision 3c's, and both are deliberate.
 
-  **A `tenant: :none` field must write its `:scope`.** `scope: :global` is the
-  only possibility on a field that has no tenant, and declaring nothing is an
+  **A `scope: :none` field must write its `:derive`.** `derive: :global` is the
+  only possibility on a field that has no scope, and declaring nothing is an
   error rather than a silent fallback to it. The reviewer reading that schema
-  line is the person who needs to know that the column is cross-tenant
-  correlatable and survives a tenant shred, and silence is exactly what a
-  reviewer does not see. Declaring `scope: :tenant` on such a field is the
+  line is the person who needs to know that the column is cross-scope
+  correlatable and survives a scope shred, and silence is exactly what a
+  reviewer does not see. Declaring `derive: :per_scope` on such a field is the
   other half of the same error (open question Q4): a global ciphertext with a
-  per-tenant index is an incoherent pair, and it stays an error until somebody
+  per-scope index is an incoherent pair, and it stays an error until somebody
   brings the case.
 
   **An index on a field this package does not encrypt is an error.** The
@@ -369,12 +369,12 @@ defmodule Encryptor.Ecto.BlindIndex do
   under the weaker contract a truncated index answers under (decision 6), and
   `compute/3` is the value itself, for a host building its own query.
 
-  ### Both raise on a missing tenant, `where_eq/3` included
+  ### Both raise on a missing scope, `where_eq/3` included
 
-  This is the sharpest requirement in the record. A `scope: :tenant` index
-  computed outside tenant scope raises `Encryptor.Ecto.MissingTenantError`
+  This is the sharpest requirement in the record. A `derive: :per_scope` index
+  computed with no scope set raises `Encryptor.Ecto.MissingScopeError`
   identically to ADR-0001 decision 5c, on the read side as well as the write
-  side - so a query *built* outside tenant scope raises where it is built,
+  side - so a query *built* with no scope set raises where it is built,
   rather than being executed and matching nothing. A blind-index query that
   silently matches nothing is the worst failure this feature can have, because
   it looks exactly like "the record does not exist".
@@ -384,7 +384,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   `put_index/3` always names its column. `where_eq/3`, `where_eq_candidates/3`
   and `compute/3` take the source field, which resolves on their own when the
   field has exactly one index and is ambiguous when it has the two that
-  decision 3d's per-tenant/global pair and decision 7's rotation pair both
+  decision 3d's per-scope/global pair and decision 7's rotation pair both
   produce. Each therefore has a four-argument form naming the index column:
 
       from(c in Customer) |> where_eq(:email, :email_v2_index, "bob@example.com")
@@ -397,27 +397,27 @@ defmodule Encryptor.Ecto.BlindIndex do
 
   ### Two things the record does not settle, carried here
 
-  **ADR-0003 Q3, a query outliving its scope.** `where_eq/3` binds the tenant
+  **ADR-0003 Q3, a query outliving its scope.** `where_eq/3` binds the scope
   at *build* time, which is the fail-loud choice and the one decision 5 makes.
-  The consequence is that the returned `Ecto.Query` carries a tenant-specific
+  The consequence is that the returned `Ecto.Query` carries a scope-specific
   constant that is invisible in the struct and wrong if the struct is reused
-  in another tenant's scope - it would then match nothing, which is the
+  under another scope - it would then match nothing, which is the
   failure mode the build-time raise exists to prevent, arriving by a different
   road. Nothing here stamps the query or checks at execute: that is a guard
-  the record leaves open, and adding one unasked would put a tenant identifier
+  the record leaves open, and adding one unasked would put a scope identifier
   into a struct hosts serialize. It is recorded rather than resolved.
 
-  **A tenant key rotation is not the rotation this record describes.**
+  **A scope key rotation is not the rotation this record describes.**
   Decision 7's two-column dance covers a change to a *declaration* - a
   version, a normalizer, a width. `encryptor`'s ADR-0003 amendment A decision 7
-  consults only the current encryption key, so rotating a tenant's key changes
+  consults only the current encryption key, so rotating a scope's key changes
   every index key under it without any declaration changing, and every value
   already stored under the superseded key stops being derivable. During that
   window `where_eq/3` matches nothing and raises nothing. ADR-0003 does not
   describe that case and this package does not invent a behaviour for it:
   `where_eq_candidates/3` is decision 6's truncation surface and is *not* a
-  multi-key candidate surface. A host rotating a tenant key must reindex that
-  tenant's index columns, and what the package should do about it is an open
+  multi-key candidate surface. A host rotating a scope key must reindex that
+  scope's index columns, and what the package should do about it is an open
   question for the record rather than a default chosen here.
   """
 
@@ -527,13 +527,13 @@ defmodule Encryptor.Ecto.BlindIndex do
       beside a non-`NULL` index would leak that a value exists, which is
       exactly ADR-0001 decision 7's rule. No key is derived on that path,
       because none is needed: writing `NULL` is not a computation and a
-      missing tenant does not make it one.
+      missing scope does not make it one.
     * **A source set to `""` gets a real index value**, over `norm("")`. That
       is a constant per key scope, so a host indexing a column where the empty
       string is common publishes that fact to anyone reading cardinality.
 
-  Raises `Encryptor.Ecto.MissingTenantError` when a `scope: :tenant` index is
-  computed outside tenant scope, `Encryptor.Ecto.BlindIndex.NormalizationError`
+  Raises `Encryptor.Ecto.MissingScopeError` when a `derive: :per_scope` index is
+  computed with no scope set, `Encryptor.Ecto.BlindIndex.NormalizationError`
   when the declared normalizer cannot produce a binary, and `ArgumentError`
   when no index is declared for the `{source, column}` pair. There is no
   `:error` arm, for ADR-0001 decision 6's reason: the failure paths raise.
@@ -585,8 +585,8 @@ defmodule Encryptor.Ecto.BlindIndex do
   `normalize: :email` index. Normalization is lossy and directional, and an
   index hit is not proof of byte equality.
 
-  Raises `Encryptor.Ecto.MissingTenantError` when the index is `scope: :tenant`
-  and there is no tenant in scope - **at build time**, which is the point:
+  Raises `Encryptor.Ecto.MissingScopeError` when the index is `derive: :per_scope`
+  and there is no scope set - **at build time**, which is the point:
   a query built outside scope must not be executable and match nothing.
 
   Raises `ArgumentError` when the index is truncated (`bits` other than `256`),
@@ -596,7 +596,7 @@ defmodule Encryptor.Ecto.BlindIndex do
 
       iex> import Encryptor.Ecto.BlindIndex
       iex> alias Encryptor.Ecto.TestSchemas.Customer
-      iex> Encryptor.Ecto.Tenant.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
       iex> where_eq(Customer, :phone, "+1 (555) 0100").wheres |> length()
       1
   """
@@ -613,8 +613,8 @@ defmodule Encryptor.Ecto.BlindIndex do
 
   Decision 7's rotation window is what this exists for: while both versions
   are declared, the source field names two indexes and neither is the one
-  meant. It is also the form to reach for beside decision 3d's per-tenant and
-  `scope: :global` pair on one field.
+  meant. It is also the form to reach for beside decision 3d's per-scope and
+  `derive: :global` pair on one field.
   """
   @spec where_eq(Ecto.Queryable.t(), atom(), atom(), term()) :: Ecto.Query.t()
   def where_eq(queryable, source, column, value) when is_atom(source) and is_atom(column) do
@@ -673,7 +673,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   @doc """
   The index value itself, for hosts building their own queries.
 
-  The read-side computation, asked of the tenant strategy with `:load` exactly
+  The read-side computation, asked of the scope strategy with `:load` exactly
   as `where_eq/3` is, so a host-built query and a helper-built one constrain
   the same bytes.
 
@@ -690,7 +690,7 @@ defmodule Encryptor.Ecto.BlindIndex do
 
       iex> alias Encryptor.Ecto.BlindIndex
       iex> alias Encryptor.Ecto.TestSchemas.Customer
-      iex> Encryptor.Ecto.Tenant.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
       iex> byte_size(BlindIndex.compute(Customer, :phone, "+1 (555) 0100"))
       32
   """
@@ -821,7 +821,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   defp validate_declaration!(declaration) do
     params = source_params!(declaration)
     validate_index_column!(declaration)
-    validate_scope!(declaration, params.tenant)
+    validate_derive!(declaration, params.scope)
   end
 
   @spec source_params!(Declaration.t()) :: map()
@@ -879,29 +879,29 @@ defmodule Encryptor.Ecto.BlindIndex do
     end
   end
 
-  @spec validate_scope!(Declaration.t(), term()) :: :ok
-  defp validate_scope!(%Declaration{scope_declared?: false} = declaration, :none) do
+  @spec validate_derive!(Declaration.t(), term()) :: :ok
+  defp validate_derive!(%Declaration{derive_declared?: false} = declaration, :none) do
     raise ArgumentError,
           at(declaration) <>
-            " with no :scope, on a field declared tenant: :none (ADR-0003 " <>
-            "decision 3c). scope: :global is the only possibility here and it still " <>
+            " with no :derive, on a field declared scope: :none (ADR-0003 " <>
+            "decision 3c). derive: :global is the only possibility here and it still " <>
             "has to be written: the reviewer reading this line is the person who " <>
-            "needs to know that this column's equality structure spans every tenant " <>
-            "and survives a tenant shred, and silence is exactly what a reviewer " <>
+            "needs to know that this column's equality structure spans every scope " <>
+            "and survives a scope shred, and silence is exactly what a reviewer " <>
             "does not see."
   end
 
-  defp validate_scope!(%Declaration{scope: :tenant} = declaration, :none) do
+  defp validate_derive!(%Declaration{derive: :per_scope} = declaration, :none) do
     raise ArgumentError,
           at(declaration) <>
-            " with scope: :tenant, on a field declared tenant: :none (ADR-0003 " <>
-            "decision 3c, open question Q4). A global ciphertext with a per-tenant " <>
-            "index is an incoherent pair: there is no tenant to key the index with, " <>
-            "and the rows the index would answer for belong to no tenant. Write " <>
-            "scope: :global, or give the field a tenant."
+            " with derive: :per_scope, on a field declared scope: :none (ADR-0003 " <>
+            "decision 3c, open question Q4). A global ciphertext with a per-scope " <>
+            "index is an incoherent pair: there is no scope to key the index with, " <>
+            "and the rows the index would answer for belong to no scope. Write " <>
+            "derive: :global, or give the field a scope."
   end
 
-  defp validate_scope!(_declaration, _tenant), do: :ok
+  defp validate_derive!(_declaration, _scope), do: :ok
 
   # -- the set --------------------------------------------------------------
 

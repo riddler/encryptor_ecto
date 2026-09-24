@@ -7,7 +7,7 @@ defmodule Encryptor.Ecto do
   record's data belongs to. What it does not do is put that behind a schema
   field, and hand-rolling the glue is where field encryption usually goes
   wrong: the ciphertext ends up in a column nobody remembers to widen, the
-  cast/load/dump arms disagree about `nil`, and the tenant a value belongs to
+  cast/load/dump arms disagree about `nil`, and the scope a value belongs to
   is resolved differently at every call site.
 
   This package is that glue, in the shape Ecto already expects. Encrypted
@@ -23,14 +23,14 @@ defmodule Encryptor.Ecto do
     `Encryptor.Ecto.NaiveDateTime` and `Encryptor.Ecto.DateTime` (ADR-0001
     decisions 1 and 8). Every one of them calls `Binary` rather than copying
     it, so the closed option set, the declared `"table"`/`"column"` encryption
-    context, the tenant resolution, the `:binary` column and the vault's bytes
+    context, the scope resolution, the `:binary` column and the vault's bytes
     stored verbatim are the same for all of them; what a wrapper adds is a cast
     arm and, for the six scalars, a parse arm over the decrypted plaintext.
-  - **Tenant resolution.** `Encryptor.Ecto.Tenant` holds the current tenant
-    for a unit of work, `Encryptor.Ecto.TenantContext` is the behaviour a
+  - **Scope resolution.** `Encryptor.Ecto.Scope` holds the current scope
+    for a unit of work, `Encryptor.Ecto.ScopeContext` is the behaviour a
     host implements to resolve it some other way, and
-    `Encryptor.Ecto.TenantScope` scopes an ExUnit case or one `describe`
-    block to a tenant (ADR-0001 decision 5c).
+    `Encryptor.Ecto.ScopeSetup` sets the scope for an ExUnit case or one
+    `describe` block (ADR-0001 decision 5c).
   - **Blind indexes.** `Encryptor.Ecto.BlindIndex` declares a keyed,
     equality-only fingerprint column beside an encrypted one, so equality on
     plaintext becomes equality on fingerprint (ADR-0003).

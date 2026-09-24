@@ -10,13 +10,13 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
 
   use ExUnit.Case, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
   import Encryptor.Ecto.TestTelemetry, only: [capture_legacy_load: 1]
 
   alias Encryptor.Ecto.DecryptError
-  alias Encryptor.Ecto.MissingTenantError
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.SerializationError
-  alias Encryptor.Ecto.Tenant
   alias Encryptor.Ecto.TestLegacy
   alias Encryptor.Ecto.TestSchemas.Reading
   alias Encryptor.Ecto.TestTypes
@@ -96,7 +96,7 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
     test "a missing vault raises naming the type the host wrote" do
       assert_raise ArgumentError, ~r/use Encryptor.Ecto.Integer requires a :vault/, fn ->
         defmodule NoVault do
-          use Encryptor.Ecto.Integer, tenant: :none
+          use Encryptor.Ecto.Integer, scope: :none
         end
       end
     end
@@ -156,7 +156,7 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
   end
 
   describe "the round trip is Binary's, once per type" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: Scalar.dump/5 handing the value to Binary without
     # to_plaintext/2, red - Binary refuses a non-binary by shape.
@@ -231,7 +231,7 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
   # pass every assertion in it. These two tests are the ones that can, and
   # they are per kind because the two forms diverge per kind.
   describe "the plaintext bytes under the ciphertext" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: Scalar.to_plaintext/2's :naive_datetime clause ->
     # `NaiveDateTime.to_string/1`, red here and green in the round trip.
@@ -273,7 +273,7 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
   end
 
   describe "a plaintext the parse arm cannot read" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # A decrypt that succeeded and a payload that is not a date: neither an
     # encryption failure nor an integrity event, which is the row ADR-0001
@@ -331,7 +331,7 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
   end
 
   describe "a value that never passed cast" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # The `insert_all/3` shape: no changeset, so no cast. sabotage:
     # Scalar.dump/5's :error arm delegating to Binary anyway, red.
@@ -373,20 +373,20 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
     end
   end
 
-  describe "the tenant rules are Binary's too" do
-    # sabotage: the generated dump/3 delegating past Binary's tenant
+  describe "the scope rules are Binary's too" do
+    # sabotage: the generated dump/3 delegating past Binary's scope
     # resolution, red.
-    test "a dump with no tenant in scope raises" do
-      Tenant.clear()
+    test "a dump with no scope set raises" do
+      Scope.clear()
 
-      assert_raise MissingTenantError, ~r/readings/, fn ->
+      assert_raise MissingScopeError, ~r/readings/, fn ->
         TestTypes.RetryCount.dump(3, nil, params(TestTypes.RetryCount, :retry_count))
       end
     end
 
-    # sabotage: the generated init/1 not carrying `tenant: :none` through, red.
+    # sabotage: the generated init/1 not carrying `scope: :none` through, red.
     test "a field declared global asks no resolver anything" do
-      Tenant.clear()
+      Scope.clear()
       params = TestTypes.GlobalRetryCount.init(schema: Reading, field: :retry_count)
 
       assert {:ok, ciphertext} = TestTypes.GlobalRetryCount.dump(3, nil, params)
@@ -402,7 +402,7 @@ defmodule Encryptor.Ecto.ScalarTypesTest do
   # `legacy_load` can no longer be read as one of theirs.
   describe "the migration window, for a type that parses" do
     setup :capture_legacy_load
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # A legacy date type has already parsed: it answers with a `Date`, not
     # with bytes. sabotage: Scalar.load/5's {:legacy, loaded} arm routed

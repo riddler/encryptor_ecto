@@ -3,7 +3,7 @@ defmodule Encryptor.Ecto.TestKeyStore do
   The furniture `Encryptor.Ecto.KeyStore`'s tests resolve through.
 
   Nothing here is a stub. `Root` is a real single-key vault with a `Static`
-  provider, `Tenant` is a real `:tenant` vault whose provider is the module
+  provider, `Scope` is a real `:scope` vault whose provider is the module
   under test, and the rows the tests read come from a real
   `Encryptor.Envelope.provision/3` against `Root`. A mock would make the
   acceptance property unfalsifiable: a cross-partition substitution fails
@@ -33,9 +33,9 @@ defmodule Encryptor.Ecto.TestKeyStore do
   def wrapping_subkey, do: Envelope.root_subkey(@root, "root-wrap")
 
   @doc """
-  The subkey `tenant_ref` derives under.
+  The subkey `Encryptor.Envelope.scope_ref/2` derives under.
 
-  The provider and the tenant vault are configured with the same value on
+  The provider and the scoped vault are configured with the same value on
   purpose: a provider looking for a row under one reference while the vault
   writes a header claiming another would find nothing, for a reason no error
   message would explain.
@@ -104,7 +104,7 @@ defmodule Encryptor.Ecto.TestKeyStore do
         table,
         [
           [
-            tenant_ref: wrapped.tenant_ref,
+            tenant_ref: wrapped.scope_ref,
             version: wrapped.version,
             namespace: wrapped.namespace,
             name: wrapped.name,
@@ -151,9 +151,9 @@ defmodule Encryptor.Ecto.TestKeyStore do
     end
   end
 
-  defmodule Tenant do
+  defmodule Scope do
     @moduledoc """
-    A per-tenant vault whose keys come from the store.
+    A per-scoped vault whose keys come from the store.
 
     `cache: false` so every call re-resolves: the acceptance property is about
     what the provider and the engine do, and a cached partition would let a
@@ -162,7 +162,7 @@ defmodule Encryptor.Ecto.TestKeyStore do
 
     use Encryptor.Vault,
       otp_app: :encryptor_ecto,
-      context_profile: :tenant,
+      context_profile: :scoped,
       algorithm_suite_id: 0x0478,
       required_context: ["table", "column"],
       cache: false

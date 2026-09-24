@@ -39,7 +39,7 @@ defmodule Encryptor.Ecto.Migrator.Source.EctoTypeTest do
     # the adapter's own bookkeeping leaked into the host's type.
     test "the adapted module receives the migrator's params without the adapter's keys" do
       params = params(TestSources.LegacyParameterizedType, 3)
-      migrator_params = %{table: "cards", column: "pan", tenant: "acct_A"}
+      migrator_params = %{table: "cards", column: "pan", scope: "acct_A"}
 
       assert EctoType.load("legacy:cba", Map.merge(migrator_params, params)) == {:ok, "abc"}
       assert_received {:loaded_with, ^migrator_params, _loader?}

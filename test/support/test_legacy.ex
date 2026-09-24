@@ -56,7 +56,7 @@ defmodule Encryptor.Ecto.TestLegacy do
     @moduledoc """
     A reader that answers every call, whatever it is given.
 
-    ADR-0004 decision 4a's two prohibitions - no fallback for a missing tenant,
+    ADR-0004 decision 4a's two prohibitions - no fallback for a missing scope,
     none for a missing context key - are only testable against a legacy module
     that *would* have succeeded. A fixture that declines cannot tell "was
     never asked" apart from "was asked and could not answer".

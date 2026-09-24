@@ -36,9 +36,9 @@ defmodule Encryptor.Ecto.KeyStoreTest do
     end
 
     test "takes a table name a host renamed" do
-      assert {:ok, state} = KeyStore.init(TestKeyStore.provider_opts(table: "tenant_keys"))
+      assert {:ok, state} = KeyStore.init(TestKeyStore.provider_opts(table: "scope_keys"))
 
-      assert state.table == "tenant_keys"
+      assert state.table == "scope_keys"
     end
 
     test "refuses a missing repo" do
@@ -61,7 +61,7 @@ defmodule Encryptor.Ecto.KeyStoreTest do
     # Sabotage: dropped the byte-size guard and took any binary. A short
     # subkey then derived a perfectly stable reference that matched no row any
     # correctly configured process had written - a vault that starts, resolves
-    # nothing, and reports `:unknown_key` for every tenant it has.
+    # nothing, and reports `:unknown_key` for every scope it has.
     test "refuses a reference subkey that is not 32 bytes" do
       assert {:error, {:invalid_config, :reference_subkey, :invalid_length}} =
                KeyStore.init(TestKeyStore.provider_opts(reference_subkey: <<1, 2, 3>>))
@@ -96,9 +96,9 @@ defmodule Encryptor.Ecto.KeyStoreTest do
     end
 
     test "takes a schema prefix a host placed the table in" do
-      assert {:ok, state} = KeyStore.init(TestKeyStore.provider_opts(prefix: "tenant_keys"))
+      assert {:ok, state} = KeyStore.init(TestKeyStore.provider_opts(prefix: "scope_keys"))
 
-      assert state.prefix == "tenant_keys"
+      assert state.prefix == "scope_keys"
     end
 
     # An empty prefix is refused rather than treated as absent: it would read
@@ -106,7 +106,7 @@ defmodule Encryptor.Ecto.KeyStoreTest do
     # host that built the name by interpolation and got it wrong deserves to
     # hear about it at start rather than to silently query the search path.
     test "refuses a prefix that is empty or not a string" do
-      for prefix <- ["", :tenant_keys, 42] do
+      for prefix <- ["", :scope_keys, 42] do
         assert {:error, {:invalid_config, :prefix, :invalid_name}} =
                  KeyStore.init(TestKeyStore.provider_opts(prefix: prefix))
       end
@@ -123,7 +123,7 @@ defmodule Encryptor.Ecto.KeyStoreTest do
     # Sabotage: dropped the `Keyword.put/3` of the store's own subkey. The
     # provider's own `init/1` refused the missing `:reference_subkey` at start,
     # so this call answered `{:error, _}` - and the suite did not boot, because
-    # the GCP tenant vault `test_helper.exs` starts failed the same way.
+    # the GCP scoped vault `test_helper.exs` starts failed the same way.
     test "resolves with the store's own reference subkey and no store closure" do
       assert {:ok, state} =
                KeyStore.init(TestKeyStore.provider_opts(gcp_kms: TestGcpKms.opts()))

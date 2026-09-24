@@ -45,20 +45,20 @@ defmodule Encryptor.Ecto.Migrator.Census do
   | Kind | Answers |
   |---|---|
   | `:format` | Which formats are in this column, and how many rows of each |
-  | `:progress` | For one tenant, how far the rotation has got |
+  | `:progress` | For one scope, how far the rotation has got |
   | `:integrity` | Nothing became `NULL` and nothing became empty. Run before, run after, compare |
 
-  `:progress` is emitted only for a rewrite that resolves its tenant from a
-  column (`tenant_from`). A rewrite whose tenant is `:none` or a resolver
-  module has no tenant column to filter on, and a per-tenant progress query
-  over it would either be a whole-table count wearing a tenant's name or a
-  guess about where the tenant lives.
+  `:progress` is emitted only for a rewrite that resolves its scope from a
+  column (`scope_from`). A rewrite whose scope is `:none` or a resolver
+  module has no scope column to filter on, and a per-scope progress query
+  over it would either be a whole-table count wearing a scope's name or a
+  guess about where the scope lives.
 
   ## Placeholders, and why the header is one
 
   Two of the queries carry `:placeholder` names for the operator to
-  substitute, because neither value is knowable from the plan: `:tenant` is
-  whichever tenant is being watched, and `:current_header` is the byte prefix
+  substitute, because neither value is knowable from the plan: `:scope` is
+  whichever scope is being watched, and `:current_header` is the byte prefix
   the target format is currently writing.
 
   The operator gets `:current_header` from the `:format` query on the same
@@ -152,7 +152,7 @@ defmodule Encryptor.Ecto.Migrator.Census do
     do: "#{named(query)}: format census, grouped on #{@header_bytes} bytes"
 
   defp heading(%{kind: :progress} = query),
-    do: "#{named(query)}: rotation progress for one tenant"
+    do: "#{named(query)}: rotation progress for one scope"
 
   defp heading(%{kind: :integrity} = query),
     do: "#{named(query)}: nothing became NULL or empty"
@@ -172,7 +172,7 @@ defmodule Encryptor.Ecto.Migrator.Census do
       target = Atom.to_string(Keyword.get(spec, :into) || field)
       context = %{schema: rewrite.schema, field: field, table: table, column: target}
 
-      [format(context), integrity(context, source)] ++ progress(context, rewrite.tenant)
+      [format(context), integrity(context, source)] ++ progress(context, rewrite.scope)
     end)
   end
 
@@ -194,8 +194,8 @@ defmodule Encryptor.Ecto.Migrator.Census do
     Map.merge(context, %{kind: :format, placeholders: [], sql: sql})
   end
 
-  @spec progress(map(), Plan.tenant()) :: [query()]
-  defp progress(context, {:column, tenant_column}) do
+  @spec progress(map(), Plan.scope()) :: [query()]
+  defp progress(context, {:column, scope_column}) do
     column = quoted(context.column)
 
     sql = """
@@ -204,13 +204,13 @@ defmodule Encryptor.Ecto.Migrator.Census do
            ) AS done,
            count(*) FILTER (WHERE #{column} IS NOT NULL) AS total
     FROM #{context.table}
-    WHERE #{quoted(tenant_column)} = :tenant;\
+    WHERE #{quoted(scope_column)} = :scope;\
     """
 
-    [Map.merge(context, %{kind: :progress, placeholders: [:current_header, :tenant], sql: sql})]
+    [Map.merge(context, %{kind: :progress, placeholders: [:current_header, :scope], sql: sql})]
   end
 
-  defp progress(_context, _tenant), do: []
+  defp progress(_context, _scope), do: []
 
   # The ordinary rewrite reads and writes one column, so "did anything become
   # NULL?" is a question about that column before and after. The backfill leg

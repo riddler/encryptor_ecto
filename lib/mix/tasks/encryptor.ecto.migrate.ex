@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Migrate do
                                       [--batch-size N] [--resume] [--no-resume]
                                       [--prefix PREFIX] [--no-checkpoint]
                                       [--only Schema:field,Schema:field]
-                                      [--only-tenant ID] [--except-tenant ID]
+                                      [--only-scope ID] [--except-scope ID]
                                       [--on-error halt|continue]
 
   `PLAN` is the plan module - the one that `use Encryptor.Ecto.Migration` -
@@ -35,8 +35,8 @@ defmodule Mix.Tasks.Encryptor.Ecto.Migrate do
   | `--prefix PREFIX` | `:prefix` | The one schema prefix to visit; the repo's default when absent. No mode enumerates prefixes - a host with several loops the command over its own list |
   | `--no-checkpoint` | `:checkpoint` | `:none`, the documented degraded mode for a host that will not add the checkpoint table: every run is a full scan, which probe-first idempotence makes correct rather than merely tolerable |
   | `--only Schema:field,Schema:field` | `:only` | Narrow the plan to these fields, in the plan's own order |
-  | `--only-tenant ID` | `:only_tenants` | Repeatable. Visit only these tenants |
-  | `--except-tenant ID` | `:except_tenants` | Repeatable. Visit every tenant but these |
+  | `--only-scope ID` | `:only_scopes` | Repeatable. Visit only these scopes |
+  | `--except-scope ID` | `:except_scopes` | Repeatable. Visit every scope but these |
   | `--on-error halt\\|continue` | `:on_error` | `continue` records the failure and finishes the pass. `halt` by default |
 
   `--resume` with `--no-checkpoint` is a usage error: resuming from a
@@ -53,7 +53,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Migrate do
   |---|---|
   | `0` | The pass completed and recorded no failures |
   | `1` | The pass ran and found something: failures recorded under `--on-error continue`, or rows an operator has to decide about. A dry run that finds `:undecryptable` rows exits 1, because "the rehearsal found a problem" is not success |
-  | `2` | Usage error, a plan that will not compile, no mode given, or a run that could not start at all - a missing checkpoint table, a tenant filter against a rewrite with no tenant column |
+  | `2` | Usage error, a plan that will not compile, no mode given, or a run that could not start at all - a missing checkpoint table, a scope filter against a rewrite with no scope column |
 
   ## What it prints
 

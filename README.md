@@ -26,15 +26,15 @@ What the package ships today:
   and `Encryptor.Ecto.Map`, with `Integer`, `Float`, `Date`, `Time`,
   `NaiveDateTime` and `DateTime` wrappers over the same machinery, each an
   `Ecto.ParameterizedType` with a closed option set.
-- **Tenant context, resolved once and fail-closed** - a process-scoped current
-  tenant, or a host resolver module, with a write that has no tenant in scope
+- **Scope context, resolved once and fail-closed** - a process-scoped current
+  scope, or a host resolver module, with a write that has no scope set
   raising rather than falling back to a default.
 - **A migrator for an already-encrypted column** - a compiled plan DSL, and a
   probe-first, compare-and-swap, batched, resumable row rewriter that runs
   against live traffic, with a read-only `verify/2` as its acceptance test.
 - **Four `mix` tasks**, thin argument parsers over the library functions, so a
   release without Mix can run the same pass through `eval`.
-- **Keyed blind indexes** - salted, per-field and (by default) per-tenant HMAC
+- **Keyed blind indexes** - salted, per-field and (by default) per-scope HMAC
   derivation, a declaration macro, declared normalizers, and the changeset and
   query helpers that write and read the column.
 
@@ -44,7 +44,7 @@ There are two packages and they draw one line between them.
 
 **`encryptor` is the vault.** It answers the key-management questions: where
 key material comes from, which key a given record's data belongs to, how that
-key rotates, and how a tenant is crypto-shredded. A host writes one vault
+key rotates, and how a scope is crypto-shredded. A host writes one vault
 module and starts it in its supervision tree.
 
 **`encryptor_ecto` is this package: the Ecto layer, and nothing else.** It puts
@@ -100,7 +100,7 @@ error.
 defmodule Payments.Vault do
   use Encryptor.Vault,
     otp_app: :payments,
-    context_profile: :tenant,
+    context_profile: :scoped,
     required_context: ["table", "column"]
 
   def init(config) do
@@ -123,8 +123,8 @@ defmodule Payments.Encrypted.String do
 end
 ```
 
-The full closed option set is `:vault` (required), `:tenant` (`:scope` by
-default, `:none`, or an `Encryptor.Ecto.TenantContext` module), `:context`,
+The full closed option set is `:vault` (required), `:scope` (`:process` by
+default, `:none`, or an `Encryptor.Ecto.ScopeContext` module), `:context`,
 `:legacy`, and the `:table` / `:column` context pins - plus `:json` on
 `Encryptor.Ecto.Map`, which defaults to `Jason`. An unknown option raises while
 the host module compiles, and two fields sharing one declared
@@ -152,27 +152,27 @@ decrypting into the wrong place. Because they are frozen at declaration, a
 physical rename costs nothing - pin the old strings with `:table` / `:column`
 and stored rows stay readable.
 
-**4. Put the tenant in scope at the edge of every unit of work.** Scope does
+**4. Set the scope at the edge of every unit of work.** Scope does
 not propagate across processes, and this package does not pretend it does.
 
 ```elixir
-Encryptor.Ecto.Tenant.put("merchant_7f3")
+Encryptor.Ecto.Scope.put("merchant_7f3")
 
 # crossing into a process that did not inherit it
-tenant = Encryptor.Ecto.Tenant.fetch!()
-Task.async(fn -> Encryptor.Ecto.Tenant.wrap(tenant, &settle_batch/0) end)
+scope = Encryptor.Ecto.Scope.fetch!()
+Task.async(fn -> Encryptor.Ecto.Scope.wrap(scope, &settle_batch/0) end)
 ```
 
-A write with no tenant in scope raises `Encryptor.Ecto.MissingTenantError`
+A write with no scope set raises `Encryptor.Ecto.MissingScopeError`
 rather than falling back to a default. That fires first in a host's own test
-suite, which is what `Encryptor.Ecto.TenantScope` ships for:
+suite, which is what `Encryptor.Ecto.ScopeSetup` ships for:
 
 ```elixir
 defmodule Payments.CardsTest do
   use ExUnit.Case, async: true
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
 
-  scope_tenant "merchant_7f3"
+  setup_scope "merchant_7f3"
 
   test "stores a card under the merchant in scope" do
     assert {:ok, _card} = Payments.Cards.store(%{pan: "4111111111111111"})
@@ -226,14 +226,14 @@ def by_email(email) do
 end
 ```
 
-Options are `:name` (defaults to the index column's name), `:scope`
-(`:tenant` by default, or `:global`), `:normalize` (`:none` by default; the
+Options are `:name` (defaults to the index column's name), `:derive`
+(`:per_scope` by default, or `:global`), `:normalize` (`:none` by default; the
 built-ins are `:none`, `:trim`, `:downcase`, `:email` and `:digits`, or a
 `{module, function}` pair), `:bits` (`256` by default; `64`, `128` and `192`
 truncate the stored value), `:version` (`1` by default) and `:slow`. An index
-on a `tenant: :none` field has to write `scope: :global` out loud - declaring
+on a `scope: :none` field has to write `derive: :global` out loud - declaring
 nothing there is a compile-time error rather than a silent fallback, because a
-global index's equality structure survives a tenant's crypto-shred.
+global index's equality structure survives a scope's crypto-shred.
 
 Four things are worth knowing before adding one:
 
@@ -256,9 +256,9 @@ Four things are worth knowing before adding one:
   from being joined against production - and an `info` string binding the
   table, the column, the index name and the `:version`. Changing `:normalize`,
   `:bits` or `:version`, rotating the `:derivation_salt`, or rotating a
-  tenant's key material each invalidates every stored value in the column, and
+  scope's key material each invalidates every stored value in the column, and
   recomputing them needs decrypted plaintext. Treat the salt as permanent from
-  the first stored index value; the tenant-key case has no supported rotation
+  the first stored index value; the scope-key case has no supported rotation
   sequence today.
 
 `:slow` runs **Argon2id over the normalized value before the HMAC**, which is
@@ -266,14 +266,14 @@ the low-entropy column's only defence here: an attacker holding the index key
 still recovers a guessable column, but at one Argon2id hash per candidate
 rather than one HMAC. The parameters are the vault's frozen `:slow_hash`
 configuration and never this package's, and the salt is derived per index, per
-tenant and per deployment through the same vault call the index key comes from
+scope and per deployment through the same vault call the index key comes from
 (ADR-0003 amendment C). Two things follow: a `slow: true` index whose vault
 declares no `:slow_hash` raises rather than quietly writing plain-cost bytes,
 and a host declaring one adds `:argon2_elixir` to its own dependencies - the
 NIF is not this package's.
 
 The full leakage table - what an attacker learns from a dump, from a dump plus
-one tenant's index key, and from a retained dump after a shred - is
+one scope's index key, and from a retained dump after a shred - is
 `Encryptor.Ecto.BlindIndex`'s *Security properties* section, and it is meant to
 be read before declaring an index rather than after.
 
@@ -299,7 +299,7 @@ defmodule Payments.Encryption.CloakMigration do
   use Encryptor.Ecto.Migration, repo: Payments.Repo
 
   rewrite Payments.Cards.Card do
-    tenant_from :merchant_id
+    scope_from :merchant_id
 
     field :pan,
       from: Payments.Cloak.Encrypted.Binary,
@@ -310,7 +310,7 @@ end
 ```
 
 The DSL is compile-checked against the real schemas: every `field`, every
-`into:` and every `tenant_from` column has to exist, every `from:` module has
+`into:` and every `scope_from` column has to exist, every `from:` module has
 to be able to load the stored bytes, and every `to:` module has to both load
 and dump. `source_authenticated:` is required on every field whose `from:` is
 not one of this package's own vault-backed types, and it is an
@@ -335,7 +335,7 @@ every write is a compare-and-swap against the exact bytes that were read so a
 row the application wrote in the meantime is counted rather than clobbered, and
 each batch is one transaction with the checkpoint row written inside it.
 `:batch_size`, `:resume`, `:prefix`, `:checkpoint`, `:on_error`,
-`:only_tenants`, `:except_tenants`, `:only` and `:progress` are the options.
+`:only_scopes`, `:except_scopes`, `:only` and `:progress` are the options.
 
 Both arms return a report. Rows are classified `:null`, `:already_target`,
 `:migratable`, `:migratable_unverified` or `:undecryptable`, with `concurrent`
@@ -378,8 +378,8 @@ path. The index is not an extra and links at its GitHub path:
 - [`docs/README.md`](https://github.com/riddler/encryptor_ecto/blob/main/docs/README.md) - the index, including why there is
   deliberately no tutorial. Repository-only; it is not published to HexDocs.
 - [What changes when you move off cloak_ecto](docs/explanation/moving-off-cloak.md) -
-  per-tenant keys where cloak had one, the encryption context and the
-  substitution it forbids, fail-closed tenant scope and the boundary audit that
+  per-scope keys where cloak had one, the encryption context and the
+  substitution it forbids, fail-closed scope and the boundary audit that
   is the real cost of adoption, crypto-shredding, why encrypted columns are not
   queryable, and what a blind index does and does not restore.
 - [How to migrate a host app off cloak_ecto](docs/guides/migrate-from-cloak.md) -
@@ -390,7 +390,7 @@ path. The index is not an extra and links at its GitHub path:
   what belongs in a declared `:context` and what does not, how the pairs
   compose, which refusals a declaration buys, and why a bound value is
   permanent.
-- [How to keep tenant keys in Google Cloud KMS through the key store](docs/guides/gcp-kms-key-store.md) -
+- [How to keep scope keys in Google Cloud KMS through the key store](docs/guides/gcp-kms-key-store.md) -
   the Goth token server, the key store's `:gcp_kms` option, provisioning a
   `"gcp_kms_ciphertext"` row, and the shred: destroying the key version,
   deleting the row, the restore window, and what the application sees in
@@ -408,9 +408,9 @@ happens to be a good one, because the record is what makes it reviewable.
 
 | # | Decision | Status |
 |---|---|---|
-| [ADR-0001](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0001-vault-backed-ecto-types.md) | The types, the closed option set, the encryption context, tenant resolution | accepted, with amendments |
+| [ADR-0001](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0001-vault-backed-ecto-types.md) | The types, the closed option set, the encryption context, scope resolution | accepted, with amendments |
 | [ADR-0002](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0002-migrator.md) | The migrator: plan-driven, probe-first, compare-and-swap, live traffic | accepted, with amendments |
-| [ADR-0003](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0003-blind-index.md) | Keyed blind indexes, per-tenant by default, equality only | accepted, with amendments |
+| [ADR-0003](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0003-blind-index.md) | Keyed blind indexes, per-scope by default, equality only | accepted, with amendments |
 | [ADR-0004](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0004-migration-from-cloak.md) | Adoption: the migration runbook, the task family, the mixed window | accepted, with amendments |
 
 Every amendment the four records carry was accepted by the operator's

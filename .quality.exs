@@ -39,7 +39,7 @@
 # times.
 # What the flag does change is the per-file column for the two modules that
 # compile no executable lines - Encryptor.Ecto (moduledoc only) and
-# Encryptor.Ecto.TenantContext (typedocs and one @callback) - which read
+# Encryptor.Ecto.ScopeContext (typedocs and one @callback) - which read
 # 100.0% with the flag and 0.0% without it. It is kept so those two rows do
 # not read as uncovered code. Carried from the same deviation statifier_blocks
 # recorded under sb-p6s.

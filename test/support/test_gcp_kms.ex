@@ -54,7 +54,7 @@ defmodule Encryptor.Ecto.TestGcpKms do
       GcpKms.init(
         Keyword.merge(opts(),
           reference_subkey: TestKeyStore.reference_subkey(),
-          store: fn _tenant_ref -> {:ok, []} end
+          store: fn _scope_ref -> {:ok, []} end
         )
       )
 
@@ -188,18 +188,18 @@ defmodule Encryptor.Ecto.TestGcpKms do
     defp ok(map), do: {:ok, %{status: 200, body: JSON.encode!(map)}}
   end
 
-  defmodule Tenant do
+  defmodule Scope do
     @moduledoc """
-    A per-tenant vault over the key store with the GCP branch configured.
+    A per-scoped vault over the key store with the GCP branch configured.
 
-    The same shape as `Encryptor.Ecto.TestKeyStore.Tenant`, plus `:gcp_kms`,
+    The same shape as `Encryptor.Ecto.TestKeyStore.Scope`, plus `:gcp_kms`,
     so a value can be written and read back under a key whose only stored
     copy is a GCP KMS ciphertext.
     """
 
     use Encryptor.Vault,
       otp_app: :encryptor_ecto,
-      context_profile: :tenant,
+      context_profile: :scoped,
       algorithm_suite_id: 0x0478,
       required_context: ["table", "column"],
       cache: false

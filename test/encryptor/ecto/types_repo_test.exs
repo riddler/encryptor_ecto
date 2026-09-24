@@ -11,11 +11,11 @@ defmodule Encryptor.Ecto.TypesRepoTest do
 
   use Encryptor.Ecto.RepoCase, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
 
   alias Ecto.Adapters.SQL
   alias Encryptor.Ecto.DecryptError
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestSchemas.Card
 
   @name "Ada Lovelace"
@@ -27,7 +27,7 @@ defmodule Encryptor.Ecto.TypesRepoTest do
   end
 
   describe "a schema field naming the map type" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: Map.dump/3 handing the map to Binary without encoding, red -
     # the insert would raise instead of storing bytes.
@@ -81,7 +81,7 @@ defmodule Encryptor.Ecto.TypesRepoTest do
   end
 
   describe "a schema field naming the string type" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: String's generated dump/3 returning {:ok, value}, red.
     test "stores ciphertext in a binary column and reads back text" do
@@ -107,12 +107,12 @@ defmodule Encryptor.Ecto.TypesRepoTest do
   end
 
   describe "a row written for another merchant" do
-    # sabotage: Map.dump/3 passing params that dropped the tenant, red - the
+    # sabotage: Map.dump/3 passing params that dropped the scope, red - the
     # read in the wrong scope would succeed.
     test "does not decrypt its map in this merchant's scope" do
-      card = Tenant.wrap("merchant_7f3", fn -> insert_card("merchant_7f3") end)
+      card = Scope.wrap("merchant_7f3", fn -> insert_card("merchant_7f3") end)
 
-      Tenant.wrap("merchant_a19", fn ->
+      Scope.wrap("merchant_a19", fn ->
         assert_raise DecryptError, fn -> TestRepo.get!(Card, card.id) end
       end)
     end

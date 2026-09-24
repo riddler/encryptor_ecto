@@ -39,7 +39,7 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeys03Row do
     {1, _rows} =
       repo().insert_all("encryptor_wrapped_keys_03", [
         [
-          tenant_ref: wrapped.tenant_ref,
+          tenant_ref: wrapped.scope_ref,
           version: wrapped.version,
           namespace: wrapped.namespace,
           name: wrapped.name,

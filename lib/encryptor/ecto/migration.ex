@@ -3,20 +3,20 @@ defmodule Encryptor.Ecto.Migration do
   The compile-time DSL for a migration plan (ADR-0002 decision 2).
 
   A plan module names one repo and, per schema, the fields to rewrite and how
-  the tenant is resolved for its rows:
+  the scope is resolved for its rows:
 
       defmodule MyApp.Encryption.CloakMigration do
         use Encryptor.Ecto.Migration, repo: MyApp.Repo
 
         rewrite MyApp.Accounts.Customer do
-          tenant_from :account_id
+          scope_from :account_id
 
           field :tax_id, from: MyApp.Cloak.Encrypted.Binary, to: MyApp.Encrypted.Binary
           field :notes, from: MyApp.Cloak.Encrypted.String, to: MyApp.Encrypted.String
         end
 
         rewrite MyApp.Reference.Code do
-          tenant :none
+          scope :none
           field :value, from: MyApp.Cloak.Encrypted.Binary, to: MyApp.Encrypted.Binary
         end
       end
@@ -47,7 +47,7 @@ defmodule Encryptor.Ecto.Migration do
 
     * the schema is a real `Ecto.Schema`, and every `field` and `into:` names
       a field on it;
-    * `tenant_from` names a real column, and a `tenant` module resolves;
+    * `scope_from` names a real column, and a `scope` module resolves;
     * every `from:` module can read the bytes - `resolve!/2` decides between
       `Encryptor.Ecto.Migrator.Source`, `Ecto.ParameterizedType` and
       `Ecto.Type` and refuses a module that is none of them;
@@ -70,13 +70,13 @@ defmodule Encryptor.Ecto.Migration do
   declaration is that shape.
 
   What the same-module spelling does not *describe* is an **in-place
-  declaration edit**. A field moving from `tenant: :none` to `tenant: :scope`,
+  declaration edit**. A field moving from `scope: :none` to `scope: :process`,
   or gaining a `:context` pair, is a context change and therefore a full
   rewrite even though no type module changed - but both sides of a same-module
   spec read that module's *current* declaration, so the spec says a rewrite
   from the edited declaration into itself. It says nothing about the bytes
   already in the column, which were written under the form the module no
-  longer has; and where the edit changed which key wrapped them - a tenant
+  longer has; and where the edit changed which key wrapped them - a scope
   strategy, a vault - the source side cannot read them at all.
 
   **An in-place declaration edit is migrated as two declarations** (ADR-0002
@@ -109,7 +109,7 @@ defmodule Encryptor.Ecto.Migration do
   (ADR-0004 decision 9), exactly as before.
 
       rewrite MyApp.Accounts.Customer do
-        tenant_from :account_id
+        scope_from :account_id
 
         field :contact_email,
           from: MyApp.Cloak.Encrypted.String,
@@ -123,7 +123,7 @@ defmodule Encryptor.Ecto.Migration do
   column - and the plan fails at `mix compile` otherwise. The value is
   `Encryptor.Ecto.BlindIndex.put_index/3`'s: the same declaration, the same
   normalization and the same key derivation, asked with `:dump`, under the
-  row's own tenant. A failure computing it is recorded against the row under
+  row's own scope. A failure computing it is recorded against the row under
   a reason naming the index column, so it stays attributable to the index
   rather than to the rewrite.
 
@@ -238,7 +238,7 @@ defmodule Encryptor.Ecto.Migration do
     quote do
       @behaviour Encryptor.Ecto.Migration
 
-      import Encryptor.Ecto.Migration, only: [rewrite: 2, tenant_from: 1, tenant: 1, field: 2]
+      import Encryptor.Ecto.Migration, only: [rewrite: 2, scope_from: 1, scope: 1, field: 2]
 
       Module.register_attribute(__MODULE__, :encryptor_ecto_rewrites, accumulate: true)
       Module.put_attribute(__MODULE__, :encryptor_ecto_open, nil)
@@ -254,7 +254,7 @@ defmodule Encryptor.Ecto.Migration do
   end
 
   @doc """
-  Opens a rewrite of one schema. Its body declares a tenant strategy and one
+  Opens a rewrite of one schema. Its body declares a scope strategy and one
   or more fields.
   """
   defmacro rewrite(schema, do: body) do
@@ -268,13 +268,13 @@ defmodule Encryptor.Ecto.Migration do
   end
 
   @doc """
-  Declares that the tenant is read off the named column of each row.
+  Declares that the scope is read off the named column of each row.
   """
-  defmacro tenant_from(column) do
+  defmacro scope_from(column) do
     meta = meta(__CALLER__)
 
     quote do
-      unquote(__MODULE__).__tenant__(
+      unquote(__MODULE__).__scope__(
         __MODULE__,
         {:column, unquote(column)},
         unquote(meta)
@@ -283,14 +283,14 @@ defmodule Encryptor.Ecto.Migration do
   end
 
   @doc """
-  Declares the tenant strategy: `:none` for a global field, or an
-  `Encryptor.Ecto.TenantContext` module.
+  Declares the scope strategy: `:none` for a global field, or an
+  `Encryptor.Ecto.ScopeContext` module.
   """
-  defmacro tenant(strategy) do
+  defmacro scope(strategy) do
     meta = meta(__CALLER__)
 
     quote do
-      unquote(__MODULE__).__tenant__(__MODULE__, unquote(strategy), unquote(meta))
+      unquote(__MODULE__).__scope__(__MODULE__, unquote(strategy), unquote(meta))
     end
   end
 
@@ -370,7 +370,7 @@ defmodule Encryptor.Ecto.Migration do
       raise_at!(meta, duplicate_rewrite_message(schema))
     end
 
-    put_open(plan_module, %{schema: schema, tenant: nil, fields: []})
+    put_open(plan_module, %{schema: schema, scope: nil, fields: []})
   end
 
   @doc false
@@ -378,46 +378,46 @@ defmodule Encryptor.Ecto.Migration do
   def __close__(plan_module, meta) do
     rewrite = open!(plan_module, meta, "rewrite")
 
-    if rewrite.tenant == nil, do: raise_at!(meta, missing_tenant_message(rewrite.schema))
+    if rewrite.scope == nil, do: raise_at!(meta, missing_scope_message(rewrite.schema))
     if rewrite.fields == [], do: raise_at!(meta, empty_rewrite_message(rewrite.schema))
 
     Module.put_attribute(plan_module, :encryptor_ecto_rewrites, %{
       schema: rewrite.schema,
-      tenant: rewrite.tenant,
+      scope: rewrite.scope,
       fields: Enum.reverse(rewrite.fields)
     })
 
     put_open(plan_module, nil)
   end
 
-  # -- the tenant strategy --------------------------------------------------
+  # -- the scope strategy --------------------------------------------------
 
   @doc false
-  @spec __tenant__(module(), term(), meta()) :: :ok
-  def __tenant__(plan_module, strategy, meta) do
-    rewrite = open!(plan_module, meta, "tenant_from/1 and tenant/1")
+  @spec __scope__(module(), term(), meta()) :: :ok
+  def __scope__(plan_module, strategy, meta) do
+    rewrite = open!(plan_module, meta, "scope_from/1 and scope/1")
 
-    if rewrite.tenant, do: raise_at!(meta, duplicate_tenant_message(rewrite.schema))
+    if rewrite.scope, do: raise_at!(meta, duplicate_scope_message(rewrite.schema))
 
-    put_open(plan_module, %{rewrite | tenant: validate_tenant!(strategy, rewrite.schema, meta)})
+    put_open(plan_module, %{rewrite | scope: validate_scope!(strategy, rewrite.schema, meta)})
   end
 
-  @spec validate_tenant!(term(), module(), meta()) :: Plan.tenant()
-  defp validate_tenant!({:column, column}, schema, meta) when is_atom(column) do
+  @spec validate_scope!(term(), module(), meta()) :: Plan.scope()
+  defp validate_scope!({:column, column}, schema, meta) when is_atom(column) do
     unless column in schema_fields(schema) do
-      raise_at!(meta, unknown_column_message(schema, column, "tenant_from"))
+      raise_at!(meta, unknown_column_message(schema, column, "scope_from"))
     end
 
     {:column, column}
   end
 
-  defp validate_tenant!(:none, _schema, _meta), do: :none
+  defp validate_scope!(:none, _schema, _meta), do: :none
 
-  defp validate_tenant!(:scope, schema, meta) do
-    raise_at!(meta, scope_tenant_message(schema))
+  defp validate_scope!(:process, schema, meta) do
+    raise_at!(meta, process_strategy_message(schema))
   end
 
-  defp validate_tenant!(module, schema, meta) when is_atom(module) do
+  defp validate_scope!(module, schema, meta) when is_atom(module) do
     if exports?(module, :resolve, 2) do
       module
     else
@@ -425,7 +425,7 @@ defmodule Encryptor.Ecto.Migration do
     end
   end
 
-  defp validate_tenant!(other, schema, meta) do
+  defp validate_scope!(other, schema, meta) do
     raise_at!(meta, not_a_resolver_message(schema, other))
   end
 
@@ -679,17 +679,17 @@ defmodule Encryptor.Ecto.Migration do
       "which schema the declaration is about."
   end
 
-  defp missing_tenant_message(schema) do
-    "`rewrite #{inspect(schema)}` declares no tenant. Add `tenant_from " <>
-      ":some_column` to read it off each row, `tenant :none` for a global " <>
-      "field, or `tenant MyApp.SomeResolver`. There is no default: the " <>
-      "migrator passes the tenant explicitly (ADR-0002 decision 3), and a " <>
+  defp missing_scope_message(schema) do
+    "`rewrite #{inspect(schema)}` declares no scope. Add `scope_from " <>
+      ":some_column` to read it off each row, `scope :none` for a global " <>
+      "field, or `scope MyApp.SomeResolver`. There is no default: the " <>
+      "migrator passes the scope explicitly (ADR-0002 decision 3), and a " <>
       "guess would rewrite rows under the wrong key."
   end
 
-  defp duplicate_tenant_message(schema) do
-    "`rewrite #{inspect(schema)}` declares a tenant twice. One rewrite has " <>
-      "one tenant strategy; split the schema into two plans if two are " <>
+  defp duplicate_scope_message(schema) do
+    "`rewrite #{inspect(schema)}` declares a scope twice. One rewrite has " <>
+      "one scope strategy; split the schema into two plans if two are " <>
       "genuinely needed."
   end
 
@@ -704,18 +704,18 @@ defmodule Encryptor.Ecto.Migration do
       "migration's plan is meant to be deleted in a named commit."
   end
 
-  defp scope_tenant_message(schema) do
-    "`rewrite #{inspect(schema)}` declares `tenant :scope`, which the " <>
+  defp process_strategy_message(schema) do
+    "`rewrite #{inspect(schema)}` declares `scope :process`, which the " <>
       "migrator cannot honour: process scope is ambient state a pass run " <>
       "from a release command does not have, and reading the empty scope " <>
-      "would rewrite every row under the wrong key. Use `tenant_from " <>
+      "would rewrite every row under the wrong key. Use `scope_from " <>
       ":some_column`, or name a resolver module."
   end
 
   defp not_a_resolver_message(schema, given) do
-    "`rewrite #{inspect(schema)}` declares `tenant #{inspect(given)}`, which " <>
-      "is neither `:none`, a column (`tenant_from :some_column`), nor a " <>
-      "module implementing `Encryptor.Ecto.TenantContext`: it exports no " <>
+    "`rewrite #{inspect(schema)}` declares `scope #{inspect(given)}`, which " <>
+      "is neither `:none`, a column (`scope_from :some_column`), nor a " <>
+      "module implementing `Encryptor.Ecto.ScopeContext`: it exports no " <>
       "`resolve/2`."
   end
 

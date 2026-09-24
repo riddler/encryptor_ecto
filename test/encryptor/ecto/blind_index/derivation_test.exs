@@ -3,8 +3,8 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
 
   alias Encryptor.Ecto.BlindIndex.Derivation
   alias Encryptor.Ecto.BlindIndex.DerivationError
-  alias Encryptor.Ecto.MissingTenantError
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestVaults
 
   doctest Encryptor.Ecto.BlindIndex.Derivation
@@ -12,25 +12,25 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
   # The vaults these tests derive through hold key material; nothing here does.
   # That is the point of the rework: after enc-ADR-0003 amendment A there is no
   # argument on any function under test that key material could be passed as.
-  @merchant_7f3 {:tenant, "merchant_7f3"}
-  @merchant_a19 {:tenant, "merchant_a19"}
+  @merchant_7f3 {:scope, "merchant_7f3"}
+  @merchant_a19 {:scope, "merchant_a19"}
 
   # A resolver that is not the default one, to prove decision 3a's claim that
   # the index asks the *field's* configured strategy rather than reading the
   # process scope itself.
   defmodule FixedResolver do
     @moduledoc false
-    @behaviour Encryptor.Ecto.TenantContext
+    @behaviour Encryptor.Ecto.ScopeContext
 
-    @impl Encryptor.Ecto.TenantContext
+    @impl Encryptor.Ecto.ScopeContext
     def resolve(_operation, _params), do: {:ok, "merchant_7f3"}
   end
 
   defmodule RefusingResolver do
     @moduledoc false
-    @behaviour Encryptor.Ecto.TenantContext
+    @behaviour Encryptor.Ecto.ScopeContext
 
-    @impl Encryptor.Ecto.TenantContext
+    @impl Encryptor.Ecto.ScopeContext
     def resolve(_operation, _params), do: {:error, :no_request_context}
   end
 
@@ -42,9 +42,9 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
 
   defmodule OperationResolver do
     @moduledoc false
-    @behaviour Encryptor.Ecto.TenantContext
+    @behaviour Encryptor.Ecto.ScopeContext
 
-    @impl Encryptor.Ecto.TenantContext
+    @impl Encryptor.Ecto.ScopeContext
     def resolve(operation, _params), do: {:ok, Atom.to_string(operation)}
   end
 
@@ -60,7 +60,7 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
   defp params(overrides \\ []) do
     Enum.into(overrides, %{
       vault: Payments.Vault,
-      tenant: :scope,
+      scope: :process,
       table: "payments",
       column: "card_number"
     })
@@ -133,7 +133,7 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
 
     # sabotage: hard-code the selector in derive_opts/2 -> red. Two merchants
     # storing one card number must not produce one index value (decision 3b).
-    test "a different tenant derives different bytes" do
+    test "a different scope derives different bytes" do
       assert derive!(card_number_index(), @merchant_a19) ==
                "d480f7acf31d42224d10467ac064147f29bfb21e8abd6398674e4e5841f09e78"
 
@@ -157,7 +157,7 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
         table: "signups",
         column: "email",
         index_name: "email_index",
-        scope: :global
+        derive: :global
       )
     end
 
@@ -217,9 +217,9 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
 
     # sabotage: delete key_opt/2's refusing clause -> red. The vault would
     # otherwise answer {:invalid_selector, term} naming a value this package
-    # constructed, and that value is a tenant identifier.
-    test "refuses a selector that is neither a resolved tenant nor :global" do
-      for selector <- [:default, {:tenant, ""}, {:tenant, nil}, "merchant_7f3", nil] do
+    # constructed, and that value is a scope identifier.
+    test "refuses a selector that is neither a resolved scope nor :global" do
+      for selector <- [:default, {:scope, ""}, {:scope, nil}, "merchant_7f3", nil] do
         error =
           assert_raise DerivationError, fn ->
             Derivation.derive_opts(card_number_index(), selector)
@@ -288,9 +288,9 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
     end
 
     # sabotage: drop `key_opt/2` from salt_derive_opts/2, i.e. derive every
-    # tenant's salt under the vault's default selector -> red. C3: a
+    # scope's salt under the vault's default selector -> red. C3: a
     # deployment-wide salt would make the Argon2id output a function of the
-    # plaintext alone, reintroducing one layer in the cross-tenant
+    # plaintext alone, reintroducing one layer in the cross-scope
     # correlatability decision 3b argues against.
     test "the salt derives under the same selector as the index key" do
       derivation = card_number_index()
@@ -357,8 +357,8 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
 
   describe "new!/1" do
     # sabotage: change the version default from 1 to 2 -> red
-    test "defaults version to 1 and scope to :tenant" do
-      assert %Derivation{version: 1, scope: :tenant} = card_number_index()
+    test "defaults version to 1 and scope to :scope" do
+      assert %Derivation{version: 1, derive: :per_scope} = card_number_index()
     end
 
     # sabotage: delete validate_component!/2's separator branch -> red
@@ -393,55 +393,55 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
       end
     end
 
-    # sabotage: delete validate_scope!/1's call from new!/1 -> red
-    test "refuses a scope that is neither :tenant nor :global" do
-      error = assert_raise DerivationError, fn -> card_number_index(scope: :everything) end
+    # sabotage: delete validate_derive!/1's call from new!/1 -> red
+    test "refuses a scope that is neither :scope nor :global" do
+      error = assert_raise DerivationError, fn -> card_number_index(derive: :everything) end
 
-      assert error.reason == {:invalid, :scope, :not_tenant_or_global}
+      assert error.reason == {:invalid, :derive, :not_per_scope_or_global}
     end
   end
 
   describe "selector!/3 (ADR-0003 decision 3a)" do
     setup do
-      Tenant.clear()
-      on_exit(&Tenant.clear/0)
+      Scope.clear()
+      on_exit(&Scope.clear/0)
     end
 
-    # sabotage: make the :global clause fall through to the :tenant one -> red
+    # sabotage: make the :global clause fall through to the :scope one -> red
     test "a :global index asks no resolver anything" do
       assert Derivation.selector!(
-               card_number_index(scope: :global),
-               params(tenant: RefusingResolver),
+               card_number_index(derive: :global),
+               params(scope: RefusingResolver),
                :dump
              ) == :global
     end
 
-    # sabotage: read Tenant.get/0 directly instead of asking the resolver -> red
-    test "a :tenant index asks the field's own strategy" do
-      Tenant.put("merchant_other")
+    # sabotage: read Scope.get/0 directly instead of asking the resolver -> red
+    test "a :scope index asks the field's own strategy" do
+      Scope.put("merchant_other")
 
-      assert Derivation.selector!(card_number_index(), params(tenant: FixedResolver), :dump) ==
-               {:tenant, "merchant_7f3"}
+      assert Derivation.selector!(card_number_index(), params(scope: FixedResolver), :dump) ==
+               {:scope, "merchant_7f3"}
     end
 
-    # sabotage: default the resolver to something other than TenantContext.Scope -> red
-    test "tenant: :scope reads the process scope through the default resolver" do
-      Tenant.put("merchant_7f3")
+    # sabotage: default the resolver to something other than ScopeContext.Process -> red
+    test "scope: :process reads the process scope through the default resolver" do
+      Scope.put("merchant_7f3")
 
       assert Derivation.selector!(card_number_index(), params(), :dump) ==
-               {:tenant, "merchant_7f3"}
+               {:scope, "merchant_7f3"}
     end
 
     # sabotage: return :global instead of raising when the resolver errors -> red.
     # A blind-index query that silently matches nothing is the worst failure
     # this feature can have (decision 5).
-    test "a missing tenant raises MissingTenantError, never a fallback" do
+    test "a missing scope raises MissingScopeError, never a fallback" do
       error =
-        assert_raise MissingTenantError, fn ->
+        assert_raise MissingScopeError, fn ->
           Derivation.selector!(card_number_index(), params(), :dump)
         end
 
-      assert error.reason == {:blind_index, "card_number_index", :no_tenant_in_scope}
+      assert error.reason == {:blind_index, "card_number_index", :no_scope_in_process}
       assert error.table == "payments"
       assert error.column == "card_number"
     end
@@ -449,31 +449,31 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
     # sabotage: replace the resolver reason with a constant in selector!/3 -> red
     test "a resolver's own error reason reaches the exception" do
       error =
-        assert_raise MissingTenantError, fn ->
-          Derivation.selector!(card_number_index(), params(tenant: RefusingResolver), :dump)
+        assert_raise MissingScopeError, fn ->
+          Derivation.selector!(card_number_index(), params(scope: RefusingResolver), :dump)
         end
 
       assert error.reason == {:blind_index, "card_number_index", :no_request_context}
     end
 
-    # sabotage: answer {:ok, _} for a tenant: :none field -> red. Decision
+    # sabotage: answer {:ok, _} for a scope: :none field -> red. Decision
     # 3c makes the pairing a compile error at the declaration; this is the
     # runtime backstop, and it has to name the field as global.
-    test "a tenant: :none field cannot key a :tenant index" do
+    test "a scope: :none field cannot key a :scope index" do
       error =
-        assert_raise MissingTenantError, fn ->
-          Derivation.selector!(card_number_index(), params(tenant: :none), :dump)
+        assert_raise MissingScopeError, fn ->
+          Derivation.selector!(card_number_index(), params(scope: :none), :dump)
         end
 
       assert error.reason ==
-               {:blind_index, "card_number_index", :field_declared_tenant_none}
+               {:blind_index, "card_number_index", :field_declared_scope_none}
     end
 
     # sabotage: delete the off-contract clause of selector!/3 -> red
     test "an off-contract resolver raises rather than being believed" do
       error =
-        assert_raise MissingTenantError, fn ->
-          Derivation.selector!(card_number_index(), params(tenant: OffContractResolver), :dump)
+        assert_raise MissingScopeError, fn ->
+          Derivation.selector!(card_number_index(), params(scope: OffContractResolver), :dump)
         end
 
       assert error.reason ==
@@ -482,8 +482,8 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
 
     # sabotage: hard-code :dump in resolve/2 -> red
     test "the operation reaches the resolver" do
-      assert Derivation.selector!(card_number_index(), params(tenant: OperationResolver), :load) ==
-               {:tenant, "load"}
+      assert Derivation.selector!(card_number_index(), params(scope: OperationResolver), :load) ==
+               {:scope, "load"}
     end
   end
 
@@ -494,7 +494,7 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationTest do
 
       error =
         assert_raise DerivationError, fn ->
-          Derivation.derive_opts(card_number_index(), {:tenant, :merchant_7f3})
+          Derivation.derive_opts(card_number_index(), {:scope, :merchant_7f3})
         end
 
       assert Enum.all?(Tuple.to_list(error.reason), &is_atom/1)

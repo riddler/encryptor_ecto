@@ -1,11 +1,11 @@
 defmodule Encryptor.Ecto.VaultProfileError do
   @moduledoc """
-  Raised when a field declared `tenant: :none` names a `:tenant`-profile vault
+  Raised when a field declared `scope: :none` names a `:scoped`-profile vault
   (ADR-0001 decision 5e, acceptance amendment 3).
 
-  A `:none` field omits the tenant key from the vault call entirely. A
-  `:tenant`-profile vault carries the tenant reference in its required set and
-  refuses an operation without it, so "a tenant vault with the pair omitted"
+  A `:none` field omits the scope key from the vault call entirely. A
+  `:scoped`-profile vault carries the scope reference in its required set and
+  refuses an operation without it, so "a scoped vault with the pair omitted"
   is not a representable configuration: the pairing is wrong, not merely
   unlucky, and the host runs a second `:single`-profile vault for its global
   fields.
@@ -20,7 +20,7 @@ defmodule Encryptor.Ecto.VaultProfileError do
   provider complaining about a selector nobody wrote; a provider that accepts
   that selector gets one step further and fails the required-context check
   instead, as `Encryptor.Ecto.MissingContextError`. Neither names the field's
-  `tenant: :none`, neither names the vault's profile, and neither says what to
+  `scope: :none`, neither names the vault's profile, and neither says what to
   change.
 
   This exception exists so the pairing rule fails in its own words, naming the
@@ -43,7 +43,7 @@ defmodule Encryptor.Ecto.VaultProfileError do
   and wrong in exactly the case a host varies the profile per environment,
   which is worse than checking later: it is a check that holds until it
   matters. Deriving the rule from the running vault's own configuration is the
-  same one-source-of-truth property the tenant reference gets, so the check
+  same one-source-of-truth property the scope reference gets, so the check
   and the vault it checks cannot disagree.
 
   ## `:vault` and `:profile`
@@ -58,7 +58,7 @@ defmodule Encryptor.Ecto.VaultProfileError do
   @doc false
   @spec headline() :: String.t()
   def headline do
-    "a field declared tenant: :none names a :tenant-profile vault; point it at " <>
+    "a field declared scope: :none names a :scoped-profile vault; point it at " <>
       "a :single-profile vault instead"
   end
 

@@ -4,8 +4,8 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
   alias Encryptor.Ecto.BlindIndex.Declaration
   alias Encryptor.Ecto.BlindIndex.Derivation
   alias Encryptor.Ecto.BlindIndex.NormalizationError
-  alias Encryptor.Ecto.MissingTenantError
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestNormalizers
   alias Encryptor.Ecto.TestSchemas.Customer
   alias Encryptor.Ecto.TestSchemas.Identity
@@ -16,14 +16,14 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
   defp new!(opts \\ []), do: Declaration.new!(MyApp.Customer, :email, :email_index, opts)
 
   describe "new!/4 defaults" do
-    # sabotage: new!/4's `scope: Keyword.get(opts, :scope, :tenant)` -> :global,
-    # red. Decision 3a's default is per-tenant, and a default that silently
-    # went the other way would make every unwritten index cross-tenant
+    # sabotage: new!/4's `scope: Keyword.get(opts, :derive, :per_scope)` -> :global,
+    # red. Decision 3a's default is per-scope, and a default that silently
+    # went the other way would make every unwritten index cross-scope
     # correlatable.
-    test "an index with no options is per-tenant, byte-exact, full width, version 1" do
+    test "an index with no options is per-scope, byte-exact, full width, version 1" do
       assert %Declaration{
-               scope: :tenant,
-               scope_declared?: false,
+               derive: :per_scope,
+               derive_declared?: false,
                normalize: :none,
                bits: 256,
                slow: false,
@@ -46,15 +46,15 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
       refute first.name == second.name
     end
 
-    # sabotage: new!/4's `scope_declared?: Keyword.has_key?(...)` -> false, red
-    # (test/support stops compiling: Identity's written `scope: :global` stops
-    # counting as written and decision 3c refuses it). `scope: :global` written
-    # and `scope: :global` inferred are the same derivation and a different
+    # sabotage: new!/4's `derive_declared?: Keyword.has_key?(...)` -> false, red
+    # (test/support stops compiling: Identity's written `derive: :global` stops
+    # counting as written and decision 3c refuses it). `derive: :global` written
+    # and `derive: :global` inferred are the same derivation and a different
     # schema line, and decision 3c cares about the line.
-    test "scope_declared? records whether the reviewer saw :scope written" do
-      assert new!(scope: :tenant).scope_declared?
-      assert new!(scope: :global).scope_declared?
-      refute new!().scope_declared?
+    test "derive_declared? records whether the reviewer saw :derive written" do
+      assert new!(derive: :per_scope).derive_declared?
+      assert new!(derive: :global).derive_declared?
+      refute new!().derive_declared?
     end
 
     # sabotage: name!/3's atom arm guarded to match nothing, red (test/support
@@ -76,10 +76,10 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
       end
     end
 
-    # sabotage: validate_option!/2's :scope guard widened to admit it, red.
-    test "a :scope outside the set is refused" do
-      assert_raise ArgumentError, ~r/:scope: :per_tenant, which is not one of/, fn ->
-        new!(scope: :per_tenant)
+    # sabotage: validate_option!/2's :derive guard widened to admit it, red.
+    test "a :derive outside the set is refused" do
+      assert_raise ArgumentError, ~r/:derive: :per_row, which is not one of/, fn ->
+        new!(derive: :per_row)
       end
     end
 
@@ -206,7 +206,7 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
         |> Declaration.fetch!(:email, :email_index)
         |> Declaration.field_params!()
 
-      assert %{table: "customers", column: "email", tenant: :scope} = params
+      assert %{table: "customers", column: "email", scope: :process} = params
     end
 
     # sabotage: derivation!/1's `column: params.column` -> the declaration's
@@ -219,7 +219,7 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
         |> Declaration.fetch!(:email, :email_index)
         |> Declaration.derivation!()
 
-      assert %Derivation{table: "customers", column: "email", scope: :tenant} = derivation
+      assert %Derivation{table: "customers", column: "email", derive: :per_scope} = derivation
       assert Derivation.info(derivation) =~ "|customers|email|email_index|1"
     end
 
@@ -247,15 +247,15 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
       assert Derivation.info(derivation) =~ "|phone_index|2"
     end
 
-    # sabotage: derivation!/1's `scope: declaration.scope` -> :tenant, red. A
-    # global index whose derivation asked for a tenant would raise on the
-    # cross-tenant login path, which is the one path per-tenant cannot serve.
+    # sabotage: derivation!/1's `derive: declaration.derive` -> :scope, red. A
+    # global index whose derivation asked for a scope would raise on the
+    # cross-scope login path, which is the one path per-scope cannot serve.
     test "a global declaration derives with the global selector" do
       declaration = Declaration.fetch!(Identity, :email, :email_index)
       derivation = Declaration.derivation!(declaration)
       params = Declaration.field_params!(declaration)
 
-      assert derivation.scope == :global
+      assert derivation.derive == :global
       assert Derivation.selector!(derivation, params, :dump) == :global
     end
 
@@ -342,7 +342,7 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
     # and the read side have to agree on, and they agree by reading one
     # declaration.
     test "normalization decides what the HMAC is computed over" do
-      Tenant.wrap("merchant_7f3", fn ->
+      Scope.wrap("merchant_7f3", fn ->
         padded = index_value(Customer, :email, :email_index, " Bob@Example.COM ")
         bare = index_value(Customer, :email, :email_index, "bob@example.com")
 
@@ -356,7 +356,7 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
     # produce the same bytes, and the failure is silent - both columns would
     # simply hold the same value.
     test "two indexes over one field produce unrelated bytes" do
-      Tenant.wrap("merchant_7f3", fn ->
+      Scope.wrap("merchant_7f3", fn ->
         full = index_value(Customer, :email, :email_index, "bob@example.com")
         short = index_value(Customer, :email, :email_short_index, "bob@example.com")
 
@@ -364,20 +364,20 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
       end)
     end
 
-    # ADR-0003 decision 3b's cross-tenant non-correlatability, end to end: two
-    # tenants storing one email address must not put the same bytes in the
+    # ADR-0003 decision 3b's cross-scope non-correlatability, end to end: two
+    # scopes storing one email address must not put the same bytes in the
     # index column, or anyone holding a dump learns they share a customer.
     #
-    # sabotage: Declaration.derivation!/1's `scope: declaration.scope` ->
+    # sabotage: Declaration.derivation!/1's `derive: declaration.derive` ->
     # :global, red.
-    test "the same plaintext in two tenants produces unrelated bytes" do
+    test "the same plaintext in two scopes produces unrelated bytes" do
       a =
-        Tenant.wrap("merchant_7f3", fn ->
+        Scope.wrap("merchant_7f3", fn ->
           index_value(Customer, :email, :email_index, "bob@example.com")
         end)
 
       b =
-        Tenant.wrap("merchant_a19", fn ->
+        Scope.wrap("merchant_a19", fn ->
           index_value(Customer, :email, :email_index, "bob@example.com")
         end)
 
@@ -385,15 +385,15 @@ defmodule Encryptor.Ecto.BlindIndex.DeclarationTest do
     end
 
     # ADR-0003 decision 5, and ADR-0001 decision 5c behind it: a blind-index
-    # computation outside tenant scope raises rather than answering. A query
+    # computation with no scope set raises rather than answering. A query
     # that silently matches nothing is the single worst failure this feature
     # can have, because it looks exactly like "the record does not exist".
     #
     # sabotage: Derivation.selector!/3's `{:error, reason}` arm ->
-    # `{:tenant, "default"}`, red (that raise is Derivation's, and this is the
+    # `{:scope, "default"}`, red (that raise is Derivation's, and this is the
     # test that says this surface inherits it rather than working around it).
-    test "computing an index value outside tenant scope raises" do
-      assert_raise MissingTenantError, fn ->
+    test "computing an index value with no scope set raises" do
+      assert_raise MissingScopeError, fn ->
         index_value(Customer, :email, :email_index, "bob@example.com")
       end
     end

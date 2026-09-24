@@ -113,7 +113,7 @@ defmodule Encryptor.Ecto.Migrator.SourceTest do
     # source stopped receiving the per-row context.
     test "hands a direct source the migrator's params" do
       resolved = Source.resolve!(TestSources.DirectSource, [])
-      params = %{table: "cards", column: "pan", tenant: "acct_A"}
+      params = %{table: "cards", column: "pan", scope: "acct_A"}
 
       assert Source.load(resolved, "direct:cba", params) == {:ok, "abc"}
       assert_received {:direct_params, ^params}

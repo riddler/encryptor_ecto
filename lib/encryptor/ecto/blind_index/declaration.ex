@@ -23,27 +23,27 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
   copying them here. A copy would be a second place for the declared context
   to live, and the whole point of freezing it is that there is one.
 
-  ## `:scope`, and why `:scope_declared?` is carried
+  ## `:derive`, and why `:derive_declared?` is carried
 
-  Decision 3a defaults a tenant-capable field's index to `scope: :tenant`, so
-  `:scope` is always resolved on the struct and a reader never has to apply a
-  default. Decision 3c then makes *silence* an error on a `tenant: :none`
+  Decision 3a defaults a scope-capable field's index to `derive: :per_scope`, so
+  `:derive` is always resolved on the struct and a reader never has to apply a
+  default. Decision 3c then makes *silence* an error on a `scope: :none`
   field, which is a fact about what the reviewer saw written rather than about
-  the resolved value - `scope: :global` written and `scope: :global` inferred
-  are the same derivation and a different schema line. `:scope_declared?`
+  the resolved value - `derive: :global` written and `derive: :global` inferred
+  are the same derivation and a different schema line. `:derive_declared?`
   carries that distinction to the compile-time check, and is why the check can
   refuse a declaration whose resolved scope would have been correct anyway.
 
   ## Which operation an index computation is
 
   `Encryptor.Ecto.BlindIndex.Derivation.selector!/3` takes the
-  `Encryptor.Ecto.TenantContext` operation from its caller, because ADR-0003
+  `Encryptor.Ecto.ScopeContext` operation from its caller, because ADR-0003
   does not say which of `:dump`/`:load` an index computation is. This package
   answers it here, at the seam where the answer becomes observable to a host
   resolver: **a write-side computation asks with `:dump` and a read-side
   computation asks with `:load`**, matching what the encrypted field itself
   would be doing at the same moment. A host whose resolver answers differently
-  for reads and writes - a reporting job with a `:load` tenant it does not
+  for reads and writes - a reporting job with a `:load` scope it does not
   have on `:dump` is ADR-0001's own example - gets the answer it would expect
   from the ordinary encryption path. The ruling is recorded for the acceptance
   reading rather than assumed settled.
@@ -52,8 +52,8 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
   alias Encryptor.Ecto.BlindIndex.Derivation
   alias Encryptor.Ecto.BlindIndex.Normalizer
 
-  @options [:name, :scope, :normalize, :bits, :slow, :version]
-  @scopes [:tenant, :global]
+  @options [:name, :derive, :normalize, :bits, :slow, :version]
+  @derives [:per_scope, :global]
   @widths [64, 128, 192, 256]
 
   @enforce_keys [:schema, :source, :column, :name]
@@ -62,8 +62,8 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
     :source,
     :column,
     :name,
-    scope: :tenant,
-    scope_declared?: false,
+    derive: :per_scope,
+    derive_declared?: false,
     normalize: :none,
     bits: 256,
     slow: false,
@@ -82,8 +82,8 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
           source: atom(),
           column: atom(),
           name: String.t(),
-          scope: Derivation.scope(),
-          scope_declared?: boolean(),
+          derive: Derivation.derive(),
+          derive_declared?: boolean(),
           normalize: Normalizer.t(),
           bits: 64 | 128 | 192 | 256,
           slow: boolean(),
@@ -103,8 +103,8 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
         source: :email,
         column: :email_index,
         name: "email_index",
-        scope: :tenant,
-        scope_declared?: false,
+        derive: :per_scope,
+        derive_declared?: false,
         normalize: :email,
         bits: 256,
         slow: false,
@@ -129,7 +129,7 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
 
       iex> Encryptor.Ecto.BlindIndex.Declaration.new!(
       ...>   MyApp.Customer, :email, :email_index, normalise: :email)
-      ** (ArgumentError) MyApp.Customer declares blind_index :email, :email_index with unknown options: [:normalise]. Known options: [:name, :scope, :normalize, :bits, :slow, :version].
+      ** (ArgumentError) MyApp.Customer declares blind_index :email, :email_index with unknown options: [:normalise]. Known options: [:name, :derive, :normalize, :bits, :slow, :version].
 
   Every argument but the schema is typed as `t:term/0` rather than as what it
   has to be. This is the boundary the macro hands a host's literal words
@@ -154,8 +154,8 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
       source: source,
       column: column,
       name: name!(at, opts, column),
-      scope: Keyword.get(opts, :scope, :tenant),
-      scope_declared?: Keyword.has_key?(opts, :scope),
+      derive: Keyword.get(opts, :derive, :per_scope),
+      derive_declared?: Keyword.has_key?(opts, :derive),
       normalize: Keyword.get(opts, :normalize, :none),
       bits: Keyword.get(opts, :bits, 256),
       slow: Keyword.get(opts, :slow, false),
@@ -259,8 +259,8 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
       iex> Encryptor.Ecto.BlindIndex.Declaration.fetch!(
       ...>   Encryptor.Ecto.TestSchemas.Customer, :email, :email_index)
       ...> |> Encryptor.Ecto.BlindIndex.Declaration.field_params!()
-      ...> |> Map.take([:table, :column, :tenant])
-      %{table: "customers", column: "email", tenant: :scope}
+      ...> |> Map.take([:table, :column, :scope])
+      %{table: "customers", column: "email", scope: :process}
   """
   @spec field_params!(t()) :: Derivation.field_params()
   def field_params!(%__MODULE__{} = declaration) do
@@ -292,7 +292,7 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
       column: params.column,
       index_name: declaration.name,
       version: declaration.version,
-      scope: declaration.scope
+      derive: declaration.derive
     )
   end
 
@@ -358,8 +358,8 @@ defmodule Encryptor.Ecto.BlindIndex.Declaration do
   end
 
   @spec validate_option!(String.t(), {atom(), term()}) :: :ok
-  defp validate_option!(at, {:scope, scope}) when scope not in @scopes,
-    do: refuse!(at, :scope, scope, "one of #{inspect(@scopes)}")
+  defp validate_option!(at, {:derive, derive}) when derive not in @derives,
+    do: refuse!(at, :derive, derive, "one of #{inspect(@derives)}")
 
   defp validate_option!(at, {:bits, bits}) when bits not in @widths,
     do: refuse!(at, :bits, bits, "one of #{inspect(@widths)}")

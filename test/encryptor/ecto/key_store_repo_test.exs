@@ -60,7 +60,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # this test at the first failing assertion, so a single run shows only the
     # first of them - which is the same mutation the acceptance property
     # catches and the cheapest place to see it.
-    test "never answers another tenant's versions" do
+    test "never answers another scope's versions" do
       TestKeyStore.provision!("merchant_7f3", 1)
       TestKeyStore.provision!("merchant_a19", 1)
 
@@ -84,11 +84,11 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
   end
 
   describe "the typed arms" do
-    # Sabotage: answered `{:ok, []}` for a tenant with no rows. The vault built
+    # Sabotage: answered `{:ok, []}` for a scope with no rows. The vault built
     # an empty candidate keyring and the failure surfaced as
     # `{:invalid_key_descriptor, _}` on the first write - a bug report about a
-    # descriptor, for a tenant that had simply never been provisioned.
-    test "a tenant with no row is a settled unknown_key on both callbacks" do
+    # descriptor, for a scope that had simply never been provisioned.
+    test "a scope with no row is a settled unknown_key on both callbacks" do
       state = TestKeyStore.state()
 
       assert {:error, {:unknown_key, "merchant_none"}} =
@@ -98,11 +98,11 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
                KeyStore.decryption_keys(state, "merchant_none")
     end
 
-    # A tenant store has no reference to derive for `:default` or for an empty
+    # A scope store has no reference to derive for `:default` or for an empty
     # selector, and that is a selector it does not serve rather than a store
     # failure: `:unknown_key` is settled, `:key_unavailable` invites a retry
     # that can never succeed.
-    test "a selector no tenant reference exists for is unknown_key, not a raise" do
+    test "a selector no scope reference exists for is unknown_key, not a raise" do
       state = TestKeyStore.state()
 
       for selector <- [:default, "", 42] do
@@ -134,11 +134,11 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # in the `:engine` field a host may well log.
     test "a row that does not unwrap is invalid_key_descriptor, and carries nothing" do
       wrapped = TestKeyStore.provision!("merchant_7f3", 1)
-      {:ok, foreign_ref} = tenant_ref("merchant_a19")
+      {:ok, foreign_ref} = scope_ref("merchant_a19")
 
       TestKeyStore.insert!(%{
         wrapped
-        | tenant_ref: foreign_ref,
+        | scope_ref: foreign_ref,
           name: "t/#{foreign_ref}/v1"
       })
 
@@ -150,7 +150,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
   describe "a version that will not unwrap" do
     # Sabotage: put `reduce_while`'s halt back, so one failed unwrap ended the
     # whole list. This assertion went red with `{:invalid_key_descriptor,
-    # :unwrap_failed}` - every write for the tenant refused because of a
+    # :unwrap_failed}` - every write for the scope refused because of a
     # wrapping from a rotation ago, which is the outage this bead exists to
     # remove.
     test "an older one does not block a write" do
@@ -164,7 +164,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # The decided read semantics: skipped, not fatal. A version that will not
     # unwrap is already a version nothing can be decrypted under, so removing
     # it from the candidate list costs a caller nothing - and halting would
-    # have made every value the tenant ever wrote unreadable to protect the
+    # have made every value the scope ever wrote unreadable to protect the
     # subset written under this one.
     test "an older one is skipped, and the versions that do unwrap still answer" do
       TestKeyStore.provision!("merchant_7f3", 3)
@@ -196,19 +196,19 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
     # The other half of the decision, end to end and through the vault: a
     # value written under the version that later stopped unwrapping is the one
-    # thing that does not read back, and everything else the tenant has keeps
+    # thing that does not read back, and everything else the scope has keeps
     # working. That is the whole trade - the loss is scoped to the rows whose
-    # key is genuinely gone, rather than spread over every row the tenant
+    # key is genuinely gone, rather than spread over every row the scope
     # owns, which is what halting on the bad version used to do.
     #
     # Sabotage: put the halt back. The value written *after* the break stopped
-    # reading back too - the tenant's whole history went dark because one
+    # reading back too - the scope's whole history went dark because one
     # wrapping from before the rotation no longer opened.
-    test "and reads of rows written under it fail, while the tenant keeps working" do
+    test "and reads of rows written under it fail, while the scope keeps working" do
       TestKeyStore.provision!("merchant_7f3", 1)
 
       assert {:ok, old} =
-               TestKeyStore.Tenant.encrypt("written under the version that broke",
+               TestKeyStore.Scope.encrypt("written under the version that broke",
                  key: "merchant_7f3",
                  encryption_context: @context
                )
@@ -217,16 +217,16 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       break_wrapping!("merchant_7f3", 1)
 
       assert {:error, %Error{reason: :decrypt_failed}} =
-               TestKeyStore.Tenant.decrypt(old, key: "merchant_7f3", encryption_context: @context)
+               TestKeyStore.Scope.decrypt(old, key: "merchant_7f3", encryption_context: @context)
 
       assert {:ok, current} =
-               TestKeyStore.Tenant.encrypt("written after",
+               TestKeyStore.Scope.encrypt("written after",
                  key: "merchant_7f3",
                  encryption_context: @context
                )
 
       assert {:ok, "written after"} =
-               TestKeyStore.Tenant.decrypt(current,
+               TestKeyStore.Scope.decrypt(current,
                  key: "merchant_7f3",
                  encryption_context: @context
                )
@@ -336,11 +336,11 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # for the whole store would make the mixed window unrepresentable. Both rows
     # below are each produced by their own path - a root-vault engine message
     # and a GCP KMS ciphertext - and one store configured with both clients
-    # serves both, in one tenant and across two.
+    # serves both, in one scope and across two.
     #
     # Sabotage: sent the GCP row down the refusal arm whatever the
     # configuration. `merchant_a19` answered `{:unsupported_wrapping_shape,
-    # "gcp_kms_ciphertext"}` and the mixed tenant lost its GCP version from
+    # "gcp_kms_ciphertext"}` and the mixed scope lost its GCP version from
     # the candidate list.
     test "one store serves both shapes at once, each down its own path" do
       wrapped = TestKeyStore.provision!("merchant_7f3", 1)
@@ -416,7 +416,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
         GcpKms.init(
           Keyword.merge(TestGcpKms.opts(),
             reference_subkey: TestKeyStore.reference_subkey(),
-            store: fn _tenant_ref -> {:ok, [provisioned]} end
+            store: fn _scope_ref -> {:ok, [provisioned]} end
           )
         )
 
@@ -426,7 +426,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       assert digest(descriptor) == digest(from_provider)
     end
 
-    # The same key, end to end: a value written through a tenant vault whose
+    # The same key, end to end: a value written through a scoped vault whose
     # only stored copy of its key is a GCP KMS ciphertext reads back, and the
     # message names the key the row declares.
     test "a value written through the vault reads back under the GCP-wrapped key" do
@@ -434,13 +434,13 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       plaintext = "the value in merchant_7f3's column"
 
       assert {:ok, ciphertext} =
-               TestGcpKms.Tenant.encrypt(plaintext,
+               TestGcpKms.Scope.encrypt(plaintext,
                  key: "merchant_7f3",
                  encryption_context: @context
                )
 
       assert {:ok, ^plaintext} =
-               TestGcpKms.Tenant.decrypt(ciphertext,
+               TestGcpKms.Scope.decrypt(ciphertext,
                  key: "merchant_7f3",
                  encryption_context: @context
                )
@@ -452,7 +452,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
     # A GCP wrapping is bound to its row's `tenant_ref`, `version` and
     # `namespace` through the additional authenticated data, so a row filed
-    # under another tenant fails closed at `Decrypt`. The provider's public
+    # under another scope fails closed at `Decrypt`. The provider's public
     # answer is `{:key_unavailable, selector}`, which merges a refused
     # `Decrypt` with an unreachable service, and the store returns it
     # unrelabelled (ADR-0005 Amendment A5).
@@ -463,10 +463,10 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # Selectors of its own: the `UPDATE` writes a `{namespace, name}` that a
     # concurrent async test inserting `merchant_7f3` would also write, and two
     # sandboxed transactions contending on one unique key deadlocked.
-    test "a row moved to another tenant fails closed, in the provider's own term" do
+    test "a row moved to another scope fails closed, in the provider's own term" do
       TestGcpKms.provision!("merchant_moved_from")
-      {:ok, mine} = tenant_ref("merchant_moved_to")
-      {:ok, theirs} = tenant_ref("merchant_moved_from")
+      {:ok, mine} = scope_ref("merchant_moved_to")
+      {:ok, theirs} = scope_ref("merchant_moved_from")
 
       {1, _rows} =
         TestRepo.update_all(
@@ -485,13 +485,13 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
     # The "one bad row is not the whole store" rule holds for a GCP row as it
     # does for an engine message, because the dispatch is per row: with the
-    # service unreachable, the tenant's engine-message version still answers
+    # service unreachable, the scope's engine-message version still answers
     # reads, and a write - whose key is that newest row - is unaffected.
     #
     # Sabotage: matched the delegate's answer with `{:ok, [descriptor]} =`
     # instead of `with`, so its failure raised rather than returned. The first
     # assertion went red on a `MatchError` out of the callback - the whole
-    # tenant unreadable because one row's service was down.
+    # scope unreadable because one row's service was down.
     test "an unreachable service costs only the GCP rows" do
       TestGcpKms.provision!("merchant_7f3")
       TestKeyStore.provision!("merchant_7f3", 2)
@@ -582,7 +582,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # unwrap the data key. That is not where it lands. ADR-0004 decision 6's
     # context comparison runs before the engine is handed a keyring
     # (`Encryptor.Vault.Decrypt.call/4` composes the context and calls
-    # `agree/4` ahead of `engine_decrypt/4`), and on a `:tenant` vault
+    # `agree/4` ahead of `engine_decrypt/4`), and on a `:scope` vault
     # `tenant_ref` is derived from `:key` by the vault itself, so the read is
     # refused as `{:encryption_context_mismatch, "tenant_ref"}` with the
     # keyring never consulted. Both are authentication failures and both are
@@ -611,13 +611,13 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       plaintext = "the value in merchant_7f3's column"
 
       assert {:ok, ciphertext} =
-               TestKeyStore.Tenant.encrypt(plaintext,
+               TestKeyStore.Scope.encrypt(plaintext,
                  key: "merchant_7f3",
                  encryption_context: @context
                )
 
       assert {:ok, ^plaintext} =
-               TestKeyStore.Tenant.decrypt(ciphertext,
+               TestKeyStore.Scope.decrypt(ciphertext,
                  key: "merchant_7f3",
                  encryption_context: @context
                )
@@ -628,7 +628,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
                 operation: :decrypt,
                 engine: {:encryption_context_mismatch, "tenant_ref"}
               }} =
-               TestKeyStore.Tenant.decrypt(ciphertext,
+               TestKeyStore.Scope.decrypt(ciphertext,
                  key: "merchant_a19",
                  encryption_context: @context
                )
@@ -652,13 +652,13 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       TestKeyStore.provision!("merchant_7f3", 1)
 
       assert {:ok, ciphertext} =
-               TestKeyStore.Tenant.encrypt("a value",
+               TestKeyStore.Scope.encrypt("a value",
                  key: "merchant_7f3",
                  encryption_context: @context
                )
 
       assert {:error, %Error{reason: {:unknown_key, "merchant_none"}}} =
-               TestKeyStore.Tenant.decrypt(ciphertext,
+               TestKeyStore.Scope.decrypt(ciphertext,
                  key: "merchant_none",
                  encryption_context: @context
                )
@@ -671,7 +671,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       TestKeyStore.provision!("merchant_7f3", 1)
 
       assert {:ok, old} =
-               TestKeyStore.Tenant.encrypt("written before the rotation",
+               TestKeyStore.Scope.encrypt("written before the rotation",
                  key: "merchant_7f3",
                  encryption_context: @context
                )
@@ -679,7 +679,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       TestKeyStore.provision!("merchant_7f3", 2)
 
       assert {:ok, "written before the rotation"} =
-               TestKeyStore.Tenant.decrypt(old, key: "merchant_7f3", encryption_context: @context)
+               TestKeyStore.Scope.decrypt(old, key: "merchant_7f3", encryption_context: @context)
     end
   end
 
@@ -696,16 +696,16 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
         version: version
       )
 
-    {:ok, ref} = tenant_ref(selector)
+    {:ok, ref} = scope_ref(selector)
 
-    TestKeyStore.insert!(%{wrapped | tenant_ref: ref, name: "t/#{ref}/v#{version}"})
+    TestKeyStore.insert!(%{wrapped | scope_ref: ref, name: "t/#{ref}/v#{version}"})
   end
 
   # Ruins a row that is already there, which `corrupt!/2` cannot do: a value
   # has to be written under the version *before* its wrapping stops opening,
   # and that is the order a root rotation gone wrong happens in.
   defp break_wrapping!(selector, version) do
-    {:ok, ref} = tenant_ref(selector)
+    {:ok, ref} = scope_ref(selector)
 
     {1, _rows} =
       TestRepo.update_all(
@@ -724,11 +724,11 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     ref
   end
 
-  # A digest rather than the bytes: a tenant master key is key-shaped, and a
+  # A digest rather than the bytes: a scope master key is key-shaped, and a
   # `refute` that fails prints both sides of what it compared.
   defp digest(descriptor), do: :crypto.hash(:sha256, descriptor.material)
 
-  defp tenant_ref(selector) do
-    Encryptor.Envelope.tenant_ref(TestKeyStore.reference_subkey(), selector)
+  defp scope_ref(selector) do
+    Encryptor.Envelope.scope_ref(TestKeyStore.reference_subkey(), selector)
   end
 end

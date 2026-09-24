@@ -14,12 +14,12 @@ defmodule Encryptor.Ecto.TestEnginePlans do
   """
 
   defmodule Cards do
-    @moduledoc "The ordinary case: one encrypted column, tenant read off the row."
+    @moduledoc "The ordinary case: one encrypted column, scope read off the row."
 
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -37,7 +37,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -57,7 +57,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -72,7 +72,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -87,7 +87,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -112,7 +112,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     alias Encryptor.Ecto.TestChecks
 
     rewrite Encryptor.Ecto.TestSchemas.Signup do
-      tenant Encryptor.Ecto.TestResolvers.Fixed
+      scope Encryptor.Ecto.TestResolvers.Fixed
 
       field :email,
         from: Encryptor.Ecto.Migrator.Source.Plaintext,
@@ -124,12 +124,12 @@ defmodule Encryptor.Ecto.TestEnginePlans do
   end
 
   defmodule Global do
-    @moduledoc "A global field: `tenant :none`, on the single-key vault."
+    @moduledoc "A global field: `scope :none`, on the single-key vault."
 
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Signup do
-      tenant :none
+      scope :none
 
       field :variant_notes,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -148,7 +148,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -169,7 +169,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     alias Encryptor.Ecto.TestChecks
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -191,7 +191,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     alias Encryptor.Ecto.TestChecks
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -213,7 +213,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     alias Encryptor.Ecto.TestChecks
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -233,7 +233,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -259,7 +259,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -284,7 +284,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestTypes.PanRekeyed,
@@ -311,7 +311,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestTypes.Pan,
@@ -321,7 +321,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
 
   defmodule Rotation do
     @moduledoc """
-    A single tenant's data-key rotation: one declaration on both sides.
+    A single scope's data-key rotation: one declaration on both sides.
 
     The shape ADR-0002's worked example gives R2 - "the same tool with a filter
     and `from`/`to` naming the same module" - and the one that rewrites nothing
@@ -338,7 +338,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestTypes.PanRotating,
@@ -360,7 +360,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -390,7 +390,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestLegacy.Binary,
@@ -405,7 +405,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Composite do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -423,7 +423,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Cardholder do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :email,
         from: Encryptor.Ecto.TestSources.CountingLegacyType,
@@ -442,7 +442,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Cardholder do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :email,
         from: Encryptor.Ecto.TestSources.CountingLegacyType,
@@ -461,7 +461,7 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Cardholder do
-      tenant :none
+      scope :none
 
       field :nickname,
         from: Encryptor.Ecto.TestSources.LegacyType,

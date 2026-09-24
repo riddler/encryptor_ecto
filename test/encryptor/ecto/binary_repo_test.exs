@@ -6,18 +6,18 @@ defmodule Encryptor.Ecto.BinaryRepoTest do
   A hand-called `dump/3` proves the callback works. It does not prove that
   Ecto calls it, that a `:binary` return survives a `bytea` column, that `nil`
   reaches the column as `NULL` rather than as encrypted bytes, or that a read
-  in the wrong tenant's scope fails at the point a host would meet it. Those
+  under the wrong scope fails at the point a host would meet it. Those
   are what this file is for.
   """
 
   use Encryptor.Ecto.RepoCase, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
 
   alias Ecto.Adapters.SQL
   alias Encryptor.Ecto.DecryptError
-  alias Encryptor.Ecto.MissingTenantError
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestSchemas.Card
 
   @pan "4111111111111111"
@@ -28,7 +28,7 @@ defmodule Encryptor.Ecto.BinaryRepoTest do
   end
 
   describe "a schema field naming the type" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: Binary.dump/3's is_binary arm returning {:ok, value}, red -
     # the stored bytes would equal the plaintext.
@@ -71,25 +71,25 @@ defmodule Encryptor.Ecto.BinaryRepoTest do
 
   describe "a row written for another merchant" do
     # sabotage: Binary's encryption_context/1 dropping a pair would not show
-    # here, but vault_opts/2 ignoring the tenant would: red, the read would
+    # here, but vault_opts/2 ignoring the scope would: red, the read would
     # succeed.
     test "does not decrypt in this merchant's scope" do
-      card = Tenant.wrap("merchant_7f3", fn -> insert_card("merchant_7f3") end)
+      card = Scope.wrap("merchant_7f3", fn -> insert_card("merchant_7f3") end)
 
-      Tenant.wrap("merchant_a19", fn ->
+      Scope.wrap("merchant_a19", fn ->
         assert_raise DecryptError, fn -> TestRepo.get!(Card, card.id) end
       end)
     end
   end
 
-  describe "a write with no tenant in scope" do
-    # sabotage: resolve_tenant!/2's {:error, _} arm returning a default
-    # tenant, red - the insert would succeed and the row would be
+  describe "a write with no scope set" do
+    # sabotage: resolve_scope!/2's {:error, _} arm returning a default
+    # scope, red - the insert would succeed and the row would be
     # unrecoverable.
     test "raises rather than writing the row" do
-      Tenant.clear()
+      Scope.clear()
 
-      assert_raise MissingTenantError, fn -> insert_card("merchant_7f3") end
+      assert_raise MissingScopeError, fn -> insert_card("merchant_7f3") end
 
       %{rows: [[count]]} = SQL.query!(TestRepo, "SELECT count(*) FROM cards", [])
       assert count == 0

@@ -92,30 +92,30 @@ defmodule Encryptor.Ecto.MigrationTest do
       assert [{:pan, _pan}, {:notes, _notes}] = rewrite.fields
     end
 
-    # Sabotage: `tenant_from/1` quoting `unquote(column)` instead of
+    # Sabotage: `scope_from/1` quoting `unquote(column)` instead of
     # `{:column, unquote(column)}` - red before the suite ran, because the
     # fixture plan is compiled by the compiler and a bare atom reaches the
     # resolver-module arm, which refuses it.
-    test "records tenant_from as the column to read off each row" do
+    test "records scope_from as the column to read off each row" do
       %Plan{rewrites: [rewrite, _signup]} = TestPlans.Cloak.__plan__()
 
-      assert rewrite.tenant == {:column, :merchant_id}
+      assert rewrite.scope == {:column, :merchant_id}
     end
 
-    # Sabotage: `validate_tenant!(:none, ...)` returning something other than
+    # Sabotage: `validate_scope!(:none, ...)` returning something other than
     # `:none` - a global field would be resolved as if it named a resolver.
-    test "records tenant :none as declared" do
+    test "records scope :none as declared" do
       %Plan{rewrites: [rewrite]} = TestPlans.SameModuleBothSides.__plan__()
 
-      assert rewrite.tenant == :none
+      assert rewrite.scope == :none
     end
 
-    # Sabotage: `validate_tenant!/3`'s module arm returning `:none` - a host
+    # Sabotage: `validate_scope!/3`'s module arm returning `:none` - a host
     # resolver was silently replaced by "this field is global".
     test "records a resolver module as declared" do
       %Plan{rewrites: [rewrite]} = TestPlans.Adoption.__plan__()
 
-      assert rewrite.tenant == Encryptor.Ecto.TestResolvers.Fixed
+      assert rewrite.scope == Encryptor.Ecto.TestResolvers.Fixed
     end
 
     # Sabotage: the field spec's `source:` entry dropped - the plan compiled
@@ -211,7 +211,7 @@ defmodule Encryptor.Ecto.MigrationTest do
     # Sabotage: `__open__`'s `__schema__/1` check inverted - a plan rewrote a
     # module with no table and failed on the first query.
     test "refuses a module that is not an Ecto schema" do
-      message = refusal(fn -> compile_rewrite("    tenant :none", "Encryptor.Ecto.Binary") end)
+      message = refusal(fn -> compile_rewrite("    scope :none", "Encryptor.Ecto.Binary") end)
 
       assert message =~ "is not an Ecto schema"
       assert message =~ "__schema__/1"
@@ -224,12 +224,12 @@ defmodule Encryptor.Ecto.MigrationTest do
         refusal(fn ->
           compile_plan("""
             rewrite Encryptor.Ecto.TestSchemas.Card do
-              tenant :none
+              scope :none
               field :pan, from: Encryptor.Ecto.TestTypes.Pan, to: Encryptor.Ecto.TestTypes.Pan
             end
 
             rewrite Encryptor.Ecto.TestSchemas.Card do
-              tenant :none
+              scope :none
               field :notes, from: Encryptor.Ecto.TestTypes.Notes, to: Encryptor.Ecto.TestTypes.Notes
             end
           """)
@@ -244,10 +244,10 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
 
               rewrite Encryptor.Ecto.TestSchemas.Signup do
-                tenant :none
+                scope :none
               end
           """)
         end)
@@ -258,7 +258,7 @@ defmodule Encryptor.Ecto.MigrationTest do
     # Sabotage: `__close__`'s empty-fields refusal dropped - a rewrite that
     # names no field compiled and silently rewrote nothing.
     test "refuses a rewrite that declares no fields" do
-      message = refusal(fn -> compile_rewrite("    tenant :none") end)
+      message = refusal(fn -> compile_rewrite("    scope :none") end)
 
       assert message =~ "declares no fields"
     end
@@ -276,16 +276,16 @@ defmodule Encryptor.Ecto.MigrationTest do
     test "refuses a declaration outside a rewrite block" do
       message =
         refusal(fn ->
-          compile_plan("  tenant :none")
+          compile_plan("  scope :none")
         end)
 
       assert message =~ "only be called inside a `rewrite` block"
     end
   end
 
-  describe "the tenant strategy" do
-    # Sabotage: `__close__`'s `tenant == nil` refusal dropped - a rewrite with
-    # no tenant compiled, and every row resolved under no key at all.
+  describe "the scope strategy" do
+    # Sabotage: `__close__`'s `scope == nil` refusal dropped - a rewrite with
+    # no scope compiled, and every row resolved under no key at all.
     test "refuses a rewrite that declares none" do
       message =
         refusal(fn ->
@@ -294,48 +294,48 @@ defmodule Encryptor.Ecto.MigrationTest do
           )
         end)
 
-      assert message =~ "declares no tenant"
+      assert message =~ "declares no scope"
     end
 
-    # Sabotage: `__tenant__`'s duplicate refusal dropped - the second
+    # Sabotage: `__scope__`'s duplicate refusal dropped - the second
     # declaration silently won over the first.
     test "refuses two declarations in one rewrite" do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
-              tenant_from :merchant_id
+              scope :none
+              scope_from :merchant_id
           """)
         end)
 
-      assert message =~ "declares a tenant twice"
+      assert message =~ "declares a scope twice"
     end
 
-    # Sabotage: `validate_tenant!/3`'s column membership check dropped - a
-    # typo'd tenant column failed on row one, against production data.
-    test "refuses a tenant_from column the schema does not have" do
-      message = refusal(fn -> compile_rewrite("    tenant_from :account_id") end)
+    # Sabotage: `validate_scope!/3`'s column membership check dropped - a
+    # typo'd scope column failed on row one, against production data.
+    test "refuses a scope_from column the schema does not have" do
+      message = refusal(fn -> compile_rewrite("    scope_from :account_id") end)
 
-      assert message =~ "tenant_from names :account_id"
+      assert message =~ "scope_from names :account_id"
       assert message =~ "merchant_id"
     end
 
-    # Sabotage: `validate_tenant!(:scope, ...)`'s raise replaced by `:scope` -
+    # Sabotage: `validate_scope!(:process, ...)`'s raise replaced by `:process` -
     # a plan compiled that would read an empty process scope for every row.
-    test "refuses :scope, which a release command does not have" do
-      message = refusal(fn -> compile_rewrite("    tenant :scope") end)
+    test "refuses :process, which a release command does not have" do
+      message = refusal(fn -> compile_rewrite("    scope :process") end)
 
       assert message =~ "ambient state"
     end
 
-    # Sabotage: `validate_tenant!/3`'s module arm returning the module without
+    # Sabotage: `validate_scope!/3`'s module arm returning the module without
     # the export check - a resolver that cannot resolve compiled.
     test "refuses a module that implements no resolve/2" do
       message =
-        refusal(fn -> compile_rewrite("    tenant Encryptor.Ecto.TestSources.NotASource") end)
+        refusal(fn -> compile_rewrite("    scope Encryptor.Ecto.TestSources.NotASource") end)
 
       assert message =~ "resolve/2"
-      assert message =~ "TenantContext"
+      assert message =~ "ScopeContext"
     end
   end
 
@@ -346,7 +346,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pann, from: Encryptor.Ecto.TestTypes.Pan, to: Encryptor.Ecto.TestTypes.Pan
           """)
         end)
@@ -361,7 +361,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan, from: Encryptor.Ecto.TestTypes.Pan, to: Encryptor.Ecto.TestTypes.Pan
               field :pan, from: Encryptor.Ecto.TestTypes.Pan, to: Encryptor.Ecto.TestTypes.Pan
           """)
@@ -376,7 +376,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan, to: Encryptor.Ecto.TestTypes.Pan
           """)
         end)
@@ -390,7 +390,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan, from: Encryptor.Ecto.TestTypes.Pan
           """)
         end)
@@ -405,7 +405,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan,
                 from: Encryptor.Ecto.TestTypes.Pan,
                 to: Encryptor.Ecto.TestTypes.Pan,
@@ -423,7 +423,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan,
                 from: Encryptor.Ecto.TestTypes.Pan,
                 to: Encryptor.Ecto.TestTypes.Pan,
@@ -442,7 +442,7 @@ defmodule Encryptor.Ecto.MigrationTest do
         refusal(fn ->
           compile_rewrite(
             """
-                tenant_from :merchant_id
+                scope_from :merchant_id
                 field :email,
                   from: Encryptor.Ecto.TestSources.LegacyType,
                   to: Encryptor.Ecto.TestTypes.HolderName,
@@ -464,7 +464,7 @@ defmodule Encryptor.Ecto.MigrationTest do
         refusal(fn ->
           compile_rewrite(
             """
-                tenant_from :merchant_id
+                scope_from :merchant_id
                 field :email,
                   from: Encryptor.Ecto.TestSources.LegacyType,
                   to: Encryptor.Ecto.TestTypes.HolderName,
@@ -484,7 +484,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan, from: "MyApp.Legacy", to: Encryptor.Ecto.TestTypes.Pan
           """)
         end)
@@ -501,7 +501,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan,
                 from: Encryptor.Ecto.TestSources.NotASource,
                 to: Encryptor.Ecto.TestTypes.Pan
@@ -519,7 +519,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan,
                 from: Encryptor.Ecto.TestTypes.Pan,
                 to: Encryptor.Ecto.MigrationTest.ReadOnlyTarget
@@ -536,7 +536,7 @@ defmodule Encryptor.Ecto.MigrationTest do
     test "accept a plain Ecto.Type on both sides" do
       assert [_ | _] =
                compile_rewrite("""
-                   tenant :none
+                   scope :none
                    field :pan,
                      from: Encryptor.Ecto.MigrationTest.PlainTarget,
                      to: Encryptor.Ecto.MigrationTest.PlainTarget,
@@ -550,7 +550,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       error =
         assert_compile_error(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :nope, from: Encryptor.Ecto.TestTypes.Pan, to: Encryptor.Ecto.TestTypes.Pan
           """)
         end)
@@ -567,7 +567,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan,
                 from: Encryptor.Ecto.TestSources.LegacyType,
                 to: Encryptor.Ecto.TestTypes.Pan
@@ -622,7 +622,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan,
                 from: Encryptor.Ecto.TestTypes.Pan,
                 to: Encryptor.Ecto.TestTypes.Pan,
@@ -640,7 +640,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan,
                 from: Encryptor.Ecto.TestTypes.Pan,
                 to: Encryptor.Ecto.TestTypes.Pan,
@@ -659,7 +659,7 @@ defmodule Encryptor.Ecto.MigrationTest do
       message =
         refusal(fn ->
           compile_rewrite("""
-              tenant :none
+              scope :none
               field :pan,
                 from: Encryptor.Ecto.TestTypes.Pan,
                 to: Encryptor.Ecto.TestTypes.Pan,
