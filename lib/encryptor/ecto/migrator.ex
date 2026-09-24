@@ -610,12 +610,20 @@ defmodule Encryptor.Ecto.Migrator do
     end
   end
 
+  # The target's `:legacy` reader is dropped from the params the pass holds.
+  # The runbook's `to:` is the host's own type module, which carries `legacy:`
+  # for the whole migration window, and a load attempt through it answers a
+  # legacy row through the legacy reader - so every probe that takes the load
+  # attempt (`verify/2` always does) would call an unmigrated row already in
+  # the target state. The dump is unaffected: it has no legacy arm.
   @spec target_params(module(), Plan.rewrite(), atom()) :: term()
   defp target_params(to, rewrite, target_column) do
     params = to.init(schema: rewrite.schema, field: target_column)
 
     if ours?(params) do
-      Map.put(params, :tenant, resolver(rewrite.tenant))
+      params
+      |> Map.put(:tenant, resolver(rewrite.tenant))
+      |> Map.put(:legacy, nil)
     else
       params
     end

@@ -37,6 +37,11 @@ holding production credentials is the opposite of a control. The `mix` form is
 the same call with an argument parser in front of it, for a host that runs
 migrations from a build machine.
 
+`eval` starts nothing: not your repository, and not your vaults. Every `eval`
+below therefore goes through one function in your release module, which
+[the release task](#before-step-4-the-release-task) sets up before step 4.
+The `mix` form needs none of it, because the task starts your application.
+
 ## The runbook at a glance
 
 | # | Step | Reversible by |
@@ -73,8 +78,11 @@ a table you are about to touch - including tenants that are offboarded but whose
 rows are still present.
 
 **If it differs:** a tenant with no key material fails at the first row of its
-own, in step 4, with a vault error rather than a decrypt failure. That is a
-provisioning gap, not a migration finding; go back and fill it.
+own, in step 4, with a vault error rather than a decrypt failure: the row is
+counted `undecryptable`, but its failure reason names
+`Encryptor.Ecto.EncryptError` where an unreadable legacy row says
+`:load_failed`. That is a provisioning gap, not a migration finding; go back
+and fill it.
 
 ## Step 2. Deploy with both libraries in the tree
 
@@ -150,6 +158,52 @@ rules.** For a cloak host that means no encryption context and no per-tenant key
 separation for those rows. The guarantee is per-row until the pass finishes,
 which is why the window is meant to be short.
 
+## Before step 4: the release task
+
+`bin/my_app eval` runs on a VM that has loaded your configuration and started
+nothing, which is also what a release migration task built on
+`Ecto.Migrator.with_repo/2` gives you: the repository, and none of your
+supervision tree. Both vaults the pass reads through live in that tree - the
+legacy vault that `legacy:` and every `from:` decrypt with, and the vault the
+new type modules encrypt with - so neither is running.
+
+Start them yourself, inside the callback, from the configuration the release
+has already loaded:
+
+```elixir
+defmodule MyApp.Release do
+  @app :my_app
+
+  def with_encryption(fun) do
+    Application.load(@app)
+
+    {:ok, result, _apps} =
+      Ecto.Migrator.with_repo(MyApp.Repo, fn _repo ->
+        {:ok, _legacy} = MyApp.Cloak.Vault.start_link()
+        {:ok, _vault} = MyApp.Vault.start_link()
+        fun.()
+      end)
+
+    result
+  end
+end
+```
+
+Each `start_link` reads its keys exactly as it does when your application
+boots: the legacy vault reads its cipher and key from your configuration or
+its own `init/1`, and the new vault runs its `init/1`. Nothing here passes a
+key, and nothing should.
+
+**Expected:** a step 4 dry run through this function reports the same counts
+as the `mix` form against the same rows.
+
+**If it differs:** every row `undecryptable`, each failure reason a
+`{:raised, SomeModule}` naming what the legacy reader raised, is the legacy
+vault not running rather than a finding about your data. A cloak-shaped
+legacy vault keeps its ciphers in its own process, so a read before that
+process starts raises, and the migrator records the raise against the row.
+Start the vault and run it again before you investigate a single primary key.
+
 ## Step 4. Rehearse with a dry run
 
 Write the plan first. It is code, it is reviewed in a diff, and step 8 deletes
@@ -163,7 +217,9 @@ $ mix encryptor.ecto.gen.plan --module MyApp.Encryption.CloakMigration
 
 The generated file does not compile on purpose: every `tenant_from` names
 `:TODO_tenant_column`, every `to:` is a comment, and the field list over-reports.
-Finish it into something like this:
+Its `from:` is the type module each field names today, which after step 3 is
+your new one; point it at the legacy module the rows were written with. Finish
+it into something like this:
 
 ```elixir
 defmodule MyApp.Encryption.CloakMigration do
@@ -223,8 +279,10 @@ problems rather than the first one.
 ```
 $ bin/my_app eval '
   {status, report} =
-    Encryptor.Ecto.Migrator.run(MyApp.Encryption.CloakMigration,
-      mode: :dry_run, on_error: :continue)
+    MyApp.Release.with_encryption(fn ->
+      Encryptor.Ecto.Migrator.run(MyApp.Encryption.CloakMigration,
+        mode: :dry_run, on_error: :continue)
+    end)
 
   IO.inspect(report.counts, label: "counts")
   IO.inspect(report.failures, label: "failures")
@@ -291,8 +349,10 @@ This is the point of no return in bulk. The application keeps serving.
 ```
 $ bin/my_app eval '
   {status, report} =
-    Encryptor.Ecto.Migrator.run(MyApp.Encryption.CloakMigration,
-      mode: :write, except_tenants: ["tnt_offboarded"])
+    MyApp.Release.with_encryption(fn ->
+      Encryptor.Ecto.Migrator.run(MyApp.Encryption.CloakMigration,
+        mode: :write, except_tenants: ["tnt_offboarded"])
+    end)
 
   IO.inspect(report.counts, label: "counts")
   IO.inspect(report.failures, label: "failures")
@@ -349,7 +409,9 @@ This is the acceptance test.
 ```
 $ bin/my_app eval '
   {status, report} =
-    Encryptor.Ecto.Migrator.verify(MyApp.Encryption.CloakMigration, sample: :all)
+    MyApp.Release.with_encryption(fn ->
+      Encryptor.Ecto.Migrator.verify(MyApp.Encryption.CloakMigration, sample: :all)
+    end)
 
   IO.inspect(report.counts, label: "counts")
   if status == :error, do: System.halt(1)
