@@ -153,13 +153,14 @@ defmodule Encryptor.Ecto.KeyStore do
 
   It **mints nothing**. `c:Encryptor.Provider.init/1` resolves configuration
   and touches no database; neither callback writes. Key creation is
-  `Encryptor.Envelope.provision/3`, re-wrap is `Encryptor.Envelope.rewrap/2`,
-  and crypto-shred is a `DELETE` the host schedules - all of them verbs that
-  operate on a key, which ADR-0002 decision 9 keeps out of this package's task
-  list. Resolution is a lookup, and the provider contract requires exactly
-  that: a provider that minted material on the first encrypt after a deploy
-  would fail `Encryptor.Provider.Conformance`'s stability property, and
-  rightly.
+  `Encryptor.Envelope.provision/3` and re-wrap is `Encryptor.Envelope.rewrap/2`,
+  verbs that operate on a key, which ADR-0002 decision 9 keeps out of this
+  package's task list. Crypto-shred is the one write this module performs,
+  and only when the host calls `shred/3`: never from a callback, never on a
+  schedule (ADR-0007 decision 3). Resolution is a lookup, and the provider
+  contract requires exactly that: a provider that minted material on the
+  first encrypt after a deploy would fail `Encryptor.Provider.Conformance`'s
+  stability property, and rightly.
 
   It **issues no DDL**. The table arrives as generated migration source the
   host reads, commits and runs - `mix encryptor.ecto.gen.key_store_migration`,
@@ -214,7 +215,9 @@ defmodule Encryptor.Ecto.KeyStore do
 
   A shred is a `DELETE` of the row, which is honest: the wrapping is the only
   copy of the key, so destroying it destroys the key. Nothing here soft-deletes,
-  because a soft-deleted wrapping is still a wrapping.
+  because a soft-deleted wrapping is still a wrapping. `shred/3` is that delete
+  for `encryptor`'s enc-ADR-0005 P3 and P4, with the cache-drain wait and a
+  returned `Encryptor.Ecto.KeyStore.Shred` record.
 
   ## The failure vocabulary
 
@@ -295,18 +298,21 @@ defmodule Encryptor.Ecto.KeyStore do
   it is the absence of one.
 
   Records: `encryptor` ADR-0002 decisions 4, 5 and 6; ADR-0003 decisions 1, 3,
-  4 and 9; this package's ADR-0002 decision 9 and ADR-0005.
+  4 and 9; ADR-0005 decisions 8 and 9; this package's ADR-0002 decision 9,
+  ADR-0005 and ADR-0007.
   """
 
   @behaviour Encryptor.Provider
 
   import Ecto.Query, only: [from: 2]
 
+  alias Encryptor.Ecto.KeyStore.Shred
   alias Encryptor.Envelope
   alias Encryptor.Envelope.WrappedKey
   alias Encryptor.Key.Aes
   alias Encryptor.Provider
   alias Encryptor.Provider.GcpKms
+  alias Encryptor.Vault
 
   @default_table "encryptor_wrapped_keys"
   @reference_subkey_bytes 32
@@ -424,6 +430,255 @@ defmodule Encryptor.Ecto.KeyStore do
          {:ok, rows} <- rows(state, ref, selector) do
       unwrap_all(state, rows, selector)
     end
+  end
+
+  @typedoc """
+  What `shred/3` answers instead of a record. Every one of them is answered
+  before anything is deleted, except that a transaction the database aborts
+  deletes nothing either.
+  """
+  @type shred_error ::
+          {:unknown_key, Provider.selector()}
+          | {:key_unavailable, Provider.selector()}
+          | {:unknown_version, pos_integer()}
+          | {:current_version, pos_integer()}
+          | {:not_a_key_store_vault, module()}
+          | {:missing_option, :version}
+          | {:invalid_option, :version | :drain}
+          | {:unknown_options, [atom()]}
+          | Encryptor.Error.t()
+
+  @shred_options [:version, :drain]
+
+  @doc """
+  Crypto-shreds a scope, or one version of it, from the store a running vault
+  reads: `encryptor`'s enc-ADR-0005 P3 (`version: :all`) or P4
+  (`version: n`). Irreversible.
+
+      {:ok, %Encryptor.Ecto.KeyStore.Shred{procedure: :scope, versions: [1, 2]}} =
+        Encryptor.Ecto.KeyStore.shred(MyApp.ScopedVault, "workspace-7", version: :all)
+
+  `vault` is a started vault whose provider is this module; the rows are
+  deleted from the table, prefix and repo its provider options name, so the
+  shred cannot reach a different store from the one the vault decrypts
+  through. The call does P3's steps 2 and 3, or P4's steps 1 and 2, and the
+  procedures' preconditions stay the operator's: a recorded human decision
+  for P3, and a green whole-scope verification for P4.
+
+  ## Options
+
+    * `:version` - required. `:all` deletes every version of the scope (P3).
+      A positive integer deletes that one version (P4), and is refused as
+      `{:current_version, n}` when it is the scope's newest version: removing
+      it would make an older version current again, and a scope whose only
+      version goes is P3, which asks for a decision of its own.
+    * `:drain` - `:wait` (the default) returns only once the vault's
+      materials cache can no longer serve a deleted version, which is its
+      cache `max_age` after the delete commits, and at once for a vault
+      configured `cache: false`. `:skip` returns at once, for a host that
+      restarts its vaults instead; the record's `:drained_at` still says when
+      waiting would have finished.
+
+  ## What it answers
+
+  `{:ok, %Encryptor.Ecto.KeyStore.Shred{}}` once the rows are deleted and,
+  under `drain: :wait`, drained. The record is ADR-0007 decision 4's: the
+  versions deleted, the versions left, the scope reference, and the two
+  timestamps a host certifies from.
+
+  After it, a read through the vault fails the way enc-ADR-0005 decision 9
+  says: `{:unknown_key, selector}` after P3, because no row is left for the
+  scope, and `:decrypt_failed` after P4 for a value written under the
+  deleted version, because the other versions still resolve.
+
+  Every refusal deletes nothing:
+
+    * `{:unknown_key, selector}` - no row for the scope, or a selector no
+      scope reference is derived from (`:default`, `""`).
+    * `{:unknown_version, n}` - the scope has no version `n`.
+    * `{:current_version, n}` - `n` is the scope's newest version.
+    * `{:key_unavailable, selector}` - the store could not be asked, and
+      asking again later could work: the same transient conditions the
+      provider callbacks answer this for. The delete is one transaction, so a
+      failure part way deletes nothing.
+    * `{:not_a_key_store_vault, vault}` - the vault's provider is not this
+      module.
+    * `{:missing_option, :version}`, `{:invalid_option, key}` and
+      `{:unknown_options, keys}` - the options above.
+    * `%Encryptor.Error{}` - the vault is not started, as
+      `Encryptor.Vault.config/1` reports it.
+
+  ## Telemetry
+
+  One `[:encryptor_ecto, :shred]` event per shred, emitted after the delete
+  commits and before the drain wait. Its measurement is `count`, the number
+  of versions deleted, and its metadata is closed at `vault`, `procedure` and
+  `table`: no selector, no scope reference and no version number, because a
+  shred is exactly the event an operator would want to label with the scope,
+  and `encryptor`'s telemetry records carry no per-scope dimension
+  (ADR-0007 decision 5).
+  """
+  @spec shred(module(), Provider.selector(), keyword()) ::
+          {:ok, Shred.t()} | {:error, shred_error()}
+  def shred(vault, selector, opts) when is_atom(vault) and is_list(opts) do
+    with {:ok, which, drain} <- shred_options(opts),
+         {:ok, config} <- Vault.config(vault),
+         {:ok, state} <- key_store_state(config),
+         {:ok, ref} <- scope_ref(state, selector),
+         {:ok, {deleted, remaining}} <- delete_versions(state, ref, which, selector) do
+      deleted_at = DateTime.utc_now()
+      emit_shred(vault, which, state, deleted)
+      drained_at = DateTime.add(deleted_at, drain_seconds(config), :second)
+
+      if drain == :wait, do: wait_until(drained_at)
+
+      {:ok,
+       %Shred{
+         vault: vault,
+         procedure: procedure(which),
+         scope_ref: ref,
+         versions: deleted,
+         remaining: remaining,
+         table: state.table,
+         prefix: state.prefix,
+         deleted_at: deleted_at,
+         drained_at: drained_at,
+         drain: if(drain == :wait, do: :waited, else: :skipped)
+       }}
+    end
+  end
+
+  @spec shred_options(keyword()) ::
+          {:ok, :all | pos_integer(), :wait | :skip} | {:error, shred_error()}
+  defp shred_options(opts) do
+    case Enum.uniq(Keyword.keys(opts) -- @shred_options) do
+      [] ->
+        with {:ok, which} <- shred_version(opts),
+             {:ok, drain} <- shred_drain(opts),
+             do: {:ok, which, drain}
+
+      unknown ->
+        {:error, {:unknown_options, unknown}}
+    end
+  end
+
+  @spec shred_version(keyword()) :: {:ok, :all | pos_integer()} | {:error, shred_error()}
+  defp shred_version(opts) do
+    case Keyword.fetch(opts, :version) do
+      {:ok, :all} -> {:ok, :all}
+      {:ok, version} when is_integer(version) and version > 0 -> {:ok, version}
+      {:ok, _other} -> {:error, {:invalid_option, :version}}
+      :error -> {:error, {:missing_option, :version}}
+    end
+  end
+
+  @spec shred_drain(keyword()) :: {:ok, :wait | :skip} | {:error, shred_error()}
+  defp shred_drain(opts) do
+    case Keyword.get(opts, :drain, :wait) do
+      drain when drain in [:wait, :skip] -> {:ok, drain}
+      _other -> {:error, {:invalid_option, :drain}}
+    end
+  end
+
+  # The provider state the vault froze at start, which is what makes the
+  # shred reach the store the vault reads and no other.
+  @spec key_store_state(Vault.Config.t()) :: {:ok, state()} | {:error, shred_error()}
+  defp key_store_state(%Vault.Config{provider: {__MODULE__, _opts}, provider_state: state}),
+    do: {:ok, state}
+
+  defp key_store_state(%Vault.Config{vault: vault}),
+    do: {:error, {:not_a_key_store_vault, vault}}
+
+  # One transaction: the scope's rows are read under `FOR UPDATE`, the
+  # refusals are decided against what is actually there, and the delete runs
+  # against the same locked set, so the versions the record names are the
+  # versions deleted. enc-ADR-0005's P3 calls a partly completed delete the
+  # worst state it has; the transaction makes that state unreachable here.
+  #
+  # The rescue is `rows/3`'s: only a condition a retry can resolve becomes
+  # `{:key_unavailable, selector}`, and a missing table still raises.
+  @spec delete_versions(state(), String.t(), :all | pos_integer(), Provider.selector()) ::
+          {:ok, {[pos_integer(), ...], [pos_integer()]}} | {:error, shred_error()}
+  defp delete_versions(state, ref, which, selector) do
+    opts = query_opts(state)
+
+    state.repo.transaction(fn ->
+      live =
+        state.repo.all(
+          from(k in state.table,
+            where: k.tenant_ref == ^ref,
+            order_by: [asc: k.version],
+            lock: "FOR UPDATE",
+            select: k.version
+          ),
+          opts
+        )
+
+      case doomed(live, which, selector) do
+        {:ok, doomed, remaining} ->
+          count = length(doomed)
+
+          {^count, _rows} =
+            state.repo.delete_all(
+              from(k in state.table,
+                where: k.tenant_ref == ^ref and k.version in type(^doomed, {:array, :integer})
+              ),
+              opts
+            )
+
+          {doomed, remaining}
+
+        {:error, reason} ->
+          state.repo.rollback(reason)
+      end
+    end)
+  rescue
+    exception ->
+      if transient?(exception),
+        do: {:error, {:key_unavailable, selector}},
+        else: reraise(exception, __STACKTRACE__)
+  end
+
+  @spec doomed([pos_integer()], :all | pos_integer(), Provider.selector()) ::
+          {:ok, [pos_integer(), ...], [pos_integer()]} | {:error, shred_error()}
+  defp doomed([], _which, selector), do: {:error, {:unknown_key, selector}}
+  defp doomed(live, :all, _selector), do: {:ok, live, []}
+
+  defp doomed(live, version, _selector) do
+    cond do
+      version not in live -> {:error, {:unknown_version, version}}
+      version == List.last(live) -> {:error, {:current_version, version}}
+      true -> {:ok, [version], List.delete(live, version)}
+    end
+  end
+
+  @spec procedure(:all | pos_integer()) :: Shred.procedure()
+  defp procedure(:all), do: :scope
+  defp procedure(_version), do: :version
+
+  # enc-ADR-0005 decision 2: a running node decrypts from cached materials for
+  # up to `max_age` seconds after the row is gone, and the bound a shred waits
+  # on is that one.
+  @spec drain_seconds(Vault.Config.t()) :: non_neg_integer()
+  defp drain_seconds(%Vault.Config{cache: false}), do: 0
+  defp drain_seconds(%Vault.Config{cache: %{max_age: max_age}}), do: max_age
+
+  @spec wait_until(DateTime.t()) :: :ok
+  defp wait_until(moment) do
+    moment
+    |> DateTime.diff(DateTime.utc_now(), :millisecond)
+    |> max(0)
+    |> Process.sleep()
+  end
+
+  # ADR-0007 decision 5, and its metadata set is closed at these three keys.
+  @spec emit_shred(module(), :all | pos_integer(), state(), [pos_integer(), ...]) :: :ok
+  defp emit_shred(vault, which, state, deleted) do
+    :telemetry.execute(
+      [:encryptor_ecto, :shred],
+      %{count: length(deleted)},
+      %{vault: vault, procedure: procedure(which), table: state.table}
+    )
   end
 
   # A selector a scope reference cannot be derived from - `:default`, an empty
