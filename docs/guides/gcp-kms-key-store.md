@@ -101,8 +101,13 @@ def provision_gcp_key(scope_id) do
     )
 
   with {:ok, row} <- Encryptor.Provider.GcpKms.provision(gcp, scope_id) do
+    {ref, row} = Map.pop(row, :scope_ref)
+
     MyApp.Repo.insert_all("encryptor_wrapped_keys", [
-      row |> Map.put(:wrapping_shape, "gcp_kms_ciphertext") |> Map.to_list()
+      row
+      |> Map.put(:tenant_ref, ref)
+      |> Map.put(:wrapping_shape, "gcp_kms_ciphertext")
+      |> Map.to_list()
     ])
   end
 end
@@ -112,6 +117,11 @@ end
 and `subkey()` the same reference subkey; with a different subkey the row
 would be filed under a `tenant_ref` the vault never asks for. The `store:`
 function is required by `init/1` and unused by `provision/2`.
+
+The provider answers the reference as `:scope_ref`, but the table's column
+is still `tenant_ref`: it kept its name through the scope rename because it
+exists in every adopter's database (ADR-0006 decision 3). Hence the
+`Map.pop/2` before the insert.
 
 What you get back:
 

@@ -582,7 +582,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # unwrap the data key. That is not where it lands. ADR-0004 decision 6's
     # context comparison runs before the engine is handed a keyring
     # (`Encryptor.Vault.Decrypt.call/4` composes the context and calls
-    # `agree/4` ahead of `engine_decrypt/4`), and on a `:scope` vault
+    # `agree/4` ahead of `engine_decrypt/4`), and on a `:scoped` vault
     # `tenant_ref` is derived from `:key` by the vault itself, so the read is
     # refused as `{:encryption_context_mismatch, "tenant_ref"}` with the
     # keyring never consulted. Both are authentication failures and both are
