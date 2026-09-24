@@ -48,10 +48,13 @@ key rotates, and how a scope is crypto-shredded. A host writes one vault
 module and starts it in its supervision tree.
 
 **`encryptor_ecto` is this package: the Ecto layer, and nothing else.** It puts
-the vault behind a schema field. It has **no key management of its own** - no
-provider, no key store, no rotation verb, no shred verb. Its whole task list
-contains no operation that touches a key, because re-wrap and crypto-shred
-belong to the side that owns the key store (ADR-0002 decision 9).
+the vault behind a schema field, and it keeps what the vault needs stored in
+the host's repo: `Encryptor.Ecto.KeyStore`, a key provider over a wrapped-key
+table whose `shred/3` is the row delete a crypto-shred ends in, and
+`Encryptor.Ecto.SuspensionStore`, where a suspension is shared across nodes
+(ADR-0007). It has **no key management of its own**: no rotation verb, and no
+task that touches a key, because key creation and re-wrap belong to the vault
+(ADR-0002 decision 9).
 
 It also issues no DDL. Every column it reads or writes - the encrypted
 `:binary` column, the blind index column, the migrator's checkpoint table - is

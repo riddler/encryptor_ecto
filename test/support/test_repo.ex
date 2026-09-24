@@ -57,6 +57,8 @@ defmodule Encryptor.Ecto.TestRepo do
     # The two-vaults guide's host: a customer-scoped table, an
     # agreement-scoped one, and the agreement vault's own key table.
     {12, Encryptor.Ecto.TestMigrationTwoVaults},
+    # `Encryptor.Ecto.SuspensionStore`'s table, as its generator writes it.
+    {13, Encryptor.Ecto.TestMigrationSuspensions},
     # The scope-in-jobs guide's host: a process-scoped table and a
     # projector's read model.
     {14, Encryptor.Ecto.TestMigrationScopeInJobs}
