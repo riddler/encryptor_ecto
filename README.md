@@ -390,6 +390,11 @@ path. The index is not an extra and links at its GitHub path:
   what belongs in a declared `:context` and what does not, how the pairs
   compose, which refusals a declaration buys, and why a bound value is
   permanent.
+- [How to keep tenant keys in Google Cloud KMS through the key store](docs/guides/gcp-kms-key-store.md) -
+  the Goth token server, the key store's `:gcp_kms` option, provisioning a
+  `"gcp_kms_ciphertext"` row, and the shred: destroying the key version,
+  deleting the row, the restore window, and what the application sees in
+  between.
 
 Reference material is the module documentation: `Encryptor.Ecto.Binary`,
 `Encryptor.Ecto.BlindIndex`, `Encryptor.Ecto.Migration`,

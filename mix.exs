@@ -55,7 +55,8 @@ defmodule Encryptor.Ecto.MixProject do
         "CHANGELOG.md",
         "docs/explanation/moving-off-cloak.md",
         "docs/guides/migrate-from-cloak.md",
-        "docs/guides/bind-extra-context.md"
+        "docs/guides/bind-extra-context.md",
+        "docs/guides/gcp-kms-key-store.md"
       ],
       groups_for_extras: [
         Guides: ~r{docs/}
@@ -78,6 +79,7 @@ defmodule Encryptor.Ecto.MixProject do
         docs/explanation/moving-off-cloak.md
         docs/guides/migrate-from-cloak.md
         docs/guides/bind-extra-context.md
+        docs/guides/gcp-kms-key-store.md
       ),
       links: %{
         "GitHub" => @source_url,
