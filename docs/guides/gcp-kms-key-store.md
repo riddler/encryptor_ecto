@@ -153,8 +153,14 @@ round trip.
 
 A shred makes every value written under the scope's key unreadable,
 including the copies in your backups: the wrapping key is in Cloud KMS, not
-in the backup. This package ships no verb for it; it is two operations you
-run, in this order.
+in the backup. It is two operations, in this order: destroying the key
+version is a Cloud KMS call you make, because this package never calls
+Cloud KMS to destroy anything; deleting the row is
+`Encryptor.Ecto.KeyStore.shred/3`.
+
+Before either, record the decision. `encryptor`'s ADR-0005 runbook P3, the
+procedure for a whole scope, requires a recorded human decision before a
+shred, and `shred/3` leaves that precondition to you.
 
 **First, destroy the key version.**
 
@@ -166,13 +172,36 @@ gcloud kms keys versions destroy 1 \
 `gcloud kms keys versions list` on the same key shows every version to
 destroy; a key provisioned as above has one.
 
-**Then delete the row**, every row for the scope's `tenant_ref`:
+**Then delete the row** with `shred/3`, on the scoped vault that reads it:
 
 ```elixir
-MyApp.Repo.delete_all(
-  from(k in "encryptor_wrapped_keys", where: k.tenant_ref == ^tenant_ref)
-)
+{:ok, shred} =
+  Encryptor.Ecto.KeyStore.shred(MyApp.ScopedVault, scope_id, version: :all)
 ```
+
+`version: :all` deletes every row for the scope's `tenant_ref` in one
+transaction that locks them first, so the versions the record names are
+the versions deleted. The rows are deleted from the repo, table and prefix
+the vault's key store was started with, and from no other. By default the
+call then waits out the vault's cache `max_age` before it returns, and
+returns at once for a vault configured `cache: false`; pass `drain: :skip`
+if you restart the vault on every node instead. The destroyed version does
+not get in the way: the shred reads the scope's version numbers and never
+unwraps a row, so it makes no Cloud KMS call.
+
+The `Encryptor.Ecto.KeyStore.Shred` it returns is the change record: the
+`versions` deleted, the `scope_ref` (the `tenant_ref` value, never your
+selector), `deleted_at` and `drained_at`. Keep it beside the decision. A
+refusal deletes nothing: `{:unknown_key, selector}` for a scope with no
+row, `{:key_unavailable, selector}` when the database could not be asked
+and a retry could work, `{:not_a_key_store_vault, vault}` for a vault
+whose provider is not the key store; `shred/3`'s documentation lists the
+rest. `version: n` deletes one version instead and refuses the scope's
+newest; a scope provisioned as above has only version 1, so its shred is
+`version: :all`.
+
+Do not replace the call with a hand-written `delete_all`: that takes no
+lock, waits for no drain and leaves no record.
 
 The row delete is not optional. Destroying the key is not full erasure: the
 scope's `tenant_ref` is a permanent pseudonym that sits in every message
@@ -188,7 +217,7 @@ the `CryptoKey`'s scheduled-destruction duration, and a
 KMS leaves a restored version disabled; enable it to use it). `provision/2`
 does not set the duration, so the service's default applies, and it is fixed
 when the key is created. The `Encryptor.Provider.GcpKms` moduledoc in
-`encryptor` 0.4.1 gives that default as 24 hours; Cloud KMS's own reference
+`encryptor` 0.5.0 gives that default as 24 hours; Cloud KMS's own reference
 for `destroyScheduledDuration` gives 30 days. Read it off your key with
 `gcloud kms keys describe` rather than trusting either.
 
@@ -203,7 +232,7 @@ delay, not as an undo you plan around.
 |---|---|---|
 | provisioning | `{:ok, ...}` | the value |
 | destroying the version, row still present | `{:error, {:key_unavailable, selector}}` | `{:error, %Encryptor.Error{reason: {:key_unavailable, selector}}}` |
-| deleting the row | `{:error, {:unknown_key, selector}}` | `{:error, %Encryptor.Error{reason: {:unknown_key, selector}}}` |
+| `shred/3` deleting the row | `{:error, {:unknown_key, selector}}` | `{:error, %Encryptor.Error{reason: {:unknown_key, selector}}}` |
 
 The middle row needs care. `{:key_unavailable, selector}` is the answer the
 provider contract reserves for "could not ask, and asking again later could
@@ -218,16 +247,18 @@ amendment records why the key store cannot tell the two apart through the
 provider's public answer.
 
 So between the two shred steps a retry loop keyed on `:key_unavailable`
-will spin on a scope that is gone. Delete the row promptly after the
+will spin on a scope that is gone. Call `shred/3` promptly after the
 destroy, and keep the scope out of your retry paths while the shred runs.
 
 A shred is also not immediate: `Encryptor.Vault`'s documentation of
 `suspend/2` notes that, unlike a suspension, a shred's runbook has to drain
-the vault's materials cache. The answers above are what a vault configured with
-`cache: false` sees on the very next call.
+the vault's materials cache, and that drain is what `shred/3` waits for by
+default. The answers above are what a vault configured with `cache: false`
+sees on the very next call.
 
 ## What this guide checked
 
 `test/encryptor/ecto/key_store_gcp_shred_repo_test.exs` runs Steps 4 to 6
 against a fake of the provider's HTTP seam: provision, write, read, destroy,
-restore, destroy again, delete the row, and every answer in the table above.
+restore, destroy again, delete the row with `shred/3`, and every answer in
+the table above.

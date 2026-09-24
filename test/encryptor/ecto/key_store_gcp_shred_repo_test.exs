@@ -5,16 +5,16 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
   `docs/guides/gcp-kms-key-store.md` walks a host through provisioning a
   scope's key into the wrapped-key table as a `"gcp_kms_ciphertext"` row,
   reading and writing through a scoped vault, and shredding it: destroying
-  the `CryptoKey`'s version, then deleting the row. This is that walk as one
+  the `CryptoKey`'s version, then deleting the row with
+  `Encryptor.Ecto.KeyStore.shred/3`. This is that walk as one
   test, against the fake of the provider's HTTP seam, so each answer the
   guide tells a host to expect is one this package actually gives.
   """
 
   use Encryptor.Ecto.RepoCase, async: true
 
-  import Ecto.Query, only: [from: 2]
-
   alias Encryptor.Ecto.KeyStore
+  alias Encryptor.Ecto.KeyStore.Shred
   alias Encryptor.Ecto.TestGcpKms
   alias Encryptor.Ecto.TestKeyStore
   alias Encryptor.Error
@@ -32,6 +32,9 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
   # GCP clause to `{:invalid_key_descriptor, :unwrap_failed}`; the first
   # post-destroy assertion went red on that term. Separately, made the fake's
   # `destroyed/2` a no-op; the same assertion went red on `{:ok, [_]}`.
+  # Separately, made `KeyStore.shred/3` resolve the scope's keys through
+  # `decryption_keys/2` before its delete; the `shred/3` assertion went red
+  # on `{:error, {:key_unavailable, "merchant_shredded"}}`.
   test "provision, write, read, destroy the version, delete the row" do
     provisioned = TestGcpKms.provision!(@selector)
     state = TestGcpKms.state()
@@ -61,10 +64,13 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
 
     TestGcpKms.destroyed(provisioned.key_id, true)
 
-    {1, _rows} =
-      TestRepo.delete_all(
-        from(k in TestGcpKms.table(), where: k.tenant_ref == ^provisioned.scope_ref)
-      )
+    # The guide's Step 6 row delete, as written there: `shred/3` on the
+    # scoped vault, after the destroy. It reads version numbers and never
+    # unwraps, so the destroyed version does not refuse it.
+    assert {:ok, %Shred{procedure: :scope, versions: [1], remaining: [], scope_ref: scope_ref}} =
+             KeyStore.shred(TestGcpKms.Scope, @selector, version: :all)
+
+    assert scope_ref == provisioned.scope_ref
 
     assert {:error, {:unknown_key, @selector}} = KeyStore.decryption_keys(state, @selector)
     assert {:error, {:unknown_key, @selector}} = KeyStore.encryption_key(state, @selector)
