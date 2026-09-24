@@ -71,7 +71,7 @@ type, replaceable with any module exporting `encode!/1` and `decode!/1`), and
 ```elixir
 def deps do
   [
-    {:encryptor_ecto, "~> 0.5.0"}
+    {:encryptor_ecto, "~> 0.6.0"}
   ]
 end
 ```
