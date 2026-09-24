@@ -874,3 +874,136 @@ suite. No decision, assumption, open question or consequence changes, and no
 status word above flips.
 
 Provenance: campaign RF048, bead ece-42x (folding ece-2bc and ece-8pt).
+
+## Amendment A (2026-09-24): open question 2 answered - the GCP branch's client is a `:gcp_kms` option, delegated one row at a time
+
+Status: proposed (2026-09-24). This Amendment decides open question 2 and
+nothing else. The record above keeps its accepted status; no sentence above
+is withdrawn, reworded or removed, and no status word above flips.
+
+Upstream cites were read in the `encryptor` 0.4.1 Hex package this
+repository's `mix.lock` resolves (`mix.lock:14`, `"encryptor", "0.4.1"`;
+tagged `v0.4.1` = `4c8fbe9`). Cites into this package name the function they
+point at, as it stands in the commit this Amendment ships in; the code half
+rides in the same commit.
+
+### A1. The decision
+
+`Encryptor.Ecto.KeyStore` takes an optional `:gcp_kms` provider option: the
+keyword list `Encryptor.Provider.GcpKms` documents, less `:reference_subkey`
+and `:store`, which the key store supplies itself. A `"gcp_kms_ciphertext"`
+row is unwrapped by handing that one row to the public
+`Encryptor.Provider.GcpKms.decryption_keys/2`, through a store closure that
+answers that row and nothing else (`Encryptor.Ecto.KeyStore`'s
+`unwrap_row/4`, the delegating clause).
+
+- `:reference_subkey` is the key store's own, so the key store and the
+  client cannot disagree about which row a selector names.
+- `:store` is built per row. Naming either option inside `:gcp_kms` is
+  refused at start as `{:invalid_config, :gcp_kms, {:supplied_by_key_store,
+  key}}` rather than silently overridden (`gcp_kms_opts/2`).
+- The remaining options are checked by `Encryptor.Provider.GcpKms.init/1`
+  itself, once, at the key store's own `init/1` (`gcp_kms_opts/2`), so a
+  client configured wrong fails the vault's start in the provider's own
+  refusal terms, not on the first GCP read.
+- A value that is not a keyword list is `{:invalid_config, :gcp_kms,
+  :not_a_keyword_list}` (`gcp_kms/2`).
+- A store configured without `:gcp_kms` keeps the interim answer the
+  2026-09-13 Note's item 2 published,
+  `{:invalid_key_descriptor, {:unsupported_wrapping_shape,
+  "gcp_kms_ciphertext"}}`, as that Note said it would "for one that is not"
+  configured with the client (the `%{gcp_kms: nil}` clause of `unwrap_row/4`).
+
+### A2. Why a second option delegating one row, and not the other two
+
+Open question 2 named three candidates. The choice turns on decision 5 and
+on the key store's "one bad row is not the whole store" rule, both of which
+are properties of the key store's own single query:
+
+- **A composite provider** (the host configures a provider that fans out to
+  the key store and to `Encryptor.Provider.GcpKms`) splits one tenant's
+  candidate list across two providers. Decision 5 dispatches per row inside
+  one table, so a tenant holding both shapes during a migration would need
+  both providers to read the same table and agree on the order of the merged
+  list. That is the per-store setting decision 5 refused, moved one layer up.
+- **A wholesale delegation** (the host configures `Encryptor.Provider.GcpKms`
+  with a `:store` closure over this table) serves only GCP rows. It cannot
+  serve an engine-message row, and the provider's own `decryption_keys/2`
+  halts on the first row that fails (`unwrap_all/3`), so one broken GCP row
+  would cost the tenant every other version, which the key store's rule
+  exists to prevent.
+- **A second option, delegated one row at a time**, keeps the query, the
+  ordering and the skip rule where they are, and puts only the unwrap in
+  the provider's hands.
+
+### A3. Only public surface is called
+
+`Encryptor.Provider.GcpKms` has no public single-row unwrap. The function
+that turns a stored row into key material is private (`defp unwrap/3`), and
+the module that speaks to Cloud KMS is `Encryptor.Provider.GcpKms.Api`, which
+is `@moduledoc false`. Neither is called here. The delegation uses `init/1`
+and `decryption_keys/2`, both public, and the documented `:store` seam of
+`init/1` ("A one-argument function taking a `tenant_ref` and answering
+`{:ok, rows}` newest first, where a row is what
+`c:Encryptor.Provider.provision/2` returned", in the `GcpKms` moduledoc's
+Configuration section). A row handed across is the table's row without its
+`wrapping_shape`, which is the shape `t:Encryptor.Provider.provisioned/0`
+names, with the field names 0.4.1 ships (`tenant_ref` among them).
+
+The cost is what the provider already costs: one `Decrypt` per GCP row per
+call, which the provider's `decryption_keys/2` documentation already states
+for itself, plus an `init/1` per GCP row that checks configuration and does no
+I/O.
+
+### A4. Assumption A4, read with this Amendment
+
+The "Upstream API assumptions" table records A4 as **not shipped**, and the
+2026-09-13 Note reads it as "assumption unmet: the module exists, the public
+unwrap does not". Read A4 now as **met through the store seam**: the module
+is shipped at the pinned 0.4.1, and a store delegates an unwrap to it through
+public `decryption_keys/2` over a one-row `:store` closure, as A1 and A3
+describe. The absence of a single-row public unwrap is no longer a blocker.
+If `encryptor` later ships one, adopting it changes nothing a host sees.
+
+### A5. What a GCP row answers when the client is configured
+
+Decision 5's table gives `{:invalid_key_descriptor, :unwrap_failed}` for "the
+wrapping does not unwrap under its declared shape". For a
+`"gcp_kms_ciphertext"` row in a store configured with `:gcp_kms`, read that
+row as amended here: the answer is whatever `Encryptor.Provider.GcpKms`
+answers for the row, returned unrelabelled (the delegating clause of
+`unwrap_row/4`). Every such answer is already a `t:Encryptor.Provider.reason/0`.
+
+| the GCP row | the answer |
+|---|---|
+| unwraps | its `%Encryptor.Key.Aes{}` descriptor, byte-identical to what the provider answers for the same row |
+| `Decrypt` fails: the service is unreachable, or the row's `tenant_ref`, `version` or `namespace` no longer matches what its wrapping was bound to | `{:key_unavailable, selector}` |
+| a field the provider requires is missing or malformed (for example `bits` other than `256`) | `{:invalid_key_descriptor, :invalid_row}` |
+| `Decrypt` returns material of the wrong size | `{:invalid_key_descriptor, :material_size}` |
+| `key_id` is `NULL` | `{:invalid_key_descriptor, :missing_key_id}`, unchanged: the key store's own clause runs before the client is consulted |
+
+The second row is the one a reader should notice. The provider maps every
+`Decrypt` failure to `{:key_unavailable, selector}` (the `{:error, _failure}`
+arm of its private `unwrap/3`) because it cannot tell a refused `Decrypt`
+from an unreachable service. The key store cannot tell them apart either, so
+relabelling would guess, and the guess that loses less is the provider's: a
+network outage is the common case, and reporting it as permanent would tell
+an operator not to retry an outage. The cost is that a GCP row moved between
+tenants reports as retryable. It still fails closed, and the "one bad row"
+rule keeps that failure to the one row.
+
+### A6. What does not change
+
+No stored or serialized string changes: not the `wrapping_shape` values, not
+the columns, not `tenant_ref` or its derivation, not the binding. The
+closed vocabulary of decision 1 stays at two. Decision 5's per-row dispatch
+is unchanged and is the reason for A2. The `encryptor` dependency stays
+pinned at `== 0.4.1`.
+
+Tests: `test/encryptor/ecto/key_store_repo_test.exs`, the describe block "a
+gcp_kms_ciphertext row, with the GCP branch configured", against a fake of
+the provider's HTTP seam in `test/support/test_gcp_kms.ex`; the start-time
+refusals are in `test/encryptor/ecto/key_store_test.exs`, "init/1's
+:gcp_kms".
+
+Provenance: bead ece-6ah.

@@ -15,6 +15,7 @@ defmodule Encryptor.Ecto.KeyStoreTest do
   use ExUnit.Case, async: true
 
   alias Encryptor.Ecto.KeyStore
+  alias Encryptor.Ecto.TestGcpKms
   alias Encryptor.Ecto.TestKeyStore
   alias Encryptor.Ecto.TestRepo
 
@@ -114,6 +115,53 @@ defmodule Encryptor.Ecto.KeyStoreTest do
 
   # Still no database: a `:repo` that is not a repository never gets as far as
   # one. The claim is about what the *rescue* does, and it needs no server.
+  describe "init/1's :gcp_kms" do
+    test "is absent unless a host names it" do
+      assert {:ok, %{gcp_kms: nil}} = KeyStore.init(TestKeyStore.provider_opts())
+    end
+
+    # Sabotage: dropped the `Keyword.put/3` of the store's own subkey. The
+    # provider's own `init/1` refused the missing `:reference_subkey` at start,
+    # so this call answered `{:error, _}` - and the suite did not boot, because
+    # the GCP tenant vault `test_helper.exs` starts failed the same way.
+    test "resolves with the store's own reference subkey and no store closure" do
+      assert {:ok, state} =
+               KeyStore.init(TestKeyStore.provider_opts(gcp_kms: TestGcpKms.opts()))
+
+      assert state.gcp_kms[:reference_subkey] == TestKeyStore.reference_subkey()
+      refute Keyword.has_key?(state.gcp_kms, :store)
+      assert state.gcp_kms[:project] == "test-project"
+    end
+
+    # The two options the store supplies are a literal list. Sabotage: removed
+    # `:store` from it. The `:store` case resolved, and the host's closure was
+    # silently replaced per row.
+    test "refuses the two options the store supplies itself" do
+      for supplied <- [:reference_subkey, :store] do
+        opts = TestKeyStore.provider_opts(gcp_kms: [{supplied, nil} | TestGcpKms.opts()])
+
+        assert {:error, {:invalid_config, :gcp_kms, {:supplied_by_key_store, ^supplied}}} =
+                 KeyStore.init(opts)
+      end
+    end
+
+    test "refuses a value that is not a keyword list" do
+      for bad <- [:yes, "project", [1, 2]] do
+        assert {:error, {:invalid_config, :gcp_kms, :not_a_keyword_list}} =
+                 KeyStore.init(TestKeyStore.provider_opts(gcp_kms: bad))
+      end
+    end
+
+    # Sabotage: resolved `:gcp_kms` without calling the provider's `init/1`.
+    # A client with no project started, and the refusal moved to the first
+    # GCP read.
+    test "refuses at start what the provider's own init/1 refuses, in its terms" do
+      opts = TestKeyStore.provider_opts(gcp_kms: Keyword.delete(TestGcpKms.opts(), :project))
+
+      assert {:error, {:missing_config, [:provider, :project]}} = KeyStore.init(opts)
+    end
+  end
+
   describe "a permanent misconfiguration" do
     # Sabotage: put the bare `rescue _exception ->` back. Both calls answered
     # `{:key_unavailable, "merchant_7f3"}` - a reason whose entire meaning is

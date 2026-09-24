@@ -16,11 +16,13 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
   import Ecto.Query, only: [from: 2]
 
   alias Encryptor.Ecto.KeyStore
+  alias Encryptor.Ecto.TestGcpKms
   alias Encryptor.Ecto.TestKeyStore
   alias Encryptor.Ecto.TestMigrationWrappedKeys03Row
   alias Encryptor.Ecto.TestMigrationWrappedKeysPrefix
   alias Encryptor.Error
   alias Encryptor.Message
+  alias Encryptor.Provider.GcpKms
 
   @context %{"table" => "cards", "column" => "pan"}
 
@@ -312,7 +314,12 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # the expected error rather than on a decrypt failure, which is the whole
     # point: a store that guesses gets it right in the fixture and wrong in
     # production, where the bytes are a GCP ciphertext.
-    test "a gcp_kms_ciphertext row is not unwrapped as an engine message" do
+    #
+    # The store here is configured without `:gcp_kms`, so the GCP branch has
+    # no client and answers the refusal ADR-0005's Amendment A keeps for that
+    # configuration. With the client configured, the row is served: see
+    # "a gcp_kms_ciphertext row, with the GCP branch configured" below.
+    test "a gcp_kms_ciphertext row is not unwrapped as an engine message, and without :gcp_kms is refused" do
       TestKeyStore.provision!("merchant_7f3", 1,
         wrapping_shape: "gcp_kms_ciphertext",
         key_id: "projects/p/locations/l/keyRings/r/cryptoKeys/k"
@@ -327,23 +334,32 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # The two shapes coexist for the length of a host's migration, which is why
     # ADR-0005 decision 5 dispatches per row rather than per store: one setting
     # for the whole store would make the mixed window unrepresentable. Both rows
-    # below hold byte-identical wrappings, produced the same way; the only thing
-    # that differs is the column, and the two answers differ because of it.
+    # below are each produced by their own path - a root-vault engine message
+    # and a GCP KMS ciphertext - and one store configured with both clients
+    # serves both, in one tenant and across two.
+    #
+    # Sabotage: sent the GCP row down the refusal arm whatever the
+    # configuration. `merchant_a19` answered `{:unsupported_wrapping_shape,
+    # "gcp_kms_ciphertext"}` and the mixed tenant lost its GCP version from
+    # the candidate list.
     test "one store serves both shapes at once, each down its own path" do
       wrapped = TestKeyStore.provision!("merchant_7f3", 1)
+      gcp = TestGcpKms.provision!("merchant_a19")
 
-      TestKeyStore.provision!("merchant_a19", 1,
-        wrapping_shape: "gcp_kms_ciphertext",
-        key_id: "projects/p/locations/l/keyRings/r/cryptoKeys/k"
-      )
+      TestKeyStore.provision!("merchant_b22", 2)
+      mixed_gcp = TestGcpKms.provision!("merchant_b22")
 
-      state = TestKeyStore.state()
+      state = TestGcpKms.state()
 
       assert {:ok, [descriptor]} = KeyStore.decryption_keys(state, "merchant_7f3")
       assert descriptor.name == wrapped.name
 
-      assert {:error, {:invalid_key_descriptor, {:unsupported_wrapping_shape, _shape}}} =
-               KeyStore.decryption_keys(state, "merchant_a19")
+      assert {:ok, [gcp_descriptor]} = KeyStore.decryption_keys(state, "merchant_a19")
+      assert gcp_descriptor.name == gcp.name
+
+      assert {:ok, [v2, v1]} = KeyStore.decryption_keys(state, "merchant_b22")
+      assert v2.name == "t/#{ref(v2)}/v2"
+      assert v1.name == mixed_gcp.name
     end
 
     # Sabotage: used `String.to_existing_atom/1` on the column. A row carrying
@@ -372,6 +388,137 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
       assert {:error, {:invalid_key_descriptor, :unexpected_key_id}} =
                KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
+    end
+  end
+
+  describe "a gcp_kms_ciphertext row, with the GCP branch configured" do
+    # ADR-0005 Amendment A: the row is handed to `Encryptor.Provider.GcpKms`'s
+    # public `decryption_keys/2` through a one-row store, and what comes back
+    # is the provider's own descriptor. The comparison below is against the
+    # provider asked directly about the same row, so the store adds nothing
+    # and loses nothing on the way through.
+    #
+    # Sabotage: restored the unconditional `{:unsupported_wrapping_shape,
+    # "gcp_kms_ciphertext"}` arm. Both callbacks answered that refusal and the
+    # first `assert {:ok, ...}` went red.
+    test "round-trips: both callbacks answer the key the provider minted" do
+      provisioned = TestGcpKms.provision!("merchant_7f3")
+      state = TestGcpKms.state()
+
+      assert {:ok, [descriptor]} = KeyStore.decryption_keys(state, "merchant_7f3")
+      assert {:ok, ^descriptor} = KeyStore.encryption_key(state, "merchant_7f3")
+
+      assert descriptor.name == provisioned.name
+      assert descriptor.namespace == provisioned.namespace
+      assert descriptor.bits == 256
+
+      {:ok, direct} =
+        GcpKms.init(
+          Keyword.merge(TestGcpKms.opts(),
+            reference_subkey: TestKeyStore.reference_subkey(),
+            store: fn _tenant_ref -> {:ok, [provisioned]} end
+          )
+        )
+
+      assert {:ok, [from_provider]} =
+               GcpKms.decryption_keys(direct, "merchant_7f3")
+
+      assert digest(descriptor) == digest(from_provider)
+    end
+
+    # The same key, end to end: a value written through a tenant vault whose
+    # only stored copy of its key is a GCP KMS ciphertext reads back, and the
+    # message names the key the row declares.
+    test "a value written through the vault reads back under the GCP-wrapped key" do
+      provisioned = TestGcpKms.provision!("merchant_7f3")
+      plaintext = "the value in merchant_7f3's column"
+
+      assert {:ok, ciphertext} =
+               TestGcpKms.Tenant.encrypt(plaintext,
+                 key: "merchant_7f3",
+                 encryption_context: @context
+               )
+
+      assert {:ok, ^plaintext} =
+               TestGcpKms.Tenant.decrypt(ciphertext,
+                 key: "merchant_7f3",
+                 encryption_context: @context
+               )
+
+      assert {:ok, info} = Message.describe(ciphertext)
+      assert [%{key_name: written_under}] = info.encrypted_data_keys
+      assert written_under == provisioned.name
+    end
+
+    # A GCP wrapping is bound to its row's `tenant_ref`, `version` and
+    # `namespace` through the additional authenticated data, so a row filed
+    # under another tenant fails closed at `Decrypt`. The provider answers
+    # that as `{:key_unavailable, selector}` because it cannot tell a refused
+    # `Decrypt` from an unreachable service, and the store returns it
+    # unrelabelled.
+    #
+    # Sabotage: translated every delegate failure into `{:invalid_key_descriptor,
+    # :unwrap_failed}`. The first assertion went red on that term.
+    test "a row moved to another tenant fails closed, in the provider's own term" do
+      TestGcpKms.provision!("merchant_a19")
+      {:ok, mine} = tenant_ref("merchant_7f3")
+      {:ok, theirs} = tenant_ref("merchant_a19")
+
+      {1, _rows} =
+        TestRepo.update_all(
+          from(k in TestGcpKms.table(), where: k.tenant_ref == ^theirs),
+          set: [tenant_ref: mine, name: "t/#{mine}/v1"]
+        )
+
+      state = TestGcpKms.state()
+
+      assert {:error, {:key_unavailable, "merchant_7f3"}} =
+               KeyStore.decryption_keys(state, "merchant_7f3")
+
+      assert {:error, {:key_unavailable, "merchant_7f3"}} =
+               KeyStore.encryption_key(state, "merchant_7f3")
+    end
+
+    # The "one bad row is not the whole store" rule holds for a GCP row as it
+    # does for an engine message, because the dispatch is per row: with the
+    # service unreachable, the tenant's engine-message version still answers
+    # reads, and a write - whose key is that newest row - is unaffected.
+    #
+    # Sabotage: matched the delegate's answer with `{:ok, [descriptor]} =`
+    # instead of `with`, so its failure raised rather than returned. The first
+    # assertion went red on a `MatchError` out of the callback - the whole
+    # tenant unreadable because one row's service was down.
+    test "an unreachable service costs only the GCP rows" do
+      TestGcpKms.provision!("merchant_7f3")
+      TestKeyStore.provision!("merchant_7f3", 2)
+      TestGcpKms.provision!("merchant_a19")
+
+      state = TestGcpKms.state()
+      TestGcpKms.outage(true)
+
+      assert {:ok, [only]} = KeyStore.decryption_keys(state, "merchant_7f3")
+      assert only.name == "t/#{ref(only)}/v2"
+      assert {:ok, ^only} = KeyStore.encryption_key(state, "merchant_7f3")
+
+      assert {:error, {:key_unavailable, "merchant_a19"}} =
+               KeyStore.encryption_key(state, "merchant_a19")
+
+      TestGcpKms.outage(false)
+
+      assert {:ok, [_v2, _v1]} = KeyStore.decryption_keys(state, "merchant_7f3")
+    end
+
+    # The read-side `key_id` rule runs before the client is consulted, so a
+    # configured store still answers the store's own term for it.
+    #
+    # Sabotage: moved the delegation clause above the `missing_key_id` clause.
+    # The provider's own row check refused the `NULL` id first and the answer
+    # became `{:invalid_key_descriptor, :invalid_row}`.
+    test "a gcp row with no key_id is still missing_key_id" do
+      TestKeyStore.provision!("merchant_7f3", 1, wrapping_shape: "gcp_kms_ciphertext")
+
+      assert {:error, {:invalid_key_descriptor, :missing_key_id}} =
+               KeyStore.decryption_keys(TestGcpKms.state(), "merchant_7f3")
     end
   end
 
