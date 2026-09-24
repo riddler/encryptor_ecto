@@ -75,8 +75,6 @@ root key and one module that derives what the vaults need from it:
 
 ```elixir
 defmodule Library.Keys do
-  import Ecto.Query, only: [from: 2]
-
   alias Encryptor.Ecto.KeyStore
   alias Encryptor.Envelope
   alias Library.Repo
@@ -123,13 +121,8 @@ defmodule Library.Keys do
     end
   end
 
-  def shred_agreement(agreement_id) do
-    {:ok, ref} = Envelope.scope_ref(reference_subkey(), agreement_id)
-
-    {count, _rows} =
-      Repo.delete_all(from(k in @agreement_table, where: k.tenant_ref == ^ref))
-
-    {:ok, count}
+  def shred_agreement(agreement_id, opts \\ []) do
+    KeyStore.shred(Library.AgreementVault, agreement_id, Keyword.put(opts, :version, :all))
   end
 end
 ```
@@ -141,7 +134,7 @@ writes it into the `tenant_ref` column: the column keeps the name it had
 before the scope rename, because it exists in every adopter's database
 (ADR-0006 decision 3). Each vault's keys carry their own namespace
 (`"library-customer"`, `"library-agreement"`), which is the "two namespaces"
-half of Step 1. `shred_agreement/1` is Step 6.
+half of Step 1. `shred_agreement/2` is Step 6.
 
 The root vault is a single-key vault with a `Static` provider and
 `cache: false`:
@@ -218,8 +211,8 @@ end
 ```
 
 Start all three in your supervision tree after the repo. `max_age` is in
-seconds, and it matters in Step 6: it is how long a running node can keep
-decrypting under a key after its row is deleted.
+seconds, and it matters in Step 6: it is how long the shred waits, by
+default, for a running node's cached key materials to expire.
 
 ## Step 4. The customer scope comes from the process
 
@@ -384,22 +377,33 @@ read of licensed rows is a read of one agreement's rows.
 
 An agreement's deletion obligation is met by destroying that agreement's
 key. `encryptor`'s ADR-0005 makes a shred the delete of a scope's wrapping
-rows ("A shred deletes the row"), and its runbook P3 is the procedure. This
-release of `encryptor_ecto` ships no shred function: the shred is a `DELETE`
-against the key table that you schedule (`Encryptor.Ecto.KeyStore`, "A shred
-is a `DELETE` of the row"), which is `Library.Keys.shred_agreement/1` above.
+rows ("A shred deletes the row"), and its runbook P3 is the procedure.
+`Encryptor.Ecto.KeyStore.shred/3` performs it against the key table a
+running vault reads: with `version: :all` it deletes every version of the
+scope in one locked transaction, waits out the vault's cache `max_age`, and
+returns an `Encryptor.Ecto.KeyStore.Shred` record of what it deleted.
+`Library.Keys.shred_agreement/2` above is that call for the agreement vault.
+Do not replace it with a hand-written `delete_all`: that takes no lock,
+waits for no drain and leaves no record.
 
 1. **Record the decision.** P3 requires a recorded, human decision before a
    shred, and says a shred is never automated and never a cascade from
    another delete. The agreement's end is the decision; write down which
    agreement and when.
-2. **Delete the agreement's key rows.** `Library.Keys.shred_agreement/1`
-   returns how many it deleted. Every version goes: a key provisioned as
-   above has one, and a rotated one has more.
-3. **Drain the caches.** A running node that resolved the agreement's key
-   before the delete can keep decrypting under it for up to `max_age` - 300
-   seconds with the vaults above. Wait that long on every node, or restart
-   the agreement vault on every node.
+2. **Shred the agreement's key.** `Library.Keys.shred_agreement(agreement_id)`
+   returns `{:ok, %Encryptor.Ecto.KeyStore.Shred{}}`. Its `versions` lists
+   every version deleted - a key provisioned as above has one, and a rotated
+   one has more - and its `deleted_at` and `drained_at` belong in the change
+   record beside the decision.
+3. **Let the drain finish.** By default the call returns only once the
+   agreement vault's `max_age` - 300 seconds with the vaults above - has
+   passed since the delete, which is P3's cache drain. A host that restarts
+   the agreement vault on every node instead passes `drain: :skip` and
+   restarts; the record's `drained_at` still says when waiting would have
+   finished. With `encryptor` 0.5.0 a read of the shredded agreement already
+   fails when the delete commits, because the vault asks the key store before
+   it consults its cache; the drain stays because P3 makes it a step
+   (this package's ADR-0007).
 4. **Delete the licensed rows.** `Library.Loans.forget/1`. After step 3 they
    are unreadable bytes, but every message header still carries the
    agreement's permanent pseudonym, the `tenant_ref`. Where the fact of the
