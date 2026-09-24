@@ -190,7 +190,7 @@ defmodule Encryptor.Ecto.TestGcpKms do
 
   defmodule Scope do
     @moduledoc """
-    A per-scoped vault over the key store with the GCP branch configured.
+    A scoped vault over the key store with the GCP branch configured.
 
     The same shape as `Encryptor.Ecto.TestKeyStore.Scope`, plus `:gcp_kms`,
     so a value can be written and read back under a key whose only stored

@@ -3,7 +3,7 @@ defmodule Encryptor.Ecto.TestKeyStore do
   The furniture `Encryptor.Ecto.KeyStore`'s tests resolve through.
 
   Nothing here is a stub. `Root` is a real single-key vault with a `Static`
-  provider, `Scope` is a real `:scope` vault whose provider is the module
+  provider, `Scope` is a real `:scoped` vault whose provider is the module
   under test, and the rows the tests read come from a real
   `Encryptor.Envelope.provision/3` against `Root`. A mock would make the
   acceptance property unfalsifiable: a cross-partition substitution fails
@@ -153,7 +153,7 @@ defmodule Encryptor.Ecto.TestKeyStore do
 
   defmodule Scope do
     @moduledoc """
-    A per-scoped vault whose keys come from the store.
+    A scoped vault whose keys come from the store.
 
     `cache: false` so every call re-resolves: the acceptance property is about
     what the provider and the engine do, and a cached partition would let a

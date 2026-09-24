@@ -33,8 +33,9 @@
   fields of `Encryptor.Ecto.BlindIndex.Declaration` are `:derive` and
   `:derive_declared?` (were `:scope` and `:scope_declared?`),
   `Encryptor.Ecto.BlindIndex.Derivation`'s field and `new!/1` option are
-  `:derive` (was `:scope`), and a derivation's selector `{:tenant, selector}`
-  is `{:scope, selector}`. No stored index value changes.
+  `:derive` (was `:scope`), its type `scope/0` is `derive/0`, and a
+  derivation's selector `{:tenant, selector}` is `{:scope, selector}`. No
+  stored index value changes.
 - **Breaking.** The migration plan DSL's `tenant_from :branch_id` is
   `scope_from :branch_id` and `tenant :none` is `scope :none`; `mix
   encryptor.ecto.gen.plan` now emits `scope_from :TODO_scope_column`. The
