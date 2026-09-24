@@ -103,10 +103,14 @@ making it not matter.
 Because a scope's rows are under that scope's key material, destroying the key
 material destroys the readability of the rows. That is crypto-shredding, and for
 a host with a deletion obligation it is often the reason the per-scope key model
-was wanted in the first place. It is the vault's operation, not this package's -
-this package's task list contains no verb that operates on a key (ADR-0002
-decision 9) - but it is this layer's field declarations that decide which rows
-participate.
+was wanted in the first place. The procedure is the vault's, written in
+`encryptor`'s ADR-0005, and this package's task list still contains no verb
+that operates on a key (ADR-0002 decision 9). The delete the procedure ends in
+is this package's: `Encryptor.Ecto.KeyStore.shred/3` is the one key-store
+delete it performs, against the table its key provider reads (ADR-0007
+decision 3, proposed; its decision 6 is the qualification of ADR-0002 decision
+9 that allows it). But it is this layer's field declarations that decide which
+rows participate.
 
 A field declared `scope: :none` does not participate. It omits the scope from
 its context entirely, and its ciphertexts are therefore not shreddable with a

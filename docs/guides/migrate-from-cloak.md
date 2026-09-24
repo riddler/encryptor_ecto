@@ -24,8 +24,10 @@ by email, served today by a `Cloak.Ecto.SHA256` sibling column.
   Nothing here can recover them, and the migration will classify every one of
   them `:undecryptable`.
 - **Vault key material exists for every scope** you are about to migrate, or
-  can be provisioned in step 1. Provisioning is `encryptor`'s territory and
-  this package has no verb that touches a key.
+  can be provisioned in step 1. Provisioning is `encryptor`'s territory: this
+  package creates and re-wraps no key, and none of its tasks touches one. Its
+  one key-store delete is `Encryptor.Ecto.KeyStore.shred/3`, the end of a
+  crypto-shred (ADR-0007, proposed), and nothing in this guide calls it.
 - **You can deploy twice**, which is what steps 2 and 3 are, and you can run a
   command against production from your release.
 - **PostgreSQL.** The census SQL at the end is written in Postgres; the tasks
