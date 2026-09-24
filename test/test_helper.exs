@@ -16,7 +16,8 @@ for vault <- [
       # start - so both start on this arm too, and the tests that read rows
       # carry `:database` themselves.
       Encryptor.Ecto.TestKeyStore.Root,
-      Encryptor.Ecto.TestKeyStore.Tenant
+      Encryptor.Ecto.TestKeyStore.Tenant,
+      Encryptor.Ecto.TestGcpKms.Tenant
     ] do
   {:ok, _pid} = vault.start_link()
 end

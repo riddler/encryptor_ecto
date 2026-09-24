@@ -48,6 +48,7 @@ defmodule Encryptor.Ecto.KeyStore do
   | `:reference_subkey` | required | 32 bytes: the pinned reference root expanded under `"tenant-ref"` |
   | `:table` | `"encryptor_wrapped_keys"` | The table to read |
   | `:prefix` | `nil` | The schema prefix the table lives in; the repo's default when absent |
+  | `:gcp_kms` | `nil` | `Encryptor.Provider.GcpKms`'s options, for a table holding `"gcp_kms_ciphertext"` rows. Absent, such a row is refused |
 
   ### `:prefix` is a placement decision, and it is singular
 
@@ -75,6 +76,38 @@ defmodule Encryptor.Ecto.KeyStore do
   state. It must be the same value the vault itself is configured with, or the
   provider will look for a row under one reference while the vault writes a
   header claiming another.
+
+  ### `:gcp_kms` is the GCP branch's client, and the store keeps the read
+
+  A table can hold rows wrapped by `Encryptor.Provider.GcpKms` beside rows
+  wrapped by the root vault (ADR-0005 decision 5), and a GCP row needs a
+  configured KMS client to unwrap. `:gcp_kms` is that client's configuration:
+  the keyword list `Encryptor.Provider.GcpKms` documents, less the two options
+  this store supplies itself.
+
+      provider:
+        {Encryptor.Ecto.KeyStore,
+         repo: MyApp.Repo,
+         root_vault: MyApp.RootVault,
+         reference_subkey: subkey,
+         gcp_kms: [
+           project: "myapp-prod",
+           location: "us-east1",
+           key_ring: "encryptor-tenant-keys",
+           http_client: MyApp.KmsHttp,
+           goth: MyApp.Goth
+         ]}
+
+  `:reference_subkey` is this store's own, so the two cannot disagree about
+  which row a selector names. `:store` is supplied per row: a GCP row is
+  unwrapped by handing `Encryptor.Provider.GcpKms.decryption_keys/2` a store
+  that answers that one row, so the per-row dispatch and the "one bad row"
+  rule below hold for GCP rows exactly as they do for engine messages. Naming
+  either inside `:gcp_kms` is refused at start rather than silently
+  overridden. The options are checked through `Encryptor.Provider.GcpKms`'s
+  own `c:Encryptor.Provider.init/1` at start, so a misconfigured client fails
+  the vault's boot rather than its first GCP read. The decision is this
+  package's ADR-0005, "Amendment A (2026-09-24)".
 
   ## What it does, and the three things it will not do
 
@@ -222,14 +255,21 @@ defmodule Encryptor.Ecto.KeyStore do
       inside the message, so a key id beside one means the row was written by
       something that did not know which shape it was writing.
     * `{:invalid_key_descriptor, {:unsupported_wrapping_shape,
-      "gcp_kms_ciphertext"}}` - a well-formed GCP row this store cannot serve.
-      ADR-0005's decision 5 branches per row, and its open question 2 leaves
-      *where the GCP branch's client comes from* open; until that is decided
-      this state holds a `root_vault` and nothing else, so the branch answers
-      rather than crashes. A store with no GCP-shaped rows never reaches it.
+      "gcp_kms_ciphertext"}}` - a well-formed GCP row in a store configured
+      without `:gcp_kms`. The branch has no client to unwrap with, so it
+      answers rather than crashes. A store with no GCP-shaped rows never
+      reaches it.
 
   None of those five widens `t:Encryptor.Provider.reason/0`: they are new terms
   inside `{:invalid_key_descriptor, term()}`, which is open by construction.
+
+  A GCP row in a store configured *with* `:gcp_kms` answers whatever
+  `Encryptor.Provider.GcpKms` answers for that row, unrelabelled. Its
+  `Decrypt` failing - the service unreachable, or the row's `tenant_ref`,
+  `version` or `namespace` no longer matching the data its wrapping was bound
+  to - is `{:key_unavailable, selector}`, because the provider does not tell
+  those apart and this store cannot either; a stored row it would never have
+  written is `{:invalid_key_descriptor, :invalid_row}`.
 
   ## The failure that is not in the vocabulary
 
@@ -266,6 +306,7 @@ defmodule Encryptor.Ecto.KeyStore do
   alias Encryptor.Envelope.WrappedKey
   alias Encryptor.Key.Aes
   alias Encryptor.Provider
+  alias Encryptor.Provider.GcpKms
 
   @default_table "encryptor_wrapped_keys"
   @reference_subkey_bytes 32
@@ -282,7 +323,8 @@ defmodule Encryptor.Ecto.KeyStore do
           root_vault: module(),
           reference_subkey: binary(),
           table: String.t(),
-          prefix: String.t() | nil
+          prefix: String.t() | nil,
+          gcp_kms: keyword() | nil
         }
 
   @typedoc "One row of the wrapped-key table, as selected by `rows/3`."
@@ -329,14 +371,16 @@ defmodule Encryptor.Ecto.KeyStore do
          {:ok, root_vault} <- module_option(opts, :root_vault),
          {:ok, subkey} <- reference_subkey(opts),
          {:ok, table} <- table(opts),
-         {:ok, prefix} <- prefix(opts) do
+         {:ok, prefix} <- prefix(opts),
+         {:ok, gcp_kms} <- gcp_kms(opts, subkey) do
       {:ok,
        %{
          repo: repo,
          root_vault: root_vault,
          reference_subkey: subkey,
          table: table,
-         prefix: prefix
+         prefix: prefix,
+         gcp_kms: gcp_kms
        }}
     end
   end
@@ -356,7 +400,7 @@ defmodule Encryptor.Ecto.KeyStore do
   def encryption_key(state, selector) do
     with {:ok, ref} <- tenant_ref(state, selector),
          {:ok, [newest | _older]} <- rows(state, ref, selector) do
-      descriptor(state, newest)
+      descriptor(state, newest, selector)
     else
       {:ok, []} -> {:error, {:unknown_key, selector}}
       {:error, reason} -> {:error, reason}
@@ -506,10 +550,10 @@ defmodule Encryptor.Ecto.KeyStore do
           {:ok, [Aes.t(), ...]} | {:error, Provider.reason()}
   defp unwrap_all(_state, [], selector), do: {:error, {:unknown_key, selector}}
 
-  defp unwrap_all(state, rows, _selector) do
+  defp unwrap_all(state, rows, selector) do
     {descriptors, reasons} =
       rows
-      |> Enum.map(&descriptor(state, &1))
+      |> Enum.map(&descriptor(state, &1, selector))
       |> Enum.split_with(&match?({:ok, _descriptor}, &1))
 
     case descriptors do
@@ -522,9 +566,10 @@ defmodule Encryptor.Ecto.KeyStore do
   # store. A host moving one tenant's wrapping from a root vault to GCP KMS has
   # a table holding both shapes at once for the length of that migration, and a
   # per-store setting would make the mixed window unrepresentable.
-  @spec descriptor(state(), row()) :: {:ok, Aes.t()} | {:error, Provider.reason()}
-  defp descriptor(state, row) do
-    with {:ok, shape} <- shape(row.wrapping_shape), do: unwrap_row(state, shape, row)
+  @spec descriptor(state(), row(), Provider.selector()) ::
+          {:ok, Aes.t()} | {:error, Provider.reason()}
+  defp descriptor(state, row, selector) do
+    with {:ok, shape} <- shape(row.wrapping_shape), do: unwrap_row(state, shape, row, selector)
   end
 
   # One clause per value the record publishes, plus a catch-all, and
@@ -541,29 +586,41 @@ defmodule Encryptor.Ecto.KeyStore do
   # The `key_id` rules are read-side because each is conditional on the shape,
   # and a conditional constraint is not portable DDL. A key id is a resource
   # name, so neither arm carries one out.
-  @spec unwrap_row(state(), wrapping_shape(), row()) ::
+  @spec unwrap_row(state(), wrapping_shape(), row(), Provider.selector()) ::
           {:ok, Aes.t()} | {:error, Provider.reason()}
-  defp unwrap_row(state, :engine_message, %{key_id: nil} = row) do
+  defp unwrap_row(state, :engine_message, %{key_id: nil} = row, _selector) do
     case Envelope.unwrap(state.root_vault, wrapped_key(row)) do
       {:ok, descriptor} -> {:ok, descriptor}
       {:error, _error} -> {:error, {:invalid_key_descriptor, :unwrap_failed}}
     end
   end
 
-  defp unwrap_row(_state, :engine_message, _row),
+  defp unwrap_row(_state, :engine_message, _row, _selector),
     do: {:error, {:invalid_key_descriptor, :unexpected_key_id}}
 
-  defp unwrap_row(_state, :gcp_kms_ciphertext, %{key_id: nil}),
+  defp unwrap_row(_state, :gcp_kms_ciphertext, %{key_id: nil}, _selector),
     do: {:error, {:invalid_key_descriptor, :missing_key_id}}
 
-  # ADR-0005 open question 2: which of a second provider option, a delegation
-  # to `Encryptor.Provider.GcpKms` or a composite provider supplies this
-  # branch's client is undecided. The record's assumption A4 is unmet rather
-  # than unshipped: the module exists upstream, and the public unwrap a store
-  # could delegate to does not. Decision 5 is written so that this is an
-  # answer rather than a crash.
-  defp unwrap_row(_state, :gcp_kms_ciphertext, _row),
+  # ADR-0005 Amendment A: a store configured without `:gcp_kms` has no client
+  # for this branch, and decision 5 is written so that this is an answer
+  # rather than a crash.
+  defp unwrap_row(%{gcp_kms: nil}, :gcp_kms_ciphertext, _row, _selector),
     do: {:error, {:invalid_key_descriptor, {:unsupported_wrapping_shape, "gcp_kms_ciphertext"}}}
+
+  # ADR-0005 Amendment A: the delegation. `Encryptor.Provider.GcpKms` has no
+  # public single-row unwrap, so the row is handed to its public
+  # `decryption_keys/2` through a store that answers this one row and nothing
+  # else. Its answer is returned unrelabelled - the provider's reasons are
+  # already `t:Encryptor.Provider.reason/0`.
+  defp unwrap_row(state, :gcp_kms_ciphertext, row, selector) do
+    provisioned = Map.delete(row, :wrapping_shape)
+    opts = Keyword.put(state.gcp_kms, :store, fn _tenant_ref -> {:ok, [provisioned]} end)
+
+    with {:ok, gcp_state} <- GcpKms.init(opts),
+         {:ok, [descriptor]} <- GcpKms.decryption_keys(gcp_state, selector) do
+      {:ok, descriptor}
+    end
+  end
 
   @spec wrapped_key(row()) :: WrappedKey.t()
   defp wrapped_key(row) do
@@ -615,6 +672,47 @@ defmodule Encryptor.Ecto.KeyStore do
         {:error, {:invalid_config, :table, :invalid_name}}
     end
   end
+
+  # ADR-0005 Amendment A. The two options this store supplies are refused
+  # rather than overridden: a host that names its own `:reference_subkey` here
+  # believes it configured something, and a silent override would hide that it
+  # did not. The rest is checked by `Encryptor.Provider.GcpKms.init/1` itself,
+  # once, now, with a store that answers nothing - so the client's own refusal
+  # terms reach the host unchanged, at vault start.
+  @gcp_kms_supplied [:reference_subkey, :store]
+
+  @spec gcp_kms(keyword(), binary()) :: {:ok, keyword() | nil} | {:error, term()}
+  defp gcp_kms(opts, subkey) do
+    case Keyword.get(opts, :gcp_kms) do
+      nil ->
+        {:ok, nil}
+
+      gcp_opts when is_list(gcp_opts) ->
+        if Keyword.keyword?(gcp_opts),
+          do: gcp_kms_opts(gcp_opts, subkey),
+          else: {:error, {:invalid_config, :gcp_kms, :not_a_keyword_list}}
+
+      _other ->
+        {:error, {:invalid_config, :gcp_kms, :not_a_keyword_list}}
+    end
+  end
+
+  @spec gcp_kms_opts(keyword(), binary()) :: {:ok, keyword()} | {:error, term()}
+  defp gcp_kms_opts(gcp_opts, subkey) do
+    case Enum.find(@gcp_kms_supplied, &Keyword.has_key?(gcp_opts, &1)) do
+      nil ->
+        resolved = Keyword.put(gcp_opts, :reference_subkey, subkey)
+
+        with {:ok, _checked} <- GcpKms.init(Keyword.put(resolved, :store, &no_rows/1)),
+             do: {:ok, resolved}
+
+      supplied ->
+        {:error, {:invalid_config, :gcp_kms, {:supplied_by_key_store, supplied}}}
+    end
+  end
+
+  @spec no_rows(String.t()) :: {:ok, []}
+  defp no_rows(_tenant_ref), do: {:ok, []}
 
   # A prefix goes to the adapter as a query option, which quotes it, so it
   # needs no identifier grammar the way the interpolated table name does -
