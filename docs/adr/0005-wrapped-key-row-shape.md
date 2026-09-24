@@ -877,9 +877,15 @@ Provenance: campaign RF048, bead ece-42x (folding ece-2bc and ece-8pt).
 
 ## Amendment A (2026-09-24): open question 2 answered - the GCP branch's client is a `:gcp_kms` option, delegated one row at a time
 
-Status: proposed (2026-09-24). This Amendment decides open question 2 and
-nothing else. The record above keeps its accepted status; no sentence above
-is withdrawn, reworded or removed, and no status word above flips.
+Status: proposed (2026-09-24). This Amendment does two things. It answers
+open question 2 (A1 to A4). And in A5 it **proposes amending decision 5's
+fourth failure row** - "the wrapping does not unwrap under its declared
+shape" answers `{:invalid_key_descriptor, :unwrap_failed}` - for a
+`"gcp_kms_ciphertext"` row in a store configured with `:gcp_kms`. Accepting
+that amendment is the operator's decision, taken when this Amendment is
+accepted. Until then decision 5 stands as accepted, and A5 records where the
+code shipped with this Amendment departs from it and why. No text above this
+Amendment is edited in place, and no status word above flips.
 
 Upstream cites were read in the `encryptor` 0.4.1 Hex package this
 repository's `mix.lock` resolves (`mix.lock:14`, `"encryptor", "0.4.1"`;
@@ -962,17 +968,31 @@ The "Upstream API assumptions" table records A4 as **not shipped**, and the
 unwrap does not". Read A4 now as **met through the store seam**: the module
 is shipped at the pinned 0.4.1, and a store delegates an unwrap to it through
 public `decryption_keys/2` over a one-row `:store` closure, as A1 and A3
-describe. The absence of a single-row public unwrap is no longer a blocker.
-If `encryptor` later ships one, adopting it changes nothing a host sees.
+describe. The absence of a single-row public unwrap no longer blocks the
+**success** half of decision 5: a GCP row that unwraps is served.
 
-### A5. What a GCP row answers when the client is configured
+The **failure** half is not fully met through the 0.4.1 public surface.
+Decision 5 separates a found row that does not unwrap (`:unwrap_failed`)
+from a store that could not be asked (`{:key_unavailable, selector}`). The
+provider's public answer merges those two for a GCP row, as A5 sets out, so
+through that surface the store cannot keep them apart. A4 is therefore met
+for serving a GCP row and still unmet for decision 5's failure vocabulary.
+A public unwrap, or a public answer that carries the failure class, would
+close that gap (A5).
+
+### A5. What a GCP row answers when the client is configured: a proposed amendment to decision 5
 
 Decision 5's table gives `{:invalid_key_descriptor, :unwrap_failed}` for "the
-wrapping does not unwrap under its declared shape". For a
-`"gcp_kms_ciphertext"` row in a store configured with `:gcp_kms`, read that
-row as amended here: the answer is whatever `Encryptor.Provider.GcpKms`
-answers for the row, returned unrelabelled (the delegating clause of
-`unwrap_row/4`). Every such answer is already a `t:Encryptor.Provider.reason/0`.
+wrapping does not unwrap under its declared shape", and the same decision
+says in words that a row which is found and does not reconstruct a descriptor
+is not `{:key_unavailable, selector}`. **This section proposes amending that
+row** for a `"gcp_kms_ciphertext"` row in a store configured with
+`:gcp_kms`. Under the proposed amendment the answer is whatever
+`Encryptor.Provider.GcpKms` answers for the row, returned unrelabelled (the
+delegating clause of `unwrap_row/4`). Every such answer is already a
+`t:Encryptor.Provider.reason/0`. The code shipped with this Amendment already
+behaves this way. Accepting the amendment, or ruling for a relabel to
+`:unwrap_failed` instead, is the operator's decision at acceptance.
 
 | the GCP row | the answer |
 |---|---|
@@ -982,15 +1002,26 @@ answers for the row, returned unrelabelled (the delegating clause of
 | `Decrypt` returns material of the wrong size | `{:invalid_key_descriptor, :material_size}` |
 | `key_id` is `NULL` | `{:invalid_key_descriptor, :missing_key_id}`, unchanged: the key store's own clause runs before the client is consulted |
 
-The second row is the one a reader should notice. The provider maps every
-`Decrypt` failure to `{:key_unavailable, selector}` (the `{:error, _failure}`
-arm of its private `unwrap/3`) because it cannot tell a refused `Decrypt`
-from an unreachable service. The key store cannot tell them apart either, so
-relabelling would guess, and the guess that loses less is the provider's: a
-network outage is the common case, and reporting it as permanent would tell
-an operator not to retry an outage. The cost is that a GCP row moved between
-tenants reports as retryable. It still fails closed, and the "one bad row"
-rule keeps that failure to the one row.
+The second row is where this departs from decision 5. The provider's
+transport does tell the two failures apart: a refused `Decrypt` comes back
+from its KMS call as `{:http_status, status}`, and an unreachable service as
+`{:transport, :request_failed}` (`Encryptor.Provider.GcpKms.Api`'s private
+`handle/2`). The provider's private `unwrap/3` then merges both, in its
+`{:error, _failure}` arm, into one public answer,
+`{:key_unavailable, selector}`. So the provider's **public** answer merges
+them, and the key store, which sees only that answer, cannot tell them apart.
+
+A relabel would therefore be a guess, and the guess that loses less is the
+provider's. An outage stays retryable, which is right. A GCP row that was
+moved between tenants or tampered with also answers `{:key_unavailable,
+selector}`, which decision 5 says it should not. It still fails closed, and
+the "one bad row" rule keeps that failure to the one row.
+
+If `encryptor` surfaces the failure class publicly, the store can follow
+decision 5 exactly and this proposed amendment becomes unnecessary. That
+could be a public single-row unwrap, or a public reason that distinguishes a
+refusal from an outage. The store would answer `:unwrap_failed` for a
+refusal and `{:key_unavailable, selector}` for an outage.
 
 ### A6. What does not change
 
