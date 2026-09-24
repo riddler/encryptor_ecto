@@ -400,6 +400,11 @@ path. The index is not an extra and links at its GitHub path:
   vault for data shared under a data agreement: the two key tables, the
   process resolver and a resolver fed from the row, and the shred of one
   agreement, with what each vault's shred reaches.
+- [Resolving the scope in jobs and projectors](docs/guides/scope-in-jobs-and-projectors.md) -
+  why the scope stops at the process, carrying it into a `Task` with
+  `Encryptor.Ecto.Scope.wrap/2`, into a background job through its
+  arguments, and into an event projector through a resolver the projector
+  feeds from each event.
 
 Reference material is the module documentation: `Encryptor.Ecto.Binary`,
 `Encryptor.Ecto.BlindIndex`, `Encryptor.Ecto.Migration`,

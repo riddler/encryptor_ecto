@@ -44,6 +44,12 @@ Task-shaped, for someone who already understands the target state.
   a composite selector, the two key tables, the process resolver and a
   resolver fed from the row, the shred of one agreement, and what each
   vault's shred reaches.
+- [Resolving the scope in jobs and projectors](guides/scope-in-jobs-and-projectors.md) -
+  why the scope stops at the process that set it, capturing it in the caller
+  and re-establishing it with `wrap/2` in a `Task` and in a background job's
+  `perform/1` (the Oban worker as one line of delegation), and a projector
+  that hands each event's scope to a resolver of its own, so that replay
+  and inline projection neither need nor disturb the process scope.
 
 ## Reference
 

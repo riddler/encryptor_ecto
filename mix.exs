@@ -57,7 +57,8 @@ defmodule Encryptor.Ecto.MixProject do
         "docs/guides/migrate-from-cloak.md",
         "docs/guides/bind-extra-context.md",
         "docs/guides/gcp-kms-key-store.md",
-        "docs/guides/two-vaults-customer-and-agreement.md"
+        "docs/guides/two-vaults-customer-and-agreement.md",
+        "docs/guides/scope-in-jobs-and-projectors.md"
       ],
       groups_for_extras: [
         Guides: ~r{docs/}
@@ -82,6 +83,7 @@ defmodule Encryptor.Ecto.MixProject do
         docs/guides/bind-extra-context.md
         docs/guides/gcp-kms-key-store.md
         docs/guides/two-vaults-customer-and-agreement.md
+        docs/guides/scope-in-jobs-and-projectors.md
       ),
       links: %{
         "GitHub" => @source_url,
