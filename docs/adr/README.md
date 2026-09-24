@@ -7,6 +7,7 @@
 | [0003](0003-blind-index.md) | keyed blind indexes, per-tenant by default, equality only | accepted (2026-08-27, with amendments) |
 | [0004](0004-migration-from-cloak.md) | Migration from a prior encryption scheme, with cloak_ecto as the named case | accepted (2026-08-27, with amendments) |
 | [0005](0005-wrapped-key-row-shape.md) | A wrapped-key row declares its wrapping shape, in a column of its own | accepted (2026-09-13) |
+| [0006](0006-scope-names-the-keys-owner.md) | Scope names the key's owner here too, and the key store's column keeps its name | proposed (2026-09-24) |
 
 Every amendment section in these four records - the 2026-08-27 and
 2026-08-28 sets, and ADR-0003's Amendment C of 2026-09-12 - was accepted by
