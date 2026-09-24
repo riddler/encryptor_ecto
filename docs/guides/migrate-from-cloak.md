@@ -203,6 +203,8 @@ vault not running rather than a finding about your data. A cloak-shaped
 legacy vault keeps its ciphers in its own process, so a read before that
 process starts raises, and the migrator records the raise against the row.
 Start the vault and run it again before you investigate a single primary key.
+With the legacy vault up and only the new vault down, the reason on every row
+is `{:raised, Encryptor.Ecto.EncryptError}` instead, and the fix is the same.
 
 ## Step 4. Rehearse with a dry run
 

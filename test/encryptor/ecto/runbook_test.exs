@@ -477,6 +477,32 @@ defmodule Encryptor.Ecto.RunbookTest do
       assert status == :ok
       assert report.counts.migratable == 3
     end
+
+    # Sabotage: removed `target_params/3`'s `legacy: nil` - with the new vault
+    # down there is no header to read, every probe loaded through the target's
+    # legacy reader, and the write pass returned `{:ok, _}` having written
+    # nothing.
+    test "with only the legacy vault started, a write pass fails every row instead of a silent green" do
+      id = seed_without_vault(@north)
+      before = Enum.map(@columns, &raw(id, &1))
+
+      {:ok, {status, report}, _apps} =
+        Ecto.Migrator.with_repo(TestRepo, fn _repo ->
+          {:ok, legacy} = LegacyVault.start_link()
+
+          try do
+            Migrator.run(Migration, mode: :write, on_error: :continue)
+          after
+            GenServer.stop(legacy)
+          end
+        end)
+
+      assert status == :error
+      assert report.counts.already_target == 0
+      assert report.counts.undecryptable == 3
+      assert Enum.all?(report.failures, &(&1.reason == {:raised, Encryptor.Ecto.EncryptError}))
+      assert Enum.map(@columns, &raw(id, &1)) == before
+    end
   end
 
   # -- helpers --------------------------------------------------------------
