@@ -181,11 +181,11 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   A field whose spec names `index:` (ADR-0004's Note of 2026-09-24, answering
   its open question Q1) adds one step between 4 and 5: the index value is
   computed from the value step 3 loaded - the plaintext already in hand, so no
-  second decrypt - through `Encryptor.Ecto.BlindIndex.Value.compute!/4`, the
-  function `Encryptor.Ecto.BlindIndex.put_index/3` computes through, asked
-  with `:dump` under the row's own scope. Step 5's compare-and-swap then
-  sets the index column in the same `UPDATE` as the ciphertext, so the two
-  land together or, on a lost swap, not at all.
+  second decrypt - by the computation `Encryptor.Ecto.BlindIndex.Value.compute!/3`
+  performs for `Encryptor.Ecto.BlindIndex.put_index/3`, run over the pass's own
+  field params and asked with `:dump` under the row's own scope. Step 5's
+  compare-and-swap then sets the index column in the same `UPDATE` as the
+  ciphertext, so the two land together or, on a lost swap, not at all.
 
   A dry run computes it and discards it, as it does the dump. A verification
   does not compute it: it stops at step 3. A row the probe skips is not
