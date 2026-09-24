@@ -15,6 +15,10 @@ defmodule Encryptor.Ecto.TestGcpKms do
 
   `outage/1` makes the fake answer a transport failure for the calling
   process, which is the arm a real network partition would take.
+  `destroyed/2` makes it refuse `Encrypt` and `Decrypt` under one `CryptoKey`
+  for the calling process, which is what the service answers once that key's
+  only version has been through `DestroyCryptoKeyVersion`; setting it back to
+  `false` is the restore.
   """
 
   alias Encryptor.Ecto.KeyStore
@@ -75,6 +79,21 @@ defmodule Encryptor.Ecto.TestGcpKms do
     :ok
   end
 
+  @doc """
+  Marks a `CryptoKey`'s version destroyed, or restored, for the calling process.
+
+  `Encryptor.Provider.GcpKms.provision/2` creates each `CryptoKey` with one
+  version and never rotates it, so destroying that version is destroying
+  every version the key has. The fake answers a destroyed key the way the
+  service answers a version that is not enabled: a `400` naming
+  `FAILED_PRECONDITION`.
+  """
+  @spec destroyed(String.t(), boolean()) :: :ok
+  def destroyed(key_id, destroyed?) do
+    Process.put({__MODULE__, :destroyed, key_id}, destroyed?)
+    :ok
+  end
+
   @doc "The default table name, for a test that edits a row in place."
   @spec table() :: String.t()
   def table, do: KeyStore.default_table()
@@ -112,9 +131,15 @@ defmodule Encryptor.Ecto.TestGcpKms do
     defp route(url, body) do
       cond do
         String.contains?(url, "/cryptoKeys?cryptoKeyId=") -> ok(%{})
-        String.ends_with?(url, ":encrypt") -> encrypt(key_id(url, ":encrypt"), body)
-        String.ends_with?(url, ":decrypt") -> decrypt(key_id(url, ":decrypt"), body)
+        String.ends_with?(url, ":encrypt") -> use_key(key_id(url, ":encrypt"), &encrypt/2, body)
+        String.ends_with?(url, ":decrypt") -> use_key(key_id(url, ":decrypt"), &decrypt/2, body)
       end
+    end
+
+    defp use_key(key_id, call, body) do
+      if Process.get({Encryptor.Ecto.TestGcpKms, :destroyed, key_id}, false),
+        do: {:ok, %{status: 400, body: ~s({"error":{"status":"FAILED_PRECONDITION"}})}},
+        else: call.(key_id, body)
     end
 
     defp encrypt(key_id, %{"plaintext" => plaintext, "additionalAuthenticatedData" => aad}) do

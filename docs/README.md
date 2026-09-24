@@ -32,6 +32,12 @@ Task-shaped, for someone who already understands the target state.
   how the pairs compose with the vault's static ones, which refusals a
   declaration buys, why a bound value is permanent, and what changing one
   costs.
+- [How to keep tenant keys in Google Cloud KMS through the key store](guides/gcp-kms-key-store.md) -
+  one `CryptoKey` per tenant: the Goth token server, the key store's
+  `:gcp_kms` option, provisioning a `"gcp_kms_ciphertext"` row, and the
+  shred - destroying the key version, deleting the row, the restore window,
+  and the answers the application sees at each step, including the one
+  ADR-0005 Amendment A5 proposes.
 
 ## Reference
 
