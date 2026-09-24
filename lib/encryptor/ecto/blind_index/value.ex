@@ -162,8 +162,22 @@ defmodule Encryptor.Ecto.BlindIndex.Value do
   C7).
   """
   @spec compute!(Declaration.t(), term(), TenantContext.operation()) :: binary()
-  def compute!(%Declaration{} = declaration, value, operation) do
-    params = Declaration.field_params!(declaration)
+  def compute!(%Declaration{} = declaration, value, operation),
+    do: compute!(declaration, value, operation, Declaration.field_params!(declaration))
+
+  # The same computation over field params the caller supplies, for the one
+  # caller that must replace the tenant strategy: the migrator's rewrite pass,
+  # folding an index in (ADR-0004's Note of 2026-09-24 on Q1). It installs its
+  # per-row resolver in these params exactly as it does in the target type's
+  # own (`Encryptor.Ecto.Migrator`'s `target_params/3`), because the field's
+  # declared strategy reads a process scope the migrator never sets. Only
+  # `:tenant` differs from what `compute!/3` reads; the normalization, the
+  # derivation identity and the width are the declaration's either way, so
+  # this is the same function rather than a second implementation of it.
+  @doc false
+  @spec compute!(Declaration.t(), term(), TenantContext.operation(), Derivation.field_params()) ::
+          binary()
+  def compute!(%Declaration{} = declaration, value, operation, params) do
     derivation = Declaration.derivation!(declaration)
     selector = Derivation.selector!(derivation, params, operation)
     slow_params = slow_params!(declaration, params.vault, derivation)

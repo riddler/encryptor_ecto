@@ -413,4 +413,61 @@ defmodule Encryptor.Ecto.TestEnginePlans do
         source_authenticated: true
     end
   end
+
+  defmodule FoldedIndex do
+    @moduledoc """
+    A rewrite that folds its blind index into the pass (ADR-0004's Note of
+    2026-09-24 on Q1), through a legacy reader that counts its decrypts.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Cardholder do
+      tenant_from :merchant_id
+
+      field :email,
+        from: Encryptor.Ecto.TestSources.CountingLegacyType,
+        to: Encryptor.Ecto.TestTypes.HolderName,
+        source_authenticated: true,
+        index: :email_index
+    end
+  end
+
+  defmodule UnfoldedIndex do
+    @moduledoc """
+    `FoldedIndex` without `index:` - the default two-pass path, where the
+    rewrite writes ciphertext only and the index is a later backfill.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Cardholder do
+      tenant_from :merchant_id
+
+      field :email,
+        from: Encryptor.Ecto.TestSources.CountingLegacyType,
+        to: Encryptor.Ecto.TestTypes.HolderName,
+        source_authenticated: true
+    end
+  end
+
+  defmodule UnderivableIndex do
+    @moduledoc """
+    A folded index over the vault that encrypts and refuses to derive: the
+    rewrite can succeed and the index cannot, which is what makes the
+    failure's attribution observable.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Cardholder do
+      tenant :none
+
+      field :nickname,
+        from: Encryptor.Ecto.TestSources.LegacyType,
+        to: Encryptor.Ecto.TestTypes.UnsaltedName,
+        source_authenticated: true,
+        index: :nickname_index
+    end
+  end
 end

@@ -970,3 +970,71 @@ Nothing in decision 3 or decision 3a changes, the compile-time check is
 unchanged, and no status word above flips.
 
 Provenance: campaign RF048.
+
+## Note (2026-09-24): Q1 is answered - a blind index may be folded into the rewrite, per field
+
+Status: proposed (2026-09-24).
+
+Q1 asked whether the migrator should backfill blind indexes in the same pass
+as the ciphertext rewrite, and deferred the answer until both engines
+existed. Both do now. **The answer is yes, opted into per field; the two-pass
+path of decision 9 stays the default and is unchanged.**
+
+**The shape is the field-spec option Q1 sketched.** A plan field may name
+`index: :contact_email_index`, the column of a `blind_index` declaration on
+the schema over the encrypted field the pass writes - the field itself, or
+its `into:` column. The plan fails at `mix compile` when no such declaration
+exists (`Encryptor.Ecto.Migration`'s `validate_index!/4`), for ADR-0002
+decision 2's reason: the declaration is where the value's normalization and key
+derivation come from, and a plan that would fail on row one fails at
+compile. `field_spec/0` gains `index: atom() | nil`, `nil` when the plan
+says nothing.
+
+**One derivation, not two.** The folded value is computed by
+`Encryptor.Ecto.BlindIndex.Value.compute!/4`, the arity `compute!/3`
+delegates to and therefore the function `Encryptor.Ecto.BlindIndex.put_index/3`
+computes through, over the same declaration and asked with `:dump`. The one
+thing the migrator changes is the tenant strategy in the field params it
+hands that function (`Encryptor.Ecto.Migrator`'s `index/3`), replaced by the
+plan's own exactly as ADR-0002 decision 3 replaces it in the target type's
+params, so each row's index is keyed under that row's own tenant. The suite
+pins the folded value equal to what `put_index/3` writes for the same
+plaintext and tenant (`test/encryptor/ecto/migrator_folded_index_test.exs`,
+"is written by the rewrite pass alone").
+
+**One decrypt, not two.** The value is computed from the plaintext the
+source load already produced for the rewrite, and written by the same
+compare-and-swap `UPDATE` as the ciphertext (`Encryptor.Ecto.Migrator.Pass`'s
+`migrate/6` and `swap/5`), so the two land together or, on a lost swap, not
+at all. The suite counts one source load per row
+(`migrator_folded_index_test.exs`, "costs one decrypt per row").
+
+**Attributability survives.** Decision 9's first reason for two passes was
+that a failure in either is attributable to one of them. A folded index that
+fails to compute is recorded against the row with the reason
+`{:blind_index, column, {:raised, module}}` (`Encryptor.Ecto.Migrator.Pass`'s
+`index_set/2`), the row is not written, and `on_error:` applies to it as to
+any other failure. The report therefore still says which of the two failed,
+and carries no plaintext (ADR-0002 decision 11) and no index value (ADR-0003,
+"The contract as typespecs", which adds index values to that list).
+
+**What the fold does not cover.** It writes the index for the rows the pass
+rewrites. A row the probe finds already in the target state is never loaded,
+so its index is whatever the application wrote: a host folding the index has
+`put_index/3` live in its changesets by the time the new type modules are
+(decision 8's step 3), or runs ADR-0003 decision 7's backfill over the rows
+the pass skipped. A dry run computes the index and discards it, so a vault
+that cannot derive shows up in the rehearsal; `verify/2` stops at the source
+load as before and says nothing about index columns.
+
+**What this reads into ADR-0002 decision 3.** That decision writes "with
+`update_all` over the ciphertext columns only". A folded field adds the one
+index column its plan names to the same `update_all`; the migrator still
+builds no changeset, calls no `Repo.update/2`, and stays below the schema
+layer. Decision 9's second reason - the migrator's position below the schema
+layer against a helper that works from plaintext in a changeset - is met by
+calling the helper's function rather than the helper.
+
+Decision 9's text, its runbook table and the worked example are unchanged:
+the default is still two passes, and step 7 is still how a host that does
+not fold adopts an index. No status word above flips.

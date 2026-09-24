@@ -248,3 +248,34 @@ defmodule Encryptor.Ecto.TestNormalizers do
   @spec charlist(binary()) :: charlist()
   def charlist(value), do: String.to_charlist(value)
 end
+
+defmodule Encryptor.Ecto.TestSchemas.Cardholder do
+  @moduledoc """
+  A table-backed schema with blind indexes, for the migrator's folded-index
+  tests (ADR-0004's Note of 2026-09-24 on Q1).
+
+  `email` is the ordinary per-tenant index; `nickname` is a global one over
+  the vault that refuses to derive, so folding it into a rewrite fails at the
+  index and nowhere else.
+  """
+
+  use Ecto.Schema
+
+  import Encryptor.Ecto.BlindIndex
+
+  alias Encryptor.Ecto.TestTypes
+
+  @type t :: %__MODULE__{}
+
+  schema "cardholders" do
+    field(:merchant_id, :string)
+
+    field(:email, TestTypes.HolderName)
+    field(:email_index, :binary)
+    blind_index(:email, :email_index, normalize: :email)
+
+    field(:nickname, TestTypes.UnsaltedName)
+    field(:nickname_index, :binary)
+    blind_index(:nickname, :nickname_index, scope: :global)
+  end
+end

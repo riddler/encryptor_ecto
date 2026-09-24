@@ -99,6 +99,39 @@ defmodule Encryptor.Ecto.Migration do
   migration. Both columns are checked against the schema; which one is wider
   is not this package's business.
 
+  ## Folding a blind index into the rewrite
+
+  `index:` names a blind index column, and the pass then writes that index in
+  the same update that writes the ciphertext, computed from the plaintext it
+  already loaded for the rewrite (ADR-0004's Note of 2026-09-24, answering its
+  open question Q1). Without it - the default - the rewrite writes ciphertext
+  only, and the index is a separate backfill after the rewrite is verified
+  (ADR-0004 decision 9), exactly as before.
+
+      rewrite MyApp.Accounts.Customer do
+        tenant_from :account_id
+
+        field :contact_email,
+          from: MyApp.Cloak.Encrypted.String,
+          to: MyApp.Encrypted.String,
+          source_authenticated: true,
+          index: :contact_email_index
+      end
+
+  The column must be one a `blind_index` declaration on the schema names, over
+  the encrypted field the pass writes - the field itself, or its `into:`
+  column - and the plan fails at `mix compile` otherwise. The value is
+  `Encryptor.Ecto.BlindIndex.put_index/3`'s: the same declaration, the same
+  normalization and the same key derivation, asked with `:dump`, under the
+  row's own tenant. A failure computing it is recorded against the row under
+  a reason naming the index column, so it stays attributable to the index
+  rather than to the rewrite.
+
+  It covers the rows the pass rewrites. A row already in the target state is
+  skipped before anything is loaded, so its index is whatever the application
+  wrote: `put_index/3` has to be live in the host's changesets by the time the
+  new type modules are, or the backfill still has rows to visit.
+
   ## What the legacy cipher does not prove
 
   A legacy stream cipher has no authentication tag, so a failed decrypt is not
@@ -141,6 +174,7 @@ defmodule Encryptor.Ecto.Migration do
   message naming the field and saying what to write.
   """
 
+  alias Encryptor.Ecto.BlindIndex.Declaration
   alias Encryptor.Ecto.Migrator.Plan
   alias Encryptor.Ecto.Migrator.Source
 
@@ -160,6 +194,10 @@ defmodule Encryptor.Ecto.Migration do
   the plan did not write it: an undeclared field is `true` only because the
   compile-time check proved it (see "What the legacy cipher does not prove"),
   so the engine reads one key rather than deciding provability again per row.
+
+  `:index` names the blind index column the pass writes beside the ciphertext
+  (see "Folding a blind index into the rewrite"), and is `nil` for the default
+  two-pass path.
   """
   @type field_spec :: [
           from: module(),
@@ -167,7 +205,8 @@ defmodule Encryptor.Ecto.Migration do
           into: atom() | nil,
           source: Source.resolved(),
           source_authenticated: boolean(),
-          validate: (term() -> boolean()) | nil
+          validate: (term() -> boolean()) | nil,
+          index: atom() | nil
         ]
 
   @typedoc "Where a compile-time failure came from, for the `CompileError`."
@@ -183,7 +222,7 @@ defmodule Encryptor.Ecto.Migration do
   # Host-written field options, in the order they are documented. Adding one
   # is meant to be this list plus a validating clause and nothing else, which
   # is how `source_authenticated:` and `validate:` arrived.
-  @field_options [:from, :to, :into, :source_authenticated, :validate]
+  @field_options [:from, :to, :into, :source_authenticated, :validate, :index]
 
   # The macros below call back into this module through `unquote(__MODULE__)`.
   # The generated code runs inside the host's plan module, which has aliased
@@ -257,7 +296,7 @@ defmodule Encryptor.Ecto.Migration do
 
   @doc """
   Declares one field to rewrite: `from:`, `to:`, and optionally `into:`,
-  `source_authenticated:` and `validate:`.
+  `source_authenticated:`, `validate:` and `index:`.
 
   `source_authenticated:` is required rather than optional wherever the
   `from:` type is not one of this package's own - see "What the legacy cipher
@@ -420,7 +459,8 @@ defmodule Encryptor.Ecto.Migration do
       into: validate_into!(Keyword.get(opts, :into), schema, meta),
       source: Source.resolve!(from, source_opts),
       source_authenticated: source_authenticated!(opts, from, source_opts, meta),
-      validate: validate_fun!(Keyword.get(opts, :validate), schema, name, meta)
+      validate: validate_fun!(Keyword.get(opts, :validate), schema, name, meta),
+      index: validate_index!(Keyword.get(opts, :index), schema, target(name, opts), meta)
     ]
 
     put_open(plan_module, %{rewrite | fields: [{name, spec} | rewrite.fields]})
@@ -447,6 +487,31 @@ defmodule Encryptor.Ecto.Migration do
   end
 
   defp validate_into!(other, _schema, meta), do: raise_at!(meta, not_a_column_message(other))
+
+  # The encrypted field the pass writes, which is the field an index folded
+  # into it must be declared over: `into:` where the plan names one, the field
+  # itself otherwise. Read raw here because `validate_into!/3` has already
+  # refused anything that is not a column of the schema by the time an index
+  # is checked.
+  @spec target(atom(), keyword()) :: atom()
+  defp target(name, opts), do: Keyword.get(opts, :into) || name
+
+  # ADR-0004's Note of 2026-09-24 (Q1). The column must be one a `blind_index`
+  # declaration names over the field the pass writes, because that declaration
+  # is where the value's normalization and key derivation come from: an index
+  # the schema does not declare has nothing to be computed by.
+  @spec validate_index!(term(), module(), atom(), meta()) :: atom() | nil
+  defp validate_index!(nil, _schema, _target, _meta), do: nil
+
+  defp validate_index!(column, schema, target, meta) when is_atom(column) do
+    case Declaration.fetch(schema, target, column) do
+      {:ok, _declaration} -> column
+      :error -> raise_at!(meta, undeclared_index_message(schema, target, column))
+    end
+  end
+
+  defp validate_index!(other, _schema, _target, meta),
+    do: raise_at!(meta, not_an_index_message(other))
 
   # ADR-0004 decision 3 and its proposed amendment of 2026-08-28 (Q2). Silence
   # compiles to `true` exactly where `Source.vault_backed?/2` proves it, and is
@@ -661,6 +726,25 @@ defmodule Encryptor.Ecto.Migration do
 
   defp not_a_column_message(given) do
     "`into:` expects a column name, got #{inspect(given)}."
+  end
+
+  defp not_an_index_message(given) do
+    "`index:` expects the name of a blind index column, got #{inspect(given)}."
+  end
+
+  defp undeclared_index_message(schema, target, column) do
+    declared =
+      case Declaration.list(schema, target) do
+        [] -> "none"
+        declarations -> Enum.map_join(declarations, ", ", &inspect(&1.column))
+      end
+
+    "`index: #{inspect(column)}` names no blind index #{inspect(schema)} " <>
+      "declares over #{inspect(target)}, the field this rewrite writes. The " <>
+      "pass computes the index from that declaration - its normalization and " <>
+      "its key derivation - so the column needs a `blind_index " <>
+      "#{inspect(target)}, #{inspect(column)}` on the schema first. Declared " <>
+      "over #{inspect(target)}: #{declared}."
   end
 
   defp duplicate_field_message(schema, name) do
