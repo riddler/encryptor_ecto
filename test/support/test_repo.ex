@@ -53,7 +53,10 @@ defmodule Encryptor.Ecto.TestRepo do
     {10, Encryptor.Ecto.TestMigrationCardholders},
     # The migrate-from-cloak runbook's own host: one secret column and two
     # token columns under a single legacy key.
-    {11, Encryptor.Ecto.TestMigrationRunbook}
+    {11, Encryptor.Ecto.TestMigrationRunbook},
+    # The two-vaults guide's host: a customer-scoped table, an
+    # agreement-scoped one, and the agreement vault's own key table.
+    {12, Encryptor.Ecto.TestMigrationTwoVaults}
   ]
 
   @doc """

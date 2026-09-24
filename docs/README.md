@@ -38,6 +38,12 @@ Task-shaped, for someone who already understands the target state.
   shred - destroying the key version, deleting the row, the restore window,
   and the answers the application sees at each step, including the one
   ADR-0005 Amendment A5 proposes.
+- [Two vaults: a customer scope and an agreement scope](guides/two-vaults-customer-and-agreement.md) -
+  a customer vault for platform data and credentials beside an agreement
+  vault for data shared under a data agreement: why two vaults rather than
+  a composite selector, the two key tables, the process resolver and a
+  resolver fed from the row, the shred of one agreement, and what each
+  vault's shred reaches.
 
 ## Reference
 
