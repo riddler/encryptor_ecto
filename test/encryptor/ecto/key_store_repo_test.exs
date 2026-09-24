@@ -452,17 +452,21 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
     # A GCP wrapping is bound to its row's `tenant_ref`, `version` and
     # `namespace` through the additional authenticated data, so a row filed
-    # under another tenant fails closed at `Decrypt`. The provider answers
-    # that as `{:key_unavailable, selector}` because it cannot tell a refused
-    # `Decrypt` from an unreachable service, and the store returns it
-    # unrelabelled.
+    # under another tenant fails closed at `Decrypt`. The provider's public
+    # answer is `{:key_unavailable, selector}`, which merges a refused
+    # `Decrypt` with an unreachable service, and the store returns it
+    # unrelabelled (ADR-0005 Amendment A5).
     #
     # Sabotage: translated every delegate failure into `{:invalid_key_descriptor,
     # :unwrap_failed}`. The first assertion went red on that term.
+    #
+    # Selectors of its own: the `UPDATE` writes a `{namespace, name}` that a
+    # concurrent async test inserting `merchant_7f3` would also write, and two
+    # sandboxed transactions contending on one unique key deadlocked.
     test "a row moved to another tenant fails closed, in the provider's own term" do
-      TestGcpKms.provision!("merchant_a19")
-      {:ok, mine} = tenant_ref("merchant_7f3")
-      {:ok, theirs} = tenant_ref("merchant_a19")
+      TestGcpKms.provision!("merchant_moved_from")
+      {:ok, mine} = tenant_ref("merchant_moved_to")
+      {:ok, theirs} = tenant_ref("merchant_moved_from")
 
       {1, _rows} =
         TestRepo.update_all(
@@ -472,11 +476,11 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
       state = TestGcpKms.state()
 
-      assert {:error, {:key_unavailable, "merchant_7f3"}} =
-               KeyStore.decryption_keys(state, "merchant_7f3")
+      assert {:error, {:key_unavailable, "merchant_moved_to"}} =
+               KeyStore.decryption_keys(state, "merchant_moved_to")
 
-      assert {:error, {:key_unavailable, "merchant_7f3"}} =
-               KeyStore.encryption_key(state, "merchant_7f3")
+      assert {:error, {:key_unavailable, "merchant_moved_to"}} =
+               KeyStore.encryption_key(state, "merchant_moved_to")
     end
 
     # The "one bad row is not the whole store" rule holds for a GCP row as it
