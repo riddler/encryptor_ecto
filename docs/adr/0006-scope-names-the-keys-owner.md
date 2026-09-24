@@ -1,6 +1,6 @@
 # ADR-0006: Scope names the key's owner here too, and the key store's column keeps its name
 
-Status: proposed (2026-09-24)
+Status: accepted (2026-09-24)
 
 ## Context
 
@@ -293,3 +293,56 @@ mix encryptor.ecto.migrate Library.PatronsPlan --mode write --only-tenant branch
 
 None. enc-ADR-0009's open question on deprecated aliases is answered for this
 package by decision 7.
+
+## Note (2026-09-24): the operator accepted this record
+
+The Status line at the head of this file now reads `accepted (2026-09-24)`,
+and the index row in `docs/adr/README.md` says the same. The rename this
+record decides shipped in `encryptor_ecto` 0.6.0 on Hex, the commit tagged
+`v0.6.0` (`cf4fd54`), which pins `encryptor` `== 0.5.0`, the release that
+ships enc-ADR-0009.
+
+Three passages speak from before the rename. None is edited; each is read with
+this Note:
+
+- Decision 1's "The rename is later, scheduled work; this record decides its
+  names, and nothing in `lib/` changes with it." True of the commit that
+  added this record; the rename landed after it and ships in 0.6.0.
+- "The contract as typespecs" opens "As the rename is to spell them; a
+  proposal, not landed code." It is landed code now, and each type there
+  matches `lib/` at `cf4fd54`.
+- The "Today (at `ad08848`)" column of decision 2's table and the "Today"
+  column of the call-site table name spellings `lib/` no longer carries.
+
+Every claim was re-verified immediately before the flip against main at
+`cf4fd54`:
+
+- Decision 2. For each row of the rename table, the new spelling is defined
+  where the table's last column says, and the old spelling is absent from
+  `lib/` and `.formatter.exs`. The call-site table holds: the profile matched
+  is `:scoped`, the key store calls `Encryptor.Envelope.scope_ref/2` and builds
+  `%WrappedKey{scope_ref: _}`, the pass calls
+  `Encryptor.Context.scope_ref_key/0`, and `mix.exs` pins `{:encryptor, "==
+  0.5.0"}`. `[:encryptor_ecto, :legacy_load]`'s metadata is still `:table` and
+  `:column` (`Encryptor.Ecto.Binary`, `emit_legacy_load/1`). The comments in
+  `.quality.exs` and `coveralls.json` name `Encryptor.Ecto.ScopeContext`, and
+  neither `key_ring: "encryptor-tenant-keys"` nor `MyApp.TenantVault` is left
+  in the README, `docs/guides/`, `docs/explanation/` or `lib/`.
+- Decision 3. `rows/3` selects `scope_ref: k.tenant_ref`
+  (`Encryptor.Ecto.KeyStore`); both key-store generators are byte-identical
+  between `ad08848` and `cf4fd54`; the moduledoc's configuration example still
+  expands `"tenant-ref"`; `"tenant_ref"` is still the context key the pass
+  compares for presence (`Encryptor.Ecto.Migrator.Pass`).
+- Decision 7. The old migrator options are refused and start no pass
+  (`test/encryptor/ecto/migrator_run_test.exs`), and so are the old flags
+  (`test/mix/tasks/encryptor_ecto_migrate_test.exs`).
+- Decision 8. Every `tenant` left in `lib/` is one of decision 3's spellings
+  or text about the kept column. The key-store generator's moduledoc still
+  describes its table as "one row per tenant per key version", around the
+  `tenant_ref` column and the `{tenant_ref, version}` index; decision 3 keeps
+  both generators unchanged, and this Note reads those sentences as text
+  about W1 and W2.
+- Consequences. The 0.6.0 changelog carries a `### **Breaking**` section for
+  the rename.
+
+Provenance: bead ece-60gg.

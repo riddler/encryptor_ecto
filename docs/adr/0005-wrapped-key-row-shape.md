@@ -877,7 +877,7 @@ Provenance: campaign RF048, bead ece-42x (folding ece-2bc and ece-8pt).
 
 ## Amendment A (2026-09-24): open question 2 answered - the GCP branch's client is a `:gcp_kms` option, delegated one row at a time
 
-Status: proposed (2026-09-24). This Amendment does two things. It answers
+Status: accepted (2026-09-24). This Amendment does two things. It answers
 open question 2 (A1 to A4). And in A5 it **proposes amending decision 5's
 fourth failure row** - "the wrapping does not unwrap under its declared
 shape" answers `{:invalid_key_descriptor, :unwrap_failed}` - for a
@@ -1038,3 +1038,76 @@ refusals are in `test/encryptor/ecto/key_store_test.exs`, "init/1's
 :gcp_kms".
 
 Provenance: bead ece-6ah.
+
+## Note (2026-09-24): the operator accepted Amendment A, with its A5
+
+Amendment A's Status line now reads `accepted (2026-09-24)`. The record's own
+Status line, `accepted (2026-09-13)`, does not change.
+
+**A5 is accepted as written.** For a `"gcp_kms_ciphertext"` row in a store
+configured with `:gcp_kms`, decision 5's fourth failure row is amended: such a
+row answers whatever `Encryptor.Provider.GcpKms` answers for it, unrelabelled,
+as A5's table sets out, and a refused `Decrypt` answers `{:key_unavailable,
+selector}`, as an outage does. The relabel to `:unwrap_failed` that A5 offered as
+the other choice is not taken. Decision 5 is unchanged for every other row.
+
+Three passages of the Amendment name the status this flip replaces. None is
+edited; each is read with this Note:
+
+- "Accepting that amendment is the operator's decision, taken when this
+  Amendment is accepted. Until then decision 5 stands as accepted, ..." That
+  acceptance is this Note.
+- A5's heading, "a proposed amendment to decision 5", and its "This section
+  proposes amending that row": the amendment is now accepted.
+- A5's "Accepting the amendment, or ruling for a relabel to `:unwrap_failed`
+  instead, is the operator's decision at acceptance." The operator accepted
+  the amendment.
+
+Two claims were overtaken by a later record on main, ADR-0006, and are read
+through it:
+
+- A6's "The `encryptor` dependency stays pinned at `== 0.4.1`", and the
+  cite line's "`mix.lock:14`, `"encryptor", "0.4.1"`". The pin is now `==
+  0.5.0` (`mix.exs`, `deps/0`), the move ADR-0006's call-site table names in
+  its `mix.exs` row. A6 held for the commit it shipped in.
+- A3's quote of the `:store` seam, "taking a `tenant_ref`", and its "field
+  names 0.4.1 ships (`tenant_ref` among them)". In `encryptor` 0.5.0 the same
+  option reads "A one-argument function taking a `scope_ref`", and the row
+  handed across is keyed `scope_ref`, as ADR-0006's call-site row for
+  `wrapped_key/1` and `unwrap_row/4` says. The table's column keeps the name
+  `tenant_ref` (ADR-0006 decision 3, W1).
+
+Every other claim was re-verified immediately before the flip, against this
+package's main at `cf4fd54`, the commit tagged `v0.6.0` and published as
+`encryptor_ecto` 0.6.0 on Hex, and against `encryptor` `v0.5.0` (`9ad74e2`),
+the release 0.6.0 pins:
+
+- A1. The `:gcp_kms` option is taken (`Encryptor.Ecto.KeyStore`'s
+  `gcp_kms/2`); a non-keyword value is `{:invalid_config, :gcp_kms,
+  :not_a_keyword_list}` (`gcp_kms/2`); naming `:reference_subkey` or `:store`
+  is `{:invalid_config, :gcp_kms, {:supplied_by_key_store, key}}`, and the rest
+  is checked by `Encryptor.Provider.GcpKms.init/1` at start (`gcp_kms_opts/2`);
+  a store without the option answers `{:invalid_key_descriptor,
+  {:unsupported_wrapping_shape, "gcp_kms_ciphertext"}}` (the `%{gcp_kms: nil}`
+  clause of `unwrap_row/4`); a configured store hands the one row, less
+  `wrapping_shape`, to `GcpKms.decryption_keys/2` (the delegating clause of
+  `unwrap_row/4`).
+- A2. The provider's `decryption_keys/2` halts on the first row that fails
+  (`Encryptor.Provider.GcpKms`'s `unwrap_all/3`).
+- A3. The single-row unwrap is private (`GcpKms`'s `defp unwrap/3`), the API
+  module is `@moduledoc false` (`Encryptor.Provider.GcpKms.Api`), and the
+  provider documents "One `Decrypt` per row, on every call" for itself
+  (`GcpKms.decryption_keys/2`'s doc).
+- A5's table. `unwrap/3` answers `{:invalid_key_descriptor, :material_size}`
+  for material of the wrong size and `{:key_unavailable, selector}` from its
+  `{:error, _failure}` arm; a `bits` other than `256` is
+  `{:invalid_key_descriptor, :invalid_row}` (`GcpKms`'s `validate_row/1`); the
+  key store's own `:missing_key_id` clause of `unwrap_row/4` runs before the
+  delegating one; the transport answers `{:http_status, status}` and
+  `{:transport, :request_failed}` (`Api`'s private `handle/2`).
+- A6. The describe blocks "a gcp_kms_ciphertext row, with the GCP branch
+  configured" (`test/encryptor/ecto/key_store_repo_test.exs`) and "init/1's
+  :gcp_kms" (`test/encryptor/ecto/key_store_test.exs`) are on main, over the
+  fake in `test/support/test_gcp_kms.ex`.
+
+Provenance: bead ece-60gg.
