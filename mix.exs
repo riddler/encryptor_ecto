@@ -38,9 +38,11 @@ defmodule Encryptor.Ecto.MixProject do
   defp elixirc_paths(_), do: ["lib"]
 
   # Hexdocs configuration. These paths are read off the publisher's disk at
-  # `mix docs` time and need no entry in package()'s files: list - the docs
-  # tarball hexdocs hosts is built separately from the package tarball
-  # `mix deps.get` fetches.
+  # `mix docs` time - the docs tarball hexdocs hosts is built separately from
+  # the package tarball `mix deps.get` fetches. The guides README.md links to
+  # relatively are also in package()'s files: list, because the hex.pm
+  # package page renders README.md from the package tarball and resolves
+  # those links inside it.
   defp docs do
     [
       name: "Encryptor.Ecto",
@@ -66,7 +68,17 @@ defmodule Encryptor.Ecto.MixProject do
     [
       name: "encryptor_ecto",
       licenses: ["Apache-2.0"],
-      files: ~w(lib mix.exs .formatter.exs README.md LICENSE CHANGELOG.md),
+      files: ~w(
+        lib
+        mix.exs
+        .formatter.exs
+        README.md
+        LICENSE
+        CHANGELOG.md
+        docs/explanation/moving-off-cloak.md
+        docs/guides/migrate-from-cloak.md
+        docs/guides/bind-extra-context.md
+      ),
       links: %{
         "GitHub" => @source_url,
         "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
