@@ -40,15 +40,15 @@ defmodule Encryptor.Ecto.BlindIndex.GoldenVectorTest do
   alias Encryptor.Ecto.BlindIndex.Declaration
   alias Encryptor.Ecto.BlindIndex.Derivation
   alias Encryptor.Ecto.BlindIndex.Value
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestSchemas.Customer
   alias Encryptor.Ecto.TestVaults
 
   # The fixed input. `Customer`'s phone index is the suite's only
   # `slow: true` declaration: `normalize: :digits`, `version: 2`,
-  # `scope: :tenant` by default, 256 bits wide, on a vault that declares
+  # `derive: :per_scope` by default, 256 bits wide, on a vault that declares
   # `:slow_hash`.
-  @tenant "merchant_7f3"
+  @scope "merchant_7f3"
   @plaintext "+1 (555) 0100"
 
   # The parameter set the vector was computed under, restated as a literal so
@@ -57,8 +57,8 @@ defmodule Encryptor.Ecto.BlindIndex.GoldenVectorTest do
   @params %{memory_kib: 32_768, iterations: 1, parallelism: 1}
 
   setup do
-    Tenant.put(@tenant)
-    on_exit(&Tenant.clear/0)
+    Scope.put(@scope)
+    on_exit(&Scope.clear/0)
     :ok
   end
 

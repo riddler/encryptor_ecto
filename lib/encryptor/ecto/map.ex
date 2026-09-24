@@ -18,7 +18,7 @@ defmodule Encryptor.Ecto.Map do
 
   Everything below the serializer is `Encryptor.Ecto.Binary`, called rather
   than copied: the same closed option set plus `:json`, the same declared
-  `"table"`/`"column"` context, the same tenant resolution, the same `:binary`
+  `"table"`/`"column"` context, the same scope resolution, the same `:binary`
   column, the same exception family, and the vault's bytes stored verbatim.
   Read that module for all of it; only the differences are documented here.
 
@@ -47,9 +47,9 @@ defmodule Encryptor.Ecto.Map do
   decision 3 makes unknown *options* a compile-time error and says nothing
   about an option's value, so this is a fail-fast extension of it.
 
-  Its `:tenant` field is `nil` even on the decode side, where one *was*
-  resolved. This layer resolves no tenant of its own - `Binary` does, inside
-  the call this one wraps - and reporting a tenant it would have to re-resolve
+  Its `:scope` field is `nil` even on the decode side, where one *was*
+  resolved. This layer resolves no scope of its own - `Binary` does, inside
+  the call this one wraps - and reporting a scope it would have to re-resolve
   to know is a second source of truth for the value the whole encryption
   context turns on.
 
@@ -122,7 +122,7 @@ defmodule Encryptor.Ecto.Map do
   @type opts :: [
           {:json, module()}
           | {:vault, module()}
-          | {:tenant, :scope | :none | module()}
+          | {:scope, :process | :none | module()}
           | {:context, %{optional(String.t()) => String.t()}}
           | {:legacy, module()}
           | {:table, String.t()}
@@ -132,7 +132,7 @@ defmodule Encryptor.Ecto.Map do
   @typedoc "What `init/2` freezes: `Encryptor.Ecto.Binary`'s params plus the serializer."
   @type params :: %{
           vault: module(),
-          tenant: :scope | :none | module(),
+          scope: :process | :none | module(),
           context: %{optional(String.t()) => String.t()},
           table: String.t(),
           column: String.t(),
@@ -215,7 +215,7 @@ defmodule Encryptor.Ecto.Map do
   Freezes the declared context and the serializer.
 
   `Encryptor.Ecto.Binary.init/2` does the first half - the option validation,
-  the tenant strategy, and the `"table"`/`"column"` derivation - and the
+  the scope strategy, and the `"table"`/`"column"` derivation - and the
   serializer is resolved and checked here.
   """
   @spec init(keyword(), keyword()) :: params()
@@ -386,7 +386,7 @@ defmodule Encryptor.Ecto.Map do
       table: params.table,
       column: params.column,
       context_keys: Binary.context_keys(binary),
-      tenant: nil,
+      scope: nil,
       reason: reason,
       serializer: params.json,
       direction: direction

@@ -24,10 +24,10 @@ defmodule Encryptor.Ecto.BlindIndexTest do
     end
 
     # sabotage: the macro's `unquote(opts)` -> `[]`, red (test/support stops
-    # compiling: Identity's `scope: :global` is one of the options that stops
+    # compiling: Identity's `derive: :global` is one of the options that stops
     # arriving).
     test "the declared options reach the stored declaration" do
-      assert %Declaration{normalize: :digits, slow: true, version: 2, scope: :tenant} =
+      assert %Declaration{normalize: :digits, slow: true, version: 2, derive: :per_scope} =
                Declaration.fetch!(Customer, :phone, :phone_index)
     end
 
@@ -38,18 +38,18 @@ defmodule Encryptor.Ecto.BlindIndexTest do
     end
 
     # sabotage: the macro's `unquote(opts)` -> `[]`, red - the written
-    # `scope: :global` stops arriving and decision 3c refuses the schema.
-    test "a global field declaring scope: :global compiles" do
-      assert %Declaration{scope: :global, scope_declared?: true} =
+    # `derive: :global` stops arriving and decision 3c refuses the schema.
+    test "a global field declaring derive: :global compiles" do
+      assert %Declaration{derive: :global, derive_declared?: true} =
                Declaration.fetch!(Identity, :email, :email_index)
     end
   end
 
-  describe "decision 3c: a tenant: :none field must write its :scope" do
-    # sabotage: validate_scope!/2's `scope_declared?: false` clause guarded to
+  describe "decision 3c: a scope: :none field must write its :derive" do
+    # sabotage: validate_derive!/2's `derive_declared?: false` clause guarded to
     # match nothing, red. The fallback to :global would be silent, and silence
     # is exactly what the reviewer reading that schema line does not see.
-    test "declaring no :scope on a tenant: :none field is a compile error" do
+    test "declaring no :scope on a scope: :none field is a compile error" do
       error =
         assert_raise ArgumentError, fn ->
           defmodule SilentGlobal do
@@ -65,40 +65,40 @@ defmodule Encryptor.Ecto.BlindIndexTest do
           end
         end
 
-      assert Exception.message(error) =~ "with no :scope"
-      assert Exception.message(error) =~ "tenant: :none"
-      assert Exception.message(error) =~ "survives a tenant shred"
+      assert Exception.message(error) =~ "with no :derive"
+      assert Exception.message(error) =~ "scope: :none"
+      assert Exception.message(error) =~ "survives a scope shred"
     end
 
-    # sabotage: validate_scope!/2's `scope: :tenant` clause guarded to match
+    # sabotage: validate_derive!/2's `derive: :per_scope` clause guarded to match
     # nothing, red. This is open question Q4: a global ciphertext with a
-    # per-tenant index is an incoherent pair, and it stays an error until
+    # per-scope index is an incoherent pair, and it stays an error until
     # somebody brings the case.
-    test "declaring scope: :tenant on a tenant: :none field is a compile error" do
+    test "declaring derive: :per_scope on a scope: :none field is a compile error" do
       error =
         assert_raise ArgumentError, fn ->
-          defmodule TenantScopedGlobal do
+          defmodule ScopeSetupdGlobal do
             use Ecto.Schema
 
             import Encryptor.Ecto.BlindIndex
 
-            schema "tenant_scoped_globals" do
+            schema "scope_setupd_globals" do
               field(:email, Encryptor.Ecto.TestTypes.GlobalName)
               field(:email_index, :binary)
-              blind_index(:email, :email_index, scope: :tenant)
+              blind_index(:email, :email_index, derive: :per_scope)
             end
           end
         end
 
-      assert Exception.message(error) =~ "with scope: :tenant"
+      assert Exception.message(error) =~ "with derive: :per_scope"
       assert Exception.message(error) =~ "incoherent pair"
     end
 
-    # sabotage: validate_scope!/2's catch-all clause -> a raise, red
-    # (test/support stops compiling). A tenant-capable field defaults to
-    # :tenant and writes nothing, which is decision 3a and the overwhelmingly
+    # sabotage: validate_derive!/2's catch-all clause -> a raise, red
+    # (test/support stops compiling). A scope-capable field defaults to
+    # :scope and writes nothing, which is decision 3a and the overwhelmingly
     # common case.
-    test "declaring no :scope on a tenant-capable field is the default, not an error" do
+    test "declaring no :scope on a scope-capable field is the default, not an error" do
       defmodule DefaultScoped do
         use Ecto.Schema
 
@@ -111,7 +111,7 @@ defmodule Encryptor.Ecto.BlindIndexTest do
         end
       end
 
-      assert %Declaration{scope: :tenant} =
+      assert %Declaration{derive: :per_scope} =
                Declaration.fetch!(DefaultScoped, :email, :email_index)
     end
   end

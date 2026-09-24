@@ -13,7 +13,7 @@ defmodule Encryptor.Ecto.TestPlans do
     @moduledoc """
     The record's own example, in miniature: two encrypted columns of one
     schema, rewritten from a legacy `Ecto.Type` into the host's new types,
-    with the tenant read off the row - and a second schema after it, because
+    with the scope read off the row - and a second schema after it, because
     the order a plan declares its rewrites in is the order the pass runs and
     the report prints them.
 
@@ -25,7 +25,7 @@ defmodule Encryptor.Ecto.TestPlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant_from :merchant_id
+      scope_from :merchant_id
 
       field :pan,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -39,7 +39,7 @@ defmodule Encryptor.Ecto.TestPlans do
     end
 
     rewrite Encryptor.Ecto.TestSchemas.Signup do
-      tenant :none
+      scope :none
 
       field :email_encrypted,
         from: Encryptor.Ecto.TestSources.LegacyType,
@@ -65,7 +65,7 @@ defmodule Encryptor.Ecto.TestPlans do
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
 
     rewrite Encryptor.Ecto.TestSchemas.Card do
-      tenant :none
+      scope :none
 
       field :pan,
         from: Encryptor.Ecto.TestTypes.Pan,
@@ -78,7 +78,7 @@ defmodule Encryptor.Ecto.TestPlans do
     The backfill leg of an adoption migration (ADR-0002 decision 8): a
     plaintext column read through `Source.Plaintext` and written `into:` the
     binary column the host's own DDL added, with a resolver module supplying
-    the tenant.
+    the scope.
 
     Plaintext authenticates nothing, so the acknowledgement is `false` and a
     `validate:` comes with it - which is also what lets this plan run in
@@ -90,7 +90,7 @@ defmodule Encryptor.Ecto.TestPlans do
     alias Encryptor.Ecto.TestChecks
 
     rewrite Encryptor.Ecto.TestSchemas.Signup do
-      tenant Encryptor.Ecto.TestResolvers.Fixed
+      scope Encryptor.Ecto.TestResolvers.Fixed
 
       field :email,
         from: Encryptor.Ecto.Migrator.Source.Plaintext,

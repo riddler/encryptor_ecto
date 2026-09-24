@@ -1,6 +1,6 @@
-# How to keep tenant keys in Google Cloud KMS through the key store
+# How to keep scope keys in Google Cloud KMS through the key store
 
-`Encryptor.Ecto.KeyStore` reads a tenant's master keys out of the
+`Encryptor.Ecto.KeyStore` reads a scope's master keys out of the
 wrapped-key table. By default each row's wrapping is an engine message
 produced by your root vault. This guide is for the other shape the table
 holds: a row whose wrapping is a Google Cloud KMS ciphertext, produced by
@@ -8,17 +8,17 @@ holds: a row whose wrapping is a Google Cloud KMS ciphertext, produced by
 wrapping key never leaves Cloud KMS and destroying it is a Cloud KMS
 operation.
 
-It takes you from an empty key ring to a tenant whose values read and write
-through a tenant vault, and then through the shred: destroying the key
+It takes you from an empty key ring to a scope whose values read and write
+through a scoped vault, and then through the shred: destroying the key
 version, deleting the row, and what your application sees at each step.
 
-It assumes a tenant vault already reading from the key store - the
+It assumes a scoped vault already reading from the key store - the
 `## Configuring it` section of `Encryptor.Ecto.KeyStore` - and a wrapped-key
 table created by `mix encryptor.ecto.gen.key_store_migration`. A table
 created before the `wrapping_shape` and `key_id` columns existed needs
 `mix encryptor.ecto.gen.key_store_shape_migration` first. What a scope is
-here: the unit your tenant vault partitions keys by, which in this release
-is the tenant selector you pass as `key:`, stored on each row as its
+here: the unit your scoped vault partitions keys by, which in this release
+is the scope selector you pass as `key:`, stored on each row as its
 keyed reference `tenant_ref`. Every scope gets its own `CryptoKey`.
 
 ## Step 1. Create the key ring, and grant the service account
@@ -31,7 +31,7 @@ keyed reference `tenant_ref`. Every scope gets its own `CryptoKey`.
   would touch.
 - For the service account your application runs as:
   `cloudkms.cryptoKeyVersions.useToEncrypt` and `useToDecrypt` on the ring,
-  and `cloudkms.cryptoKeys.create` for whichever process provisions tenants.
+  and `cloudkms.cryptoKeys.create` for whichever process provisions scopes.
 
 ## Step 2. Run a Goth token server
 
@@ -43,7 +43,7 @@ The provider asks a token server for a bearer token on every call. Add
 children = [
   MyApp.Repo,
   {Goth, name: MyApp.Goth, source: {:service_account, credentials}},
-  MyApp.TenantVault
+  MyApp.ScopedVault
 ]
 ```
 
@@ -70,7 +70,7 @@ provider:
    gcp_kms: [
      project: "myapp-prod",
      location: "us-east1",
-     key_ring: "encryptor-tenant-keys",
+     key_ring: "encryptor-scope-keys",
      http_client: MyApp.KmsHttp,
      goth: MyApp.Goth
    ]}
@@ -83,7 +83,7 @@ checked by the provider's own `init/1` when the vault starts, so a missing
 option or an unloaded module fails the boot rather than the first read.
 
 Engine-message rows keep working beside GCP rows in the same table and the
-same tenant; the key store picks the unwrap path per row from its
+same scope; the key store picks the unwrap path per row from its
 `wrapping_shape` (`Encryptor.Ecto.KeyStore`, "The table").
 
 ## Step 4. Provision a scope's key and store its row
@@ -94,13 +94,13 @@ wraps them under it, and returns the row. You insert that row with
 `wrapping_shape` set to `"gcp_kms_ciphertext"`:
 
 ```elixir
-def provision_gcp_key(tenant_id) do
+def provision_gcp_key(scope_id) do
   {:ok, gcp} =
     Encryptor.Provider.GcpKms.init(
       gcp_kms_opts() ++ [reference_subkey: subkey(), store: fn _ref -> {:ok, []} end]
     )
 
-  with {:ok, row} <- Encryptor.Provider.GcpKms.provision(gcp, tenant_id) do
+  with {:ok, row} <- Encryptor.Provider.GcpKms.provision(gcp, scope_id) do
     MyApp.Repo.insert_all("encryptor_wrapped_keys", [
       row |> Map.put(:wrapping_shape, "gcp_kms_ciphertext") |> Map.to_list()
     ])
@@ -150,7 +150,7 @@ run, in this order.
 
 ```sh
 gcloud kms keys versions destroy 1 \
-  --location us-east1 --keyring encryptor-tenant-keys --key t-<digest>
+  --location us-east1 --keyring encryptor-scope-keys --key t-<digest>
 ```
 
 `gcloud kms keys versions list` on the same key shows every version to
@@ -189,7 +189,7 @@ delay, not as an undo you plan around.
 
 ### What your application sees
 
-| After | `decryption_keys/2` and `encryption_key/2` | a tenant vault's `decrypt/2` |
+| After | `decryption_keys/2` and `encryption_key/2` | a scoped vault's `decrypt/2` |
 |---|---|---|
 | provisioning | `{:ok, ...}` | the value |
 | destroying the version, row still present | `{:error, {:key_unavailable, selector}}` | `{:error, %Encryptor.Error{reason: {:key_unavailable, selector}}}` |

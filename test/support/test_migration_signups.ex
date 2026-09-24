@@ -10,7 +10,7 @@ defmodule Encryptor.Ecto.TestMigrationSignups do
   performs - the expand and the contract are the host's own migrations.
 
   `variant_notes` is a global field: it belongs to the wizard's A/B variant
-  rather than to any one tenant, which is the `tenant :none` case a plan has
+  rather than to any one scope, which is the `scope :none` case a plan has
   to be able to express.
   """
 

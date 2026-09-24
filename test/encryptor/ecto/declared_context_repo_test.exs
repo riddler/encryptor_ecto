@@ -11,7 +11,7 @@ defmodule Encryptor.Ecto.DeclaredContextRepoTest do
 
   use Encryptor.Ecto.RepoCase, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
 
   alias Ecto.Adapters.SQL
   alias Encryptor.Ecto.DecryptError
@@ -37,7 +37,7 @@ defmodule Encryptor.Ecto.DeclaredContextRepoTest do
   end
 
   describe "a field whose declared context is pinned" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: Binary.declared_value/4's field-level pin lookup deleted, red -
     # the pin would be ignored and the row would round-trip through Card,

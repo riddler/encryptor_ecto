@@ -17,7 +17,7 @@ defmodule Encryptor.Ecto.Migrator.CLI do
   #   * A flag whose verb has no library option behind it is a usage error,
   #     not a silently ignored argument. `verify/2` takes `:sample` and
   #     `:prefix` and nothing else, so `mix encryptor.ecto.verify
-  #     --only-tenant` refuses instead of pretending to narrow anything.
+  #     --only-scope` refuses instead of pretending to narrow anything.
   #
   # Exit codes are the tasks' contract with a runbook step that says "check it
   # worked": 0 clean, 1 the pass ran and found something, 2 usage error or a
@@ -35,8 +35,8 @@ defmodule Encryptor.Ecto.Migrator.CLI do
     prefix: :string,
     checkpoint: :boolean,
     only: :string,
-    only_tenant: [:string, :keep],
-    except_tenant: [:string, :keep],
+    only_scope: [:string, :keep],
+    except_scope: [:string, :keep],
     on_error: :string
   ]
 
@@ -48,7 +48,7 @@ defmodule Encryptor.Ecto.Migrator.CLI do
 
   @migrate_only_flags ~w(
     --mode --batch-size --resume --no-resume --checkpoint --no-checkpoint
-    --only --only-tenant --except-tenant --on-error
+    --only --only-scope --except-scope --on-error
   )
 
   @modes %{"dry-run" => :dry_run, "write" => :write}
@@ -99,8 +99,8 @@ defmodule Encryptor.Ecto.Migrator.CLI do
   Runs a pass, prints its report, and returns the exit code it earned.
 
   An `ArgumentError` is the library's "this run cannot start" arm - an unknown
-  option, a plan module that is not one, a tenant filter against a rewrite
-  with no tenant column, a missing checkpoint table. None of those is a
+  option, a plan module that is not one, a scope filter against a rewrite
+  with no scope column, a missing checkpoint table. None of those is a
   finding about rows, so none of them is exit 1.
   """
   @spec run_pass((-> {:ok, Report.t()} | {:error, Report.t()})) :: 0 | 1 | 2
@@ -261,7 +261,7 @@ defmodule Encryptor.Ecto.Migrator.CLI do
          {:ok, on_error} <- enum_opt(parsed, :on_error, @on_errors),
          {:ok, only} <- only(parsed) do
       {:ok,
-       batch_size ++ resume(parsed) ++ prefix ++ checkpoint ++ on_error ++ only ++ tenants(parsed)}
+       batch_size ++ resume(parsed) ++ prefix ++ checkpoint ++ on_error ++ only ++ scopes(parsed)}
     end
   end
 
@@ -355,10 +355,10 @@ defmodule Encryptor.Ecto.Migrator.CLI do
     end
   end
 
-  @spec tenants(keyword()) :: keyword()
-  defp tenants(parsed) do
-    keep(:only_tenants, Keyword.get_values(parsed, :only_tenant)) ++
-      keep(:except_tenants, Keyword.get_values(parsed, :except_tenant))
+  @spec scopes(keyword()) :: keyword()
+  defp scopes(parsed) do
+    keep(:only_scopes, Keyword.get_values(parsed, :only_scope)) ++
+      keep(:except_scopes, Keyword.get_values(parsed, :except_scope))
   end
 
   @spec keep(atom(), [String.t()]) :: keyword()

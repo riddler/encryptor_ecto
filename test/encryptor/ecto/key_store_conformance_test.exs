@@ -14,7 +14,7 @@ defmodule Encryptor.Ecto.KeyStoreConformanceTest do
   would have supplied - the `:database` tag and a sandbox checkout - are
   therefore spelled here.
 
-  The case provisions one tenant with a single version and one with two, so
+  The case provisions one scope with a single version and one with two, so
   the suite's "a bare `RawAes` from one candidate and a `Multi` from more"
   property has both arms to check rather than trivially passing on one.
   """

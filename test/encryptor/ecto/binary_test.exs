@@ -1,14 +1,14 @@
 defmodule Encryptor.Ecto.BinaryTest do
   use ExUnit.Case, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
 
   alias Encryptor.Ecto.Binary
   alias Encryptor.Ecto.DecryptError
   alias Encryptor.Ecto.EncryptError
   alias Encryptor.Ecto.MissingContextError
-  alias Encryptor.Ecto.MissingTenantError
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestLegacy
   alias Encryptor.Ecto.TestSchemas.Card
   alias Encryptor.Ecto.TestTypes
@@ -58,7 +58,7 @@ defmodule Encryptor.Ecto.BinaryTest do
     test "refuses a declaration with no vault" do
       assert_raise ArgumentError, ~r/requires a :vault/, fn ->
         defmodule NoVault do
-          use Encryptor.Ecto.Binary, tenant: :none
+          use Encryptor.Ecto.Binary, scope: :none
         end
       end
     end
@@ -70,10 +70,10 @@ defmodule Encryptor.Ecto.BinaryTest do
       end
     end
 
-    # sabotage: validated_tenant/1's catch-all arm -> the value, red.
-    test "refuses a tenant strategy that is neither an atom strategy nor a module" do
-      assert_raise ArgumentError, ~r/expected :tenant to be :scope, :none, or a module/, fn ->
-        Binary.init([vault: TestVaults.App, tenant: "merchant_7f3"], schema: Card, field: :pan)
+    # sabotage: validated_scope/1's catch-all arm -> the value, red.
+    test "refuses a scope strategy that is neither an atom strategy nor a module" do
+      assert_raise ArgumentError, ~r/expected :scope to be :process, :none, or a module/, fn ->
+        Binary.init([vault: TestVaults.App, scope: "merchant_7f3"], schema: Card, field: :pan)
       end
     end
 
@@ -194,8 +194,8 @@ defmodule Encryptor.Ecto.BinaryTest do
     end
   end
 
-  describe "dump and load, with a tenant in scope" do
-    scope_tenant "merchant_7f3"
+  describe "dump and load, with a scope set" do
+    setup_scope "merchant_7f3"
 
     # sabotage: dump/3's is_binary arm returning {:ok, value} unencrypted, red.
     test "round-trips a value through the vault" do
@@ -243,9 +243,9 @@ defmodule Encryptor.Ecto.BinaryTest do
       end
     end
 
-    # sabotage: vault_opts/2 passing the tenant as a context pair instead of
-    # key:, red - the vault refuses a caller-supplied tenant pair.
-    test "passes the tenant as the key and supplies exactly table and column" do
+    # sabotage: vault_opts/2 passing the scope as a context pair instead of
+    # key:, red - the vault refuses a caller-supplied scope pair.
+    test "passes the scope as the key and supplies exactly table and column" do
       assert {:ok, ciphertext} = TestTypes.Pan.dump(@pan, nil, params(TestTypes.Pan))
 
       # The vault, called directly with the context this layer claims to
@@ -266,55 +266,55 @@ defmodule Encryptor.Ecto.BinaryTest do
     end
   end
 
-  describe "a wrong tenant" do
-    # sabotage: encryption_context/1 dropping the "table" pair (the tenant
+  describe "a wrong scope" do
+    # sabotage: encryption_context/1 dropping the "table" pair (the scope
     # would still separate them, but the AAD binding under test is the one
     # this arm relies on), red.
     test "fails authentication rather than reading across the boundary" do
       params = params(TestTypes.Pan)
 
       ciphertext =
-        Tenant.wrap("merchant_7f3", fn ->
+        Scope.wrap("merchant_7f3", fn ->
           {:ok, bytes} = TestTypes.Pan.dump(@pan, nil, params)
           bytes
         end)
 
-      Tenant.wrap("merchant_a19", fn ->
+      Scope.wrap("merchant_a19", fn ->
         assert_raise DecryptError, fn -> TestTypes.Pan.load(ciphertext, nil, params) end
       end)
     end
   end
 
-  describe "no tenant in scope" do
+  describe "no scope set" do
     setup do
-      Tenant.clear()
+      Scope.clear()
     end
 
-    # sabotage: resolve_tenant!/2's {:error, _} arm returning "default", red.
+    # sabotage: resolve_scope!/2's {:error, _} arm returning "default", red.
     test "a dump raises, naming the table and the column" do
       error =
-        assert_raise MissingTenantError, fn ->
+        assert_raise MissingScopeError, fn ->
           TestTypes.Pan.dump(@pan, nil, params(TestTypes.Pan))
         end
 
       message = Exception.message(error)
       assert message =~ ~s(table: "cards")
       assert message =~ ~s(column: "pan")
-      assert message =~ "no_tenant_in_scope"
+      assert message =~ "no_scope_in_process"
     end
 
     # sabotage: the same arm - decision 5d says a load raises the same way, red.
     test "a load raises the same way" do
-      assert_raise MissingTenantError, fn ->
+      assert_raise MissingScopeError, fn ->
         TestTypes.Pan.load(<<0, 1, 2, 3>>, nil, params(TestTypes.Pan))
       end
     end
 
-    # sabotage: the MissingTenantError raise replaced by one carrying the
+    # sabotage: the MissingScopeError raise replaced by one carrying the
     # value, red.
     test "the failure carries no plaintext, in its message or its inspect" do
       error =
-        assert_raise MissingTenantError, fn ->
+        assert_raise MissingScopeError, fn ->
           TestTypes.Pan.dump(@pan, nil, params(TestTypes.Pan))
         end
 
@@ -325,10 +325,10 @@ defmodule Encryptor.Ecto.BinaryTest do
 
   describe "a host resolver" do
     setup do
-      Tenant.clear()
+      Scope.clear()
     end
 
-    # sabotage: resolver/1's module clause -> TenantContext.Scope, red.
+    # sabotage: resolver/1's module clause -> ScopeContext.Process, red.
     test "is asked instead of the process scope" do
       params = params(TestTypes.Resolved)
 
@@ -336,18 +336,18 @@ defmodule Encryptor.Ecto.BinaryTest do
       assert {:ok, @pan} = TestTypes.Resolved.load(ciphertext, nil, params)
     end
 
-    # sabotage: resolve_tenant!/2's {:error, _} arm -> :none, red.
+    # sabotage: resolve_scope!/2's {:error, _} arm -> :none, red.
     test "that refuses drives the same raise an empty scope does" do
-      assert_raise MissingTenantError, fn ->
+      assert_raise MissingScopeError, fn ->
         TestTypes.Refusing.dump(@pan, nil, params(TestTypes.Refusing))
       end
     end
 
-    # sabotage: resolve_tenant!/2's off-contract arm deleted, red (a
-    # FunctionClauseError is not a MissingTenantError).
+    # sabotage: resolve_scope!/2's off-contract arm deleted, red (a
+    # FunctionClauseError is not a MissingScopeError).
     test "that answers off contract raises rather than guessing" do
       error =
-        assert_raise MissingTenantError, fn ->
+        assert_raise MissingScopeError, fn ->
           TestTypes.OffContract.dump(@pan, nil, params(TestTypes.OffContract))
         end
 
@@ -355,14 +355,14 @@ defmodule Encryptor.Ecto.BinaryTest do
     end
   end
 
-  describe "a field declared tenant: :none" do
+  describe "a field declared scope: :none" do
     setup do
-      Tenant.clear()
+      Scope.clear()
     end
 
-    # sabotage: resolve_tenant!/2's :none clause deleted, red - the field
+    # sabotage: resolve_scope!/2's :none clause deleted, red - the field
     # would consult the scope and raise.
-    test "round-trips with no tenant anywhere in sight" do
+    test "round-trips with no scope anywhere in sight" do
       params = TestTypes.Global.init(schema: Card, field: :notes)
 
       assert {:ok, ciphertext} = TestTypes.Global.dump(@pan, nil, params)
@@ -370,7 +370,7 @@ defmodule Encryptor.Ecto.BinaryTest do
     end
 
     # sabotage: assert_single_profile_vault!/1's raising arm -> :ok, red.
-    test "on a :tenant-profile vault is refused on dump, in its own words" do
+    test "on a :scoped-profile vault is refused on dump, in its own words" do
       params = TestTypes.Misprofiled.init(schema: Card, field: :pan)
 
       error =
@@ -384,15 +384,15 @@ defmodule Encryptor.Ecto.BinaryTest do
       assert message =~ ~s(table: "cards")
       assert message =~ ~s(column: "pan")
       assert message =~ "vault: Encryptor.Ecto.TestVaults.Merchant"
-      assert message =~ "vault profile: :tenant"
+      assert message =~ "vault profile: :scoped"
     end
 
-    # The check sits in the shared tenant resolution rather than in dump/3, so
+    # The check sits in the shared scope resolution rather than in dump/3, so
     # a read of a row that should never have been written is refused the same
     # way the write was.
     #
     # sabotage: assert_single_profile_vault!/1's raising arm -> :ok, red.
-    test "on a :tenant-profile vault is refused on load too" do
+    test "on a :scoped-profile vault is refused on load too" do
       params = TestTypes.Misprofiled.init(schema: Card, field: :pan)
 
       assert_raise VaultProfileError, fn ->
@@ -417,9 +417,9 @@ defmodule Encryptor.Ecto.BinaryTest do
       assert Exception.message(error) =~ "vault_not_started"
     end
 
-    # sabotage: resolve_tenant!/2's :none clause matching every params map, red.
-    test "leaves a tenant-scoped field on the same vault alone" do
-      Tenant.put("merchant_7f3")
+    # sabotage: resolve_scope!/2's :none clause matching every params map, red.
+    test "leaves a scoped field on the same vault alone" do
+      Scope.put("merchant_7f3")
       params = params(TestTypes.Pan)
 
       assert {:ok, ciphertext} = TestTypes.Pan.dump(@pan, nil, params)
@@ -428,7 +428,7 @@ defmodule Encryptor.Ecto.BinaryTest do
   end
 
   describe "a vault failure" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: dump/3's {:error, %Error{}} arm returning {:ok, value}, red.
     test "on encrypt raises EncryptError rather than returning :error" do
@@ -449,7 +449,7 @@ defmodule Encryptor.Ecto.BinaryTest do
   end
 
   describe "a value that is not a binary" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: refuse_non_binary!/3 replaced by inspect(value) in the
     # message, red.
@@ -529,10 +529,10 @@ defmodule Encryptor.Ecto.BinaryTest do
 
   describe "a resolver that declares the value global" do
     setup do
-      Tenant.clear()
+      Scope.clear()
     end
 
-    # sabotage: resolve_tenant!/2's `:none ->` arm deleted, red - the value
+    # sabotage: resolve_scope!/2's `:none ->` arm deleted, red - the value
     # would fall to the off-contract arm and raise.
     test "round-trips with no key passed to the vault" do
       params = TestTypes.Declining.init(schema: Card, field: :notes)
@@ -564,7 +564,7 @@ defmodule Encryptor.Ecto.BinaryTest do
   end
 
   describe "the shape a refused value is reported as" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: any one shape_of/1 clause falling through to the catch-all, red.
     test "names the kind of term without rendering it" do
@@ -589,7 +589,7 @@ defmodule Encryptor.Ecto.BinaryTest do
   end
 
   describe "the no-leak prohibition, on every exception this type raises" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: Encryptor.Ecto.Error.redact/1's binary clause returning the
     # binary rather than its byte count, red.
@@ -597,7 +597,7 @@ defmodule Encryptor.Ecto.BinaryTest do
       {:ok, ciphertext} = TestTypes.Pan.dump(@pan, nil, params(TestTypes.Pan))
 
       error =
-        Tenant.wrap("merchant_a19", fn ->
+        Scope.wrap("merchant_a19", fn ->
           assert_raise DecryptError, fn ->
             TestTypes.Pan.load(ciphertext, nil, params(TestTypes.Pan))
           end
@@ -609,7 +609,7 @@ defmodule Encryptor.Ecto.BinaryTest do
       end
     end
 
-    # sabotage: common/3 passing the dumped value as :tenant, red.
+    # sabotage: common/3 passing the dumped value as :scope, red.
     test "an encrypt failure renders no plaintext" do
       params = TestTypes.Unstarted.init(schema: Card, field: :pan)
       error = assert_raise EncryptError, fn -> TestTypes.Unstarted.dump(@pan, nil, params) end
@@ -632,9 +632,9 @@ defmodule Encryptor.Ecto.BinaryTest do
       params = TestTypes.Pinned.init(schema: Card, field: :pan)
 
       error =
-        Tenant.wrap("merchant_a19", fn ->
+        Scope.wrap("merchant_a19", fn ->
           {:ok, ciphertext} =
-            Tenant.wrap("merchant_7f3", fn -> TestTypes.Pinned.dump(@pan, nil, params) end)
+            Scope.wrap("merchant_7f3", fn -> TestTypes.Pinned.dump(@pan, nil, params) end)
 
           assert_raise DecryptError, fn -> TestTypes.Pinned.load(ciphertext, nil, params) end
         end)

@@ -124,22 +124,22 @@ defmodule Encryptor.Ecto.Migrator.CLITest do
       assert message =~ "--on-error expects one of"
     end
 
-    # Sabotage: made the tenant flags overwrite rather than accumulate - a
-    # `--only-tenant a --only-tenant b` pass visited only the last tenant
-    # named, so a two-tenant rotation silently migrated one of them.
-    test "--only-tenant and --except-tenant accumulate" do
+    # Sabotage: made the scope flags overwrite rather than accumulate - a
+    # `--only-scope a --only-scope b` pass visited only the last scope
+    # named, so a two-scope rotation silently migrated one of them.
+    test "--only-scope and --except-scope accumulate" do
       assert {:ok, {_plan, opts}} =
                migrate([
-                 "--only-tenant",
+                 "--only-scope",
                  "merchant_7f3",
-                 "--only-tenant",
+                 "--only-scope",
                  "merchant_a11",
-                 "--except-tenant",
+                 "--except-scope",
                  "merchant_dead"
                ])
 
-      assert opts[:only_tenants] == ["merchant_7f3", "merchant_a11"]
-      assert opts[:except_tenants] == ["merchant_dead"]
+      assert opts[:only_scopes] == ["merchant_7f3", "merchant_a11"]
+      assert opts[:except_scopes] == ["merchant_dead"]
     end
 
     # Sabotage: made `group_only/1` build one entry per pair instead of
@@ -187,13 +187,13 @@ defmodule Encryptor.Ecto.Migrator.CLITest do
       assert opts[:prefix] == "tenant_b"
     end
 
-    # Sabotage: gave `parse_verify/1` the migrate switch list - `--only-tenant`
+    # Sabotage: gave `parse_verify/1` the migrate switch list - `--only-scope`
     # parsed and was dropped on the floor by `verify/2`, so a verification an
-    # operator believed was scoped to one tenant silently reported on all of
+    # operator believed was narrowed to one scope silently reported on all of
     # them. This is the asymmetry ADR-0004 decision 6 forbids the tasks to
     # paper over: the flag has no `verify/2` option behind it, so it refuses.
     test "a migrate-only flag names the verb it belongs to instead of being ignored" do
-      for flag <- ["--only-tenant", "--except-tenant", "--on-error", "--only"] do
+      for flag <- ["--only-scope", "--except-scope", "--on-error", "--only"] do
         assert {:error, message} = verify([flag, "x"])
         assert message =~ "is a `mix encryptor.ecto.migrate` flag"
         assert message =~ "takes only --prefix and --sample"

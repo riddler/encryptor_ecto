@@ -78,8 +78,8 @@ defmodule Encryptor.Ecto.Migrator do
   | `:checkpoint` | `:table` | `:none` runs with no checkpoint at all |
   | `:checkpoint_table` | `"encryptor_ecto_migration_checkpoints"` | |
   | `:on_error` | `:halt` | `:continue` records the failure and finishes |
-  | `:only_tenants` | `nil` | Visit only these tenants |
-  | `:except_tenants` | `[]` | Visit every tenant but these |
+  | `:only_scopes` | `nil` | Visit only these scopes |
+  | `:except_scopes` | `[]` | Visit every scope but these |
   | `:only` | `nil` | `[{Schema, [:field]}]`, to narrow the plan |
   | `:writing_key` | `nil` | The wrapping key name a rotation's rows must claim |
   | `:progress` | no-op | Called with the report after each batch |
@@ -95,7 +95,7 @@ defmodule Encryptor.Ecto.Migrator do
 
   ## A rotation is a pass with `writing_key:` set
 
-  A single tenant's data-key rotation is this same tool with `from:` and `to:`
+  A single scope's data-key rotation is this same tool with `from:` and `to:`
   naming one declaration under one vault - and, without this option, it
   rewrites nothing. Assumptions A11 and A12 leave the outgoing key version
   decryptable, so both probes answer "already in the target state" for a row
@@ -108,7 +108,7 @@ defmodule Encryptor.Ecto.Migrator do
   The name is the message's own, as `Encryptor.Message.describe/1` reports it
   for each of the header's encrypted data keys, and the operator running the
   plan is where it comes from: nothing keyless can ask a vault for "this
-  tenant's current version", and the operator who minted the version knows its
+  scope's current version", and the operator who minted the version knows its
   name. It is a comparison target and never an authorization input. A stale
   name is self-correcting rather than dangerous - every row is classified
   migratable and rewritten, each rewrite encrypts under whatever version is
@@ -123,9 +123,9 @@ defmodule Encryptor.Ecto.Migrator do
   failed and the `from` load succeeded.
 
   One literal key name belongs to one key holder, so `writing_key:` against a
-  `:tenant`-profile vault requires `only_tenants:` naming exactly one tenant,
+  `:scoped`-profile vault requires `only_scopes:` naming exactly one scope,
   and against a `:single`-profile vault - whose scope holds one key holder
-  already - it requires no tenant filter and permits none. `only:` stays
+  already - it requires no scope filter and permits none. `only:` stays
   orthogonal: a rotation narrowed to some of the plan's columns is a partial
   rotation. A field whose target this package cannot read a header claim out
   of takes the load attempt instead, and the load attempt cannot answer the
@@ -141,8 +141,8 @@ defmodule Encryptor.Ecto.Migrator do
   ## Which failures are exceptions and which are reports
 
   A run that **cannot start** raises: an unknown option, a missing mode, a
-  schema whose primary key cannot be paged over, a tenant filter against a
-  rewrite that has no tenant column, a missing checkpoint table. None of those
+  schema whose primary key cannot be paged over, a scope filter against a
+  rewrite that has no scope column, a missing checkpoint table. None of those
   is about rows, and none of them is improved by being handed back as an empty
   report.
 
@@ -170,7 +170,7 @@ defmodule Encryptor.Ecto.Migrator do
   alias Encryptor.Ecto.Migrator.Pass
   alias Encryptor.Ecto.Migrator.Plan
   alias Encryptor.Ecto.Migrator.Report
-  alias Encryptor.Ecto.Migrator.RowTenant
+  alias Encryptor.Ecto.Migrator.RowScope
   alias Encryptor.Ecto.Migrator.Source
 
   @typedoc "The mode a run performs. There is no default (decision 7)."
@@ -205,8 +205,8 @@ defmodule Encryptor.Ecto.Migrator do
           checkpoint: :table | :none,
           checkpoint_table: String.t(),
           on_error: :halt | :continue,
-          only_tenants: [String.t()] | nil,
-          except_tenants: [String.t()],
+          only_scopes: [String.t()] | nil,
+          except_scopes: [String.t()],
           only: [{module(), [atom()]}] | nil,
           writing_key: String.t() | nil,
           progress: (Report.t() -> any())
@@ -221,8 +221,8 @@ defmodule Encryptor.Ecto.Migrator do
            checkpoint: :table | :none,
            checkpoint_table: String.t(),
            on_error: :halt | :continue,
-           only_tenants: [String.t()] | nil,
-           except_tenants: [String.t()],
+           only_scopes: [String.t()] | nil,
+           except_scopes: [String.t()],
            only: [{module(), [atom()]}] | nil,
            writing_key: String.t() | nil,
            progress: (Report.t() -> any())
@@ -236,8 +236,8 @@ defmodule Encryptor.Ecto.Migrator do
     :checkpoint,
     :checkpoint_table,
     :on_error,
-    :only_tenants,
-    :except_tenants,
+    :only_scopes,
+    :except_scopes,
     :only,
     :writing_key,
     :progress
@@ -406,8 +406,8 @@ defmodule Encryptor.Ecto.Migrator do
       field: field,
       source_column: field,
       target_column: target_column,
-      tenant: rewrite.tenant,
-      tenant_column: tenant_column!(rewrite, options),
+      scope: rewrite.scope,
+      scope_column: scope_column!(rewrite, options),
       from_source: source!(spec, rewrite, field),
       source_authenticated: Keyword.fetch!(spec, :source_authenticated),
       validate: Keyword.fetch!(spec, :validate),
@@ -424,8 +424,8 @@ defmodule Encryptor.Ecto.Migrator do
       prefix: options.prefix,
       checkpoint: options.checkpoint,
       checkpoint_table: options.checkpoint_table,
-      only_tenants: options.only_tenants,
-      except_tenants: options.except_tenants,
+      only_scopes: options.only_scopes,
+      except_scopes: options.except_scopes,
       progress: options.progress
     }
   end
@@ -456,37 +456,37 @@ defmodule Encryptor.Ecto.Migrator do
     end
   end
 
-  # A tenant filter is a `where` on the tenant column (decision 11), so a
-  # rewrite that resolves its tenant any other way has no column to filter on.
-  # Refused rather than ignored: a run that quietly visited every tenant of a
-  # `tenant :none` rewrite while the operator believed it was scoped to one is
+  # A scope filter is a `where` on the scope column (decision 11), so a
+  # rewrite that resolves its scope any other way has no column to filter on.
+  # Refused rather than ignored: a run that quietly visited every scope of a
+  # `scope :none` rewrite while the operator believed it was scoped to one is
   # the failure the filter exists to prevent.
-  @spec tenant_column!(Plan.rewrite(), options()) :: atom() | nil
-  defp tenant_column!(%{tenant: {:column, column}}, _options), do: column
+  @spec scope_column!(Plan.rewrite(), options()) :: atom() | nil
+  defp scope_column!(%{scope: {:column, column}}, _options), do: column
 
-  defp tenant_column!(rewrite, options) do
+  defp scope_column!(rewrite, options) do
     if filtering?(options) do
-      raise ArgumentError, unfilterable_message(rewrite.schema, rewrite.tenant)
+      raise ArgumentError, unfilterable_message(rewrite.schema, rewrite.scope)
     end
 
     nil
   end
 
   @spec filtering?(options()) :: boolean()
-  defp filtering?(options), do: options.only_tenants != nil or options.except_tenants != []
+  defp filtering?(options), do: options.only_scopes != nil or options.except_scopes != []
 
   # The two refusals a rotation forces (ADR-0002's "the rotation pass"), both
   # of them knowable only here: the vault's context profile, and whether this
   # package can read a header claim out of the target, are facts about the
   # resolved declaration rather than about the option list. That is why the
-  # option-shape half of the tenant rule lives in `options!/1` and this half
+  # option-shape half of the scope rule lives in `options!/1` and this half
   # lives beside `unfilterable_message/2`.
   #
-  # The first is the scope rule. A tenant's wrapping key name belongs to one
-  # tenant, so one literal name compared against another tenant's rows would
-  # classify every one of them migratable: a `:tenant`-profile vault needs
-  # `only_tenants:` naming exactly one tenant, and a `:single`-profile one,
-  # whose scope holds a single key holder already, needs no tenant filter and
+  # The first is the scope rule. A scope's wrapping key name belongs to one
+  # scope, so one literal name compared against another scope's rows would
+  # classify every one of them migratable: a `:scoped`-profile vault needs
+  # `only_scopes:` naming exactly one scope, and a `:single`-profile one,
+  # whose scope holds a single key holder already, needs no scope filter and
   # permits none.
   #
   # The second is the probe rule. A target this package cannot read a header
@@ -501,8 +501,8 @@ defmodule Encryptor.Ecto.Migrator do
     raise ArgumentError, unreadable_rotation_message(schema, field)
   end
 
-  defp rotatable!(schema, _field, _header, :tenant, %{only_tenants: nil}) do
-    raise ArgumentError, untenanted_rotation_message(schema)
+  defp rotatable!(schema, _field, _header, :scoped, %{only_scopes: nil}) do
+    raise ArgumentError, unscoped_rotation_message(schema)
   end
 
   defp rotatable!(schema, _field, _header, :single, options) do
@@ -521,7 +521,7 @@ defmodule Encryptor.Ecto.Migrator do
   # gets. The map is right for a host's own legacy module, which is the only
   # thing decision 3 was ever describing, and wrong for one of ours: these
   # types read `:vault`, `:context` and `:legacy` off their params, and the
-  # `:tenant` they read is a resolution strategy rather than one row's tenant
+  # `:scope` they read is a resolution strategy rather than one row's scope
   # selector.
   #
   # The params travel in the resolution rather than in the per-row map because
@@ -529,8 +529,8 @@ defmodule Encryptor.Ecto.Migrator do
   # per-field map: the adapter's own keys still win, a foreign `from:` still
   # sees exactly what it saw before, and nothing is decided per row.
   #
-  # The tenant is replaced the way `target_params/3` replaces it, and for the
-  # same reason: a pass supplies the tenant explicitly, per row, and a source
+  # The scope is replaced the way `target_params/3` replaces it, and for the
+  # same reason: a pass supplies the scope explicitly, per row, and a source
   # type reading the ambient process scope would open the wrong key or none.
   @spec source!(keyword(), Plan.rewrite(), atom()) :: Source.resolved()
   defp source!(spec, rewrite, column) do
@@ -556,7 +556,7 @@ defmodule Encryptor.Ecto.Migrator do
 
   @spec ours_or_nil(term(), Plan.rewrite()) :: map() | nil
   defp ours_or_nil(params, rewrite) do
-    if ours?(params), do: Map.put(params, :tenant, resolver(rewrite.tenant))
+    if ours?(params), do: Map.put(params, :scope, resolver(rewrite.scope))
   end
 
   # -- a folded blind index -------------------------------------------------
@@ -567,11 +567,11 @@ defmodule Encryptor.Ecto.Migrator do
   # so `fetch!/3` here raises only for a plan compiled against a schema that
   # has since lost it - a run that cannot start.
   #
-  # The params are the encrypted field's own, with the tenant replaced by the
+  # The params are the encrypted field's own, with the scope replaced by the
   # plan's strategy for the reason `target_params/3` replaces it: the field's
   # declared strategy reads a process scope the migrator never sets
-  # (`Encryptor.Ecto.Migrator.RowTenant`), so an index computed through it
-  # would raise `Encryptor.Ecto.MissingTenantError` on every row. The value is
+  # (`Encryptor.Ecto.Migrator.RowScope`), so an index computed through it
+  # would raise `Encryptor.Ecto.MissingScopeError` on every row. The value is
   # then `Encryptor.Ecto.BlindIndex.put_index/3`'s, computed by the same
   # function over the same declaration.
   @spec index(Plan.rewrite(), atom(), atom() | nil) :: Pass.index() | nil
@@ -583,7 +583,7 @@ defmodule Encryptor.Ecto.Migrator do
     params =
       declaration
       |> Declaration.field_params!()
-      |> Map.put(:tenant, resolver(rewrite.tenant))
+      |> Map.put(:scope, resolver(rewrite.scope))
 
     %{column: column, declaration: declaration, params: params}
   end
@@ -595,9 +595,9 @@ defmodule Encryptor.Ecto.Migrator do
   # side's params come from the declaration that side names, so the two differ
   # exactly when the two declarations do. An in-place declaration edit is
   # therefore two declarations rather than one module named twice (decision 3
-  # as amended 2026-09-13). The tenant is replaced by the plan's own strategy: a
-  # `tenant_from` rewrite resolves per row through
-  # `Encryptor.Ecto.Migrator.RowTenant`, never through the process scope the
+  # as amended 2026-09-13). The scope is replaced by the plan's own strategy: a
+  # `scope_from` rewrite resolves per row through
+  # `Encryptor.Ecto.Migrator.RowScope`, never through the process scope the
   # type would otherwise read.
   @spec target!(module(), Plan.rewrite(), atom()) :: {1 | 3, term()}
   defp target!(to, rewrite, target_column) do
@@ -622,7 +622,7 @@ defmodule Encryptor.Ecto.Migrator do
 
     if ours?(params) do
       params
-      |> Map.put(:tenant, resolver(rewrite.tenant))
+      |> Map.put(:scope, resolver(rewrite.scope))
       |> Map.put(:legacy, nil)
     else
       params
@@ -654,7 +654,7 @@ defmodule Encryptor.Ecto.Migrator do
          {:ok, config} <- params.vault.config() do
       %{
         context: Map.merge(config.static_encryption_context, Binary.declared_context(params)),
-        tenant_ref?: params.tenant != :none,
+        scope_ref?: params.scope != :none,
         suite: config.algorithm_suite_id
       }
     else
@@ -682,7 +682,7 @@ defmodule Encryptor.Ecto.Migrator do
   end
 
   # A foreign `Ecto.ParameterizedType` gets its own params untouched: its
-  # `:tenant` key, if it has one, means whatever that module decided it means,
+  # `:scope` key, if it has one, means whatever that module decided it means,
   # and writing ours over it would be this package reaching into a contract it
   # does not own.
   #
@@ -696,7 +696,7 @@ defmodule Encryptor.Ecto.Migrator do
   # shape checked here is the whole of what `Encryptor.Ecto.Binary.init/2`
   # freezes - six keys, `:vault` and `:legacy` among them - which an unrelated
   # parameterized type does not carry by accident.
-  @our_params [:vault, :tenant, :context, :table, :column, :legacy]
+  @our_params [:vault, :scope, :context, :table, :column, :legacy]
 
   @spec ours?(term()) :: boolean()
   defp ours?(params) when is_map(params),
@@ -704,8 +704,8 @@ defmodule Encryptor.Ecto.Migrator do
 
   defp ours?(_params), do: false
 
-  @spec resolver(Plan.tenant()) :: module() | :none
-  defp resolver({:column, _column}), do: RowTenant
+  @spec resolver(Plan.scope()) :: module() | :none
+  defp resolver({:column, _column}), do: RowScope
   defp resolver(:none), do: :none
   defp resolver(module) when is_atom(module), do: module
 
@@ -725,8 +725,8 @@ defmodule Encryptor.Ecto.Migrator do
       checkpoint: one_of!(opts, :checkpoint, [:table, :none], :table),
       checkpoint_table: checkpoint_table!(opts),
       on_error: one_of!(opts, :on_error, [:halt, :continue], :halt),
-      only_tenants: tenants!(opts, :only_tenants, nil),
-      except_tenants: tenants!(opts, :except_tenants, []),
+      only_scopes: scopes!(opts, :only_scopes, nil),
+      except_scopes: scopes!(opts, :except_scopes, []),
       only: only!(opts),
       writing_key: writing_key!(opts),
       progress: progress!(opts)
@@ -737,13 +737,13 @@ defmodule Encryptor.Ecto.Migrator do
     end
 
     # The half of the rotation scope rule that is a fact about the option list:
-    # whatever the vault's profile turns out to be, a tenant filter given
-    # beside `writing_key:` names exactly one tenant or it is wrong, because
+    # whatever the vault's profile turns out to be, a scope filter given
+    # beside `writing_key:` names exactly one scope or it is wrong, because
     # one literal key name belongs to one key holder. Which of "one" and "none"
     # a given vault requires is `rotatable!/5`'s.
-    if options.writing_key != nil and is_list(options.only_tenants) and
-         length(options.only_tenants) != 1 do
-      raise ArgumentError, rotation_tenants_message(options.only_tenants)
+    if options.writing_key != nil and is_list(options.only_scopes) and
+         length(options.only_scopes) != 1 do
+      raise ArgumentError, rotation_scopes_message(options.only_scopes)
     end
 
     options
@@ -774,8 +774,8 @@ defmodule Encryptor.Ecto.Migrator do
       checkpoint: :none,
       checkpoint_table: Checkpoint.default_table(),
       on_error: :continue,
-      only_tenants: nil,
-      except_tenants: [],
+      only_scopes: nil,
+      except_scopes: [],
       only: nil,
       # A verification cannot use it: it takes the load attempt by design and
       # the outgoing key version loads (A12), so a rotation's acceptance check
@@ -870,26 +870,26 @@ defmodule Encryptor.Ecto.Migrator do
     end
   end
 
-  @spec tenants!(keyword(), atom(), [String.t()] | nil) :: [String.t()] | nil
-  defp tenants!(opts, key, default) do
+  @spec scopes!(keyword(), atom(), [String.t()] | nil) :: [String.t()] | nil
+  defp scopes!(opts, key, default) do
     case Keyword.get(opts, key, default) do
       nil ->
         nil
 
       list when is_list(list) ->
-        assert_tenant_list!(list, key)
+        assert_scope_list!(list, key)
 
       other ->
-        raise ArgumentError, "#{key}: expects a list of tenant identifiers, got #{inspect(other)}"
+        raise ArgumentError, "#{key}: expects a list of scope identifiers, got #{inspect(other)}"
     end
   end
 
-  @spec assert_tenant_list!([term()], atom()) :: [String.t()]
-  defp assert_tenant_list!(list, key) do
+  @spec assert_scope_list!([term()], atom()) :: [String.t()]
+  defp assert_scope_list!(list, key) do
     if Enum.all?(list, &is_binary/1) do
       list
     else
-      raise ArgumentError, "#{key}: expects a list of tenant identifiers as strings"
+      raise ArgumentError, "#{key}: expects a list of scope identifiers as strings"
     end
   end
 
@@ -994,12 +994,12 @@ defmodule Encryptor.Ecto.Migrator do
       "#{inspect(given)}."
   end
 
-  defp unfilterable_message(schema, tenant) do
-    "a tenant filter was given, but `rewrite #{inspect(schema)}` resolves " <>
-      "its tenant as #{inspect(tenant)} rather than from a column, so there " <>
-      "is nothing to filter on. `only_tenants:` and `except_tenants:` are a " <>
-      "`where` on the tenant column (ADR-0002 decision 11); narrow the run " <>
-      "with `only:` instead, or give the rewrite a `tenant_from`."
+  defp unfilterable_message(schema, scope) do
+    "a scope filter was given, but `rewrite #{inspect(schema)}` resolves " <>
+      "its scope as #{inspect(scope)} rather than from a column, so there " <>
+      "is nothing to filter on. `only_scopes:` and `except_scopes:` are a " <>
+      "`where` on the scope column (ADR-0002 decision 11); narrow the run " <>
+      "with `only:` instead, or give the rewrite a `scope_from`."
   end
 
   defp bad_writing_key_message(given) do
@@ -1009,27 +1009,27 @@ defmodule Encryptor.Ecto.Migrator do
       "compared against every encrypted data key the header names."
   end
 
-  defp rotation_tenants_message(given) do
-    "writing_key: was given with `only_tenants: #{inspect(given)}`, and a " <>
-      "tenant filter beside it names exactly one tenant. One literal wrapping " <>
+  defp rotation_scopes_message(given) do
+    "writing_key: was given with `only_scopes: #{inspect(given)}`, and a " <>
+      "scope filter beside it names exactly one scope. One literal wrapping " <>
       "key name belongs to one key holder, so comparing it against a second " <>
-      "tenant's rows would classify every one of them migratable and rewrite " <>
+      "scope's rows would classify every one of them migratable and rewrite " <>
       "them for nothing."
   end
 
-  defp untenanted_rotation_message(schema) do
+  defp unscoped_rotation_message(schema) do
     "writing_key: was given for a rewrite of #{inspect(schema)} whose target " <>
-      "rides a `:tenant`-profile vault, so `only_tenants:` naming exactly one " <>
-      "tenant is required with it. A tenant's wrapping key name belongs to " <>
-      "that tenant alone; a pass comparing it against every tenant's rows " <>
+      "rides a `:scoped`-profile vault, so `only_scopes:` naming exactly one " <>
+      "scope is required with it. A scope's wrapping key name belongs to " <>
+      "that scope alone; a pass comparing it against every scope's rows " <>
       "would classify all of them migratable."
   end
 
   defp filtered_rotation_message(schema) do
     "writing_key: was given for a rewrite of #{inspect(schema)} whose target " <>
-      "rides a `:single`-profile vault, together with a tenant filter. That " <>
+      "rides a `:single`-profile vault, together with a scope filter. That " <>
       "vault's scope holds one key holder already, so the rotation needs no " <>
-      "tenant filter and takes none. Narrow the run with `only:` instead."
+      "scope filter and takes none. Narrow the run with `only:` instead."
   end
 
   defp unreadable_rotation_message(schema, field) do

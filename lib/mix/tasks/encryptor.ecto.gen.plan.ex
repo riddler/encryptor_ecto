@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Plan do
 
   | | What it does | Why |
   |---|---|---|
-  | Tenant | Emits `tenant_from :TODO_tenant_column` | Which column identifies the tenant is a fact about the host's domain model that no generator can read off a schema, and guessing it re-encrypts every row under one tenant's key. `tenant_from` is checked against the schema at `mix compile` (ADR-0002 decision 2), so the wrong answer cannot reach a row. A skeleton that compiled would be a skeleton somebody ran |
+  | Scope | Emits `scope_from :TODO_scope_column` | Which column identifies the scope is a fact about the host's domain model that no generator can read off a schema, and guessing it re-encrypts every row under one scope's key. `scope_from` is checked against the schema at `mix compile` (ADR-0002 decision 2), so the wrong answer cannot reach a row. A skeleton that compiled would be a skeleton somebody ran |
   | Target type | Emits `to:` as a comment, never a value | The generator cannot know which type module a field is being rewritten into, and a half-guess produces a diff that looks reviewed |
   | Field list | Over-reports | Per ADR-0004 decision 1 this package tests for no other library's marker function - not `cloak_ecto`'s `__cloak__/0`, not any other - so a custom `Ecto.Type` of the host's that encrypts nothing is listed too. A false positive a human deletes is strictly better than a field nobody noticed |
 
@@ -47,7 +47,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Plan do
       embedded schema has none.
 
   This package's own types are candidates like any other, which is correct
-  rather than incidental: a field moving between tenant strategies is a full
+  rather than incidental: a field moving between scope strategies is a full
   rewrite, and the plan spells it with the declaration the bytes were written
   under as `from:` and the edited declaration as `to:` (ADR-0002 decision 3,
   as amended 2026-09-13).
@@ -57,7 +57,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Plan do
   | Flag | Default | |
   |---|---|---|
   | `--app APP` | the current Mix project's application | Which application's modules to read schemas from |
-  | `--repo REPO` | the app's `:ecto_repos`, when it names exactly one | The repo the plan names. Unlike the tenant column this is a fact the host has already declared, so a single configured repo is read rather than guessed; anything else is a usage error |
+  | `--repo REPO` | the app's `:ecto_repos`, when it names exactly one | The repo the plan names. Unlike the scope column this is a fact the host has already declared, so a single configured repo is read rather than guessed; anything else is a usage error |
   | `--module MODULE` | `<App>.Encryption.Migration` | The plan module to generate |
   | `--output PATH` | derived from `--module` under `lib/` | Where to write the file |
 
@@ -154,12 +154,12 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Plan do
       # are each a fact about your domain that no generator can read off a
       # schema. Finish them and delete this comment.
       #
-      # 1. Every `tenant_from :TODO_tenant_column` names a column that does
+      # 1. Every `scope_from :TODO_scope_column` names a column that does
       #    not exist, so the plan fails at `mix compile`. Replace each one
-      #    with the column that says which tenant a row belongs to - or with
-      #    `tenant :none` for a genuinely global field, or with
-      #    `tenant MyApp.SomeResolver`. Guessing this wrong re-encrypts every
-      #    row under one tenant's key, and a skeleton that compiled would be a
+      #    with the column that says which scope a row belongs to - or with
+      #    `scope :none` for a genuinely global field, or with
+      #    `scope MyApp.SomeResolver`. Guessing this wrong re-encrypts every
+      #    row under one scope's key, and a skeleton that compiled would be a
       #    skeleton somebody ran.
       #
       # 2. Every field's `to:` is a comment rather than a value. Which type
@@ -187,7 +187,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Plan do
   defp rewrite_block({schema, fields}) do
     """
       rewrite #{inspect(schema)} do
-        tenant_from :TODO_tenant_column
+        scope_from :TODO_scope_column
 
     #{Enum.map_join(fields, "\n", &field_lines/1)}  end
     """
@@ -369,7 +369,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Plan do
     fields = found |> Enum.map(fn {_schema, fields} -> length(fields) end) |> Enum.sum()
 
     "#{plural(fields, "candidate field")} across #{plural(length(found), "schema", "schemas")}. " <>
-      "It does not compile yet: finish every `tenant_from` and every `to:`, and delete " <>
+      "It does not compile yet: finish every `scope_from` and every `to:`, and delete " <>
       "the fields that are not encrypted. The file says which is which."
   end
 
@@ -430,7 +430,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Plan do
   @spec already_written_message(String.t()) :: String.t()
   defp already_written_message(output) do
     "#{output} already exists, and the generator never overwrites a plan. A plan is " <>
-      "finished by hand, so an overwrite would discard exactly the tenant columns and " <>
+      "finished by hand, so an overwrite would discard exactly the scope columns and " <>
       "`to:` types somebody worked out. Pass --output to write elsewhere, or move the " <>
       "file you have."
   end

@@ -24,7 +24,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Verify do
   | `--sample N` / `--sample all` | `:sample` | `all` by default: the whole scope, visited with the same keyset pagination a run uses. `N` is a random sample of that many rows per field |
   | `--prefix PREFIX` | `:prefix` | The one schema prefix to visit; the repo's default when absent. Present because a verification that silently checked a different prefix than the pass wrote to would be worse than no verification |
 
-  **These two and no others.** `--only-tenant`, `--except-tenant`, `--only`,
+  **These two and no others.** `--only-scope`, `--except-scope`, `--only`,
   `--batch-size`, `--resume`, `--no-checkpoint` and `--on-error` are
   `mix encryptor.ecto.migrate` flags, and passing one here is a usage error
   rather than a silently ignored argument. `verify/2` takes `:sample` and

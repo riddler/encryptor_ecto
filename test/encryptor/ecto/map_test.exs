@@ -1,12 +1,12 @@
 defmodule Encryptor.Ecto.MapTest do
   use ExUnit.Case, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
 
   alias Encryptor.Ecto.DecryptError
-  alias Encryptor.Ecto.MissingTenantError
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.SerializationError
-  alias Encryptor.Ecto.Tenant
   alias Encryptor.Ecto.TestSchemas.Card
   alias Encryptor.Ecto.TestSerializers
   alias Encryptor.Ecto.TestTypes
@@ -102,7 +102,7 @@ defmodule Encryptor.Ecto.MapTest do
 
     # sabotage: init/2 not delegating to Binary.init/2, red.
     test "carries Binary's whole option set through" do
-      assert %{table: "cards", column: "metadata", tenant: :scope, context: %{}} =
+      assert %{table: "cards", column: "metadata", scope: :process, context: %{}} =
                params(TestTypes.Metadata)
 
       assert_raise ArgumentError, ~r/the :legacy type .* could not be loaded/, fn ->
@@ -138,8 +138,8 @@ defmodule Encryptor.Ecto.MapTest do
     end
   end
 
-  describe "dump and load, with a tenant in scope" do
-    scope_tenant "merchant_7f3"
+  describe "dump and load, with a scope set" do
+    setup_scope "merchant_7f3"
 
     # sabotage: dump/3's map arm handing the value to Binary.dump/3 without
     # encoding it, red - Binary refuses a non-binary.
@@ -268,7 +268,7 @@ defmodule Encryptor.Ecto.MapTest do
   end
 
   describe "a serializer failure" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: encode!/2's {:error, reason} arm returning "{}" instead of
     # raising, red - a value the serializer could not encode would be stored
@@ -354,18 +354,18 @@ defmodule Encryptor.Ecto.MapTest do
       assert error.table == "cards"
       assert error.column == "metadata"
       assert error.context_keys == ["column", "table"]
-      # The serializer runs outside the tenant-resolved part of the call, and
+      # The serializer runs outside the scope-resolved part of the call, and
       # this layer resolves none of its own.
-      assert error.tenant == nil
+      assert error.scope == nil
     end
   end
 
-  describe "the tenant rules are Binary's" do
-    # sabotage: dump/3 delegating past Binary's tenant resolution, red.
-    test "a dump with no tenant in scope raises" do
-      Tenant.clear()
+  describe "the scope rules are Binary's" do
+    # sabotage: dump/3 delegating past Binary's scope resolution, red.
+    test "a dump with no scope set raises" do
+      Scope.clear()
 
-      assert_raise MissingTenantError, ~r/cards/, fn ->
+      assert_raise MissingScopeError, ~r/cards/, fn ->
         TestTypes.Metadata.dump(@metadata, nil, params(TestTypes.Metadata))
       end
     end

@@ -66,7 +66,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.VerifyTest do
   end
 
   test "a migrate-only flag exits 2 and says which verb owns it" do
-    assert {2, output} = verify([@plan, "--only-tenant", @merchant])
+    assert {2, output} = verify([@plan, "--only-scope", @merchant])
 
     assert output =~ "is a `mix encryptor.ecto.migrate` flag"
     assert output =~ "takes only --prefix and --sample"

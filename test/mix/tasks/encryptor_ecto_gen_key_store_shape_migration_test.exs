@@ -93,13 +93,13 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigrationTest do
   end
 
   test "a renamed table is carried into the file name, module and DDL", %{path: path} do
-    assert {0, _output} = generate(["--table", "tenant_keys", "--migrations-path", path])
+    assert {0, _output} = generate(["--table", "scope_keys", "--migrations-path", path])
 
-    [file] = Path.wildcard(Path.join(path, "*_add_wrapping_shape_to_tenant_keys.exs"))
+    [file] = Path.wildcard(Path.join(path, "*_add_wrapping_shape_to_scope_keys.exs"))
     source = File.read!(file)
 
-    assert source =~ "alter table(:tenant_keys) do"
-    assert source =~ "defmodule EncryptorEcto.Repo.Migrations.AddWrappingShapeToTenantKeys do"
+    assert source =~ "alter table(:scope_keys) do"
+    assert source =~ "defmodule EncryptorEcto.Repo.Migrations.AddWrappingShapeToScopeKeys do"
   end
 
   # Sabotage: dropped `unwritten/2` so a second run wrote a second file. Both
@@ -114,7 +114,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigrationTest do
   end
 
   test "it refuses a table name that is not an unquoted identifier", %{path: path} do
-    assert {2, output} = generate(["--table", "tenant keys", "--migrations-path", path])
+    assert {2, output} = generate(["--table", "scope keys", "--migrations-path", path])
 
     assert output =~ "--table expects an unquoted table name"
     assert Path.wildcard(Path.join(path, "*.exs")) == []

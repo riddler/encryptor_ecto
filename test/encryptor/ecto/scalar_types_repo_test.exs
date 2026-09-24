@@ -11,11 +11,11 @@ defmodule Encryptor.Ecto.ScalarTypesRepoTest do
 
   use Encryptor.Ecto.RepoCase, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
 
   alias Ecto.Adapters.SQL
   alias Encryptor.Ecto.DecryptError
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestSchemas.Reading
 
   @values [
@@ -40,7 +40,7 @@ defmodule Encryptor.Ecto.ScalarTypesRepoTest do
   end
 
   describe "a schema field naming a scalar type" do
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: Scalar.dump/5 handing the value to Binary without
     # to_plaintext/2, red - the insert would raise rather than storing bytes.
@@ -125,12 +125,12 @@ defmodule Encryptor.Ecto.ScalarTypesRepoTest do
   end
 
   describe "a row written for another merchant" do
-    # sabotage: the generated dump/3 passing params that dropped the tenant,
+    # sabotage: the generated dump/3 passing params that dropped the scope,
     # red - the read in the wrong scope would succeed.
     test "does not decrypt its scalars in this merchant's scope" do
-      reading = Tenant.wrap("merchant_7f3", fn -> insert_reading("merchant_7f3") end)
+      reading = Scope.wrap("merchant_7f3", fn -> insert_reading("merchant_7f3") end)
 
-      Tenant.wrap("merchant_a19", fn ->
+      Scope.wrap("merchant_a19", fn ->
         assert_raise DecryptError, fn -> TestRepo.get!(Reading, reading.id) end
       end)
     end

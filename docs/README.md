@@ -12,9 +12,9 @@ preference.
 Read at leisure, away from a terminal.
 
 - [What changes when you move off cloak_ecto](explanation/moving-off-cloak.md) -
-  what a migration onto this package changes *semantically*: per-tenant keys
+  what a migration onto this package changes *semantically*: per-scope keys
   where cloak had one key, the encryption context and the substitution it
-  forbids, fail-closed tenant scope and the boundary audit that is the real cost
+  forbids, fail-closed scope and the boundary audit that is the real cost
   of adoption, crypto-shredding and the field that opts out, why encrypted
   columns are not queryable, what a keyed blind index restores and what it does
   not, and why the mixed window is a per-row downgrade while it is open.
@@ -32,8 +32,8 @@ Task-shaped, for someone who already understands the target state.
   how the pairs compose with the vault's static ones, which refusals a
   declaration buys, why a bound value is permanent, and what changing one
   costs.
-- [How to keep tenant keys in Google Cloud KMS through the key store](guides/gcp-kms-key-store.md) -
-  one `CryptoKey` per tenant: the Goth token server, the key store's
+- [How to keep scope keys in Google Cloud KMS through the key store](guides/gcp-kms-key-store.md) -
+  one `CryptoKey` per scope: the Goth token server, the key store's
   `:gcp_kms` option, provisioning a `"gcp_kms_ciphertext"` row, and the
   shred - destroying the key version, deleting the row, the restore window,
   and the answers the application sees at each step, including the one
@@ -57,7 +57,7 @@ A tutorial's promise is a safe place to practice. For a destructive migration
 performed on live production data, a practice article would either operate on a
 host's real data, which is the thing it is supposed to teach them to be careful
 with, or on a toy that omits every property making the real one hard: live
-traffic, tenant scope, rows that will not decrypt. The dry run is the rehearsal.
+traffic, per-row scopes, rows that will not decrypt. The dry run is the rehearsal.
 It runs against the host's own data, it is a step of the how-to guide, and a
 fake one alongside it would compete with it (ADR-0004 decision 10).
 

@@ -10,7 +10,7 @@ defmodule Encryptor.Ecto.TestVaults do
   context is only checked where the message is authenticated.
 
   The worked domain is card processing: a per-merchant vault keyed by merchant
-  reference, and a single-key application vault for fields that have no tenant.
+  reference, and a single-key application vault for fields that have no scope.
 
   Key material arrives through `init/1` rather than through `use` options, the
   way the vault's own fixtures do it - `Encryptor.Vault.Config` refuses key
@@ -43,7 +43,7 @@ defmodule Encryptor.Ecto.TestVaults do
   # decision C5).
   @slow_hash [memory_kib: 32_768, iterations: 1, parallelism: 1]
 
-  @doc "The Argon2id parameters the tenant vault declares."
+  @doc "The Argon2id parameters the scoped vault declares."
   @spec slow_hash() :: keyword()
   def slow_hash, do: @slow_hash
 
@@ -56,7 +56,7 @@ defmodule Encryptor.Ecto.TestVaults do
   def merchant_key("merchant_7f3"), do: @merchant_7f3
   def merchant_key("merchant_a19"), do: @merchant_a19
 
-  @doc "The subkey the tenant vault derives `tenant_ref` under."
+  @doc "The subkey the scoped vault derives its scope references under."
   @spec reference_subkey() :: binary()
   def reference_subkey, do: @subkey
 
@@ -144,7 +144,7 @@ defmodule Encryptor.Ecto.TestVaults do
 
   defmodule Merchant do
     @moduledoc """
-    The per-merchant vault: a `:tenant` profile requiring the column pair.
+    The per-merchant vault: a `:scoped` profile requiring the column pair.
 
     `required_context: ["table", "column"]` is what makes the type's context
     composition testable rather than merely present - a type that forgot to
@@ -154,7 +154,7 @@ defmodule Encryptor.Ecto.TestVaults do
 
     use Encryptor.Vault,
       otp_app: :encryptor_ecto,
-      context_profile: :tenant,
+      context_profile: :scoped,
       algorithm_suite_id: 0x0478,
       required_context: ["table", "column"],
       cache: false
@@ -175,20 +175,20 @@ defmodule Encryptor.Ecto.TestVaults do
 
   defmodule MerchantRekeyed do
     @moduledoc """
-    `Merchant`'s deployment after a re-key: same namespace, same tenant
+    `Merchant`'s deployment after a re-key: same namespace, same scope
     references, new key names over new material.
 
     ADR-0002's R3 names a rewrite whose "format, algorithm, library, or
     encryption context" changes, and this is the half of it that changes none
     of them: a message this vault wrote carries exactly the context, the
-    tenant reference and the algorithm suite `Merchant` writes, and differs
+    scope reference and the algorithm suite `Merchant` writes, and differs
     only in the wrapping key the header names. It exists so the probe can be
     held to that difference.
     """
 
     use Encryptor.Vault,
       otp_app: :encryptor_ecto,
-      context_profile: :tenant,
+      context_profile: :scoped,
       algorithm_suite_id: 0x0478,
       required_context: ["table", "column"],
       cache: false
@@ -212,7 +212,7 @@ defmodule Encryptor.Ecto.TestVaults do
     opens.
 
     Every pair the migrator's header probe compares is `Merchant`'s - the
-    namespace, the tenant references, the declared context, the required pair
+    namespace, the scope references, the declared context, the required pair
     and the algorithm suite - and the only difference between a row this vault
     writes and one `Merchant` wrote is the wrapping key name the header
     carries: `.../v2` rather than `.../v1`. Since this vault decrypts both,
@@ -227,7 +227,7 @@ defmodule Encryptor.Ecto.TestVaults do
 
     use Encryptor.Vault,
       otp_app: :encryptor_ecto,
-      context_profile: :tenant,
+      context_profile: :scoped,
       algorithm_suite_id: 0x0478,
       required_context: ["table", "column"],
       cache: false
@@ -260,7 +260,7 @@ defmodule Encryptor.Ecto.TestVaults do
 
     use Encryptor.Vault,
       otp_app: :encryptor_ecto,
-      context_profile: :tenant,
+      context_profile: :scoped,
       algorithm_suite_id: 0x0478,
       required_context: ["table", "column"],
       static_encryption_context: %{"deployment" => "eu-west-1"},
@@ -291,7 +291,7 @@ defmodule Encryptor.Ecto.TestVaults do
 
     use Encryptor.Vault,
       otp_app: :encryptor_ecto,
-      context_profile: :tenant,
+      context_profile: :scoped,
       algorithm_suite_id: 0x0578,
       required_context: ["table", "column"],
       cache: false
@@ -311,9 +311,9 @@ defmodule Encryptor.Ecto.TestVaults do
 
   defmodule App do
     @moduledoc """
-    The single-key vault a `tenant: :none` field points at.
+    The single-key vault a `scope: :none` field points at.
 
-    Acceptance amendment 3: a global field cannot ride a `:tenant`-profile
+    Acceptance amendment 3: a global field cannot ride a `:scoped`-profile
     vault with the pair omitted, so it names a `:single` one instead.
 
     It declares no `:slow_hash`, deliberately: ece-ADR-0003 amendment C's

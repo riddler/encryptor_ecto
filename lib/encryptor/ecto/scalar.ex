@@ -232,7 +232,7 @@ defmodule Encryptor.Ecto.Scalar do
       table: params.table,
       column: params.column,
       context_keys: Binary.context_keys(params),
-      tenant: nil,
+      scope: nil,
       reason: reason,
       serializer: impl,
       direction: :decode

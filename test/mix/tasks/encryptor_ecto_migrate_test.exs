@@ -82,20 +82,39 @@ defmodule Mix.Tasks.Encryptor.Ecto.MigrateTest do
       assert output =~ "--mode is required"
     end
 
-    # Sabotage: mapped `--only-tenant` onto `run/2`'s `:except_tenants` - a
-    # tenant filter against a global rewrite stopped raising, and a request
-    # that names one tenant quietly migrated every other one instead.
-    test "a run that cannot start - a tenant filter against a rewrite with no tenant" do
+    # Sabotage: mapped `--only-scope` onto `run/2`'s `:except_scopes` - a
+    # scope filter against a global rewrite stopped raising, and a request
+    # that names one scope quietly migrated every other one instead.
+    test "a run that cannot start - a scope filter against a rewrite with no scope" do
       assert {2, output} =
                migrate([
                  "Encryptor.Ecto.TestEnginePlans.Global",
                  "--mode",
                  "write",
-                 "--only-tenant",
+                 "--only-scope",
                  @merchant
                ])
 
       assert output =~ "Encryptor.Ecto.TestSchemas.Signup"
+    end
+
+    # ADR-0006 decision 7: the old filter flags are gone with no alias, and
+    # the strict parse refuses them before a row is read. A flag that parsed
+    # and mapped onto nothing would narrow nothing, so a write run meant for
+    # one scope would rewrite them all.
+    #
+    # Sabotage: added `only_tenant: [:string, :keep]` and
+    # `except_tenant: [:string, :keep]` to `@migrate_switches` - both parsed,
+    # mapped onto no option, and the pass rewrote the row and exited 0.
+    test "the pre-rename filter flags, refused before any row is read" do
+      id = insert_card(pan: legacy(@pan))
+
+      for stale <- ["--only-tenant", "--except-tenant"] do
+        assert {2, output} = migrate([@plan, "--mode", "write", stale, @merchant])
+        assert output =~ stale
+      end
+
+      assert raw_pan(id) == legacy(@pan)
     end
   end
 
@@ -117,6 +136,11 @@ defmodule Mix.Tasks.Encryptor.Ecto.MigrateTest do
   end
 
   defp legacy(plaintext), do: "legacy:" <> String.reverse(plaintext)
+
+  defp raw_pan(id) do
+    %{rows: [[pan]]} = TestRepo.query!("SELECT pan FROM cards WHERE id = $1", [id])
+    pan
+  end
 
   defp insert_card(attrs) do
     row = attrs |> Map.new() |> Map.put_new(:merchant_id, @merchant)

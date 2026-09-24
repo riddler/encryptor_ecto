@@ -9,7 +9,7 @@ defmodule Encryptor.Ecto.TestRepo do
   this repository is here to prove are the ones only a real column can show: a
   ciphertext survives a round trip through a `bytea` column byte for byte, a
   `nil` stays `NULL` rather than becoming encrypted bytes, and a value written
-  in one tenant's scope does not read back in another's.
+  under one scope does not read back in another's.
 
   It is test-only in every sense. `ecto_sql` and `postgrex` are `only: :test`
   dependencies, this module lives under `test/support` and so compiles only in

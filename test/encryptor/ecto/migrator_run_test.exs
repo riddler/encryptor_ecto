@@ -22,7 +22,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
 
   alias Encryptor.Ecto.Migrator
   alias Encryptor.Ecto.Migrator.Report
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestEnginePlans
   alias Encryptor.Ecto.TestEngineTypes
   alias Encryptor.Ecto.TestLegacy
@@ -78,7 +78,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       bytes = raw(:cards, id, :pan)
       refute bytes == legacy(@pan)
 
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, id)
     end
 
@@ -97,7 +97,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert raw(:cards, id, :pan) == written
     end
 
-    # Sabotage: dropped the `[_id, nil, _target | _tenant]` clause - a NULL
+    # Sabotage: dropped the `[_id, nil, _target | _scope]` clause - a NULL
     # column went to the source reader and was reported undecryptable.
     test "a NULL column is counted and nothing is touched" do
       id = insert_card(pan: nil)
@@ -107,17 +107,17 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert raw(:cards, id, :pan) == nil
     end
 
-    # Sabotage: made `resolver/1` return `:scope` for a column tenant - the
+    # Sabotage: made `resolver/1` return `:process` for a column scope - the
     # dump read the empty process scope and raised instead of encrypting under
     # the row's own merchant.
-    test "each row is encrypted under its own tenant" do
+    test "each row is encrypted under its own scope" do
       mine = insert_card(pan: legacy(@pan), merchant_id: @merchant)
       theirs = insert_card(pan: legacy(@pan), merchant_id: @other_merchant)
 
       assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
       assert report.counts.migratable == 2
 
-      Tenant.put(@other_merchant)
+      Scope.put(@other_merchant)
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, theirs)
 
       # The other merchant's row does not open under this one's key: the
@@ -188,7 +188,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert report.concurrent == 1
       assert report.counts.migratable == 1
 
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
       assert %TestSchemas.Card{pan: "4222222222222222"} = TestRepo.get(TestSchemas.Card, id)
     end
 
@@ -304,42 +304,67 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert raw(:cards, id, :notes) == legacy("a note")
     end
 
-    # Sabotage: dropped `only_tenants/3`'s `where` - the run visited a tenant
-    # the operator had excluded, which for a crypto-shredded tenant is a pass
+    # Sabotage: dropped `only_scopes/3`'s `where` - the run visited a scope
+    # the operator had excluded, which for a crypto-shredded scope is a pass
     # that cannot exit zero.
-    test "only_tenants: visits one tenant's rows and leaves the others" do
+    test "only_scopes: visits one scope's rows and leaves the others" do
       mine = insert_card(pan: legacy(@pan), merchant_id: @merchant)
       theirs = insert_card(pan: legacy(@pan), merchant_id: @other_merchant)
 
       assert {:ok, report} =
-               Migrator.run(TestEnginePlans.Cards, mode: :write, only_tenants: [@merchant])
+               Migrator.run(TestEnginePlans.Cards, mode: :write, only_scopes: [@merchant])
 
       assert report.counts.migratable == 1
       assert raw(:cards, mine, :pan) != legacy(@pan)
       assert raw(:cards, theirs, :pan) == legacy(@pan)
     end
 
-    # Sabotage: dropped `except_tenants/3`'s `where` - the shredded tenant's
+    # Sabotage: dropped `except_scopes/3`'s `where` - the shredded scope's
     # rows were visited and the pass could not exit zero.
-    test "except_tenants: skips the named tenant" do
+    test "except_scopes: skips the named scope" do
       theirs = insert_card(pan: legacy(@pan), merchant_id: @other_merchant)
 
       assert {:ok, report} =
                Migrator.run(TestEnginePlans.Cards,
                  mode: :write,
-                 except_tenants: [@other_merchant]
+                 except_scopes: [@other_merchant]
                )
 
       assert report.counts.migratable == 0
       assert raw(:cards, theirs, :pan) == legacy(@pan)
     end
+
+    # ADR-0006 decision 7: the rename is a clean break, and a filter spelled
+    # the old way must fail loudly rather than be ignored - an ignored
+    # `only_tenants:` would widen a write run to every scope.
+    #
+    # Sabotage: added `:only_tenants` and `:except_tenants` to
+    # `@known_options` - both were accepted and ignored, and the write run
+    # rewrote every scope's rows.
+    test "the pre-rename filter options are refused and start no pass" do
+      mine = insert_card(pan: legacy(@pan), merchant_id: @merchant)
+      theirs = insert_card(pan: legacy(@pan), merchant_id: @other_merchant)
+
+      for stale <- [:only_tenants, :except_tenants] do
+        error =
+          assert_raise ArgumentError, fn ->
+            Migrator.run(TestEnginePlans.Cards, [{:mode, :write}, {stale, [@merchant]}])
+          end
+
+        assert error.message =~ "unknown options [#{inspect(stale)}]"
+      end
+
+      assert raw(:cards, mine, :pan) == legacy(@pan)
+      assert raw(:cards, theirs, :pan) == legacy(@pan)
+      assert checkpoints() == []
+    end
   end
 
-  describe "the other tenant strategies" do
-    # Sabotage: made `resolver/1` map `:none` to `RowTenant` - a global field
-    # asked for a row tenant that is not there and raised instead of
+  describe "the other scope strategies" do
+    # Sabotage: made `resolver/1` map `:none` to `RowScope` - a global field
+    # asked for a row scope that is not there and raised instead of
     # encrypting under the vault's single key.
-    test "a tenant :none rewrite encrypts under the single-key vault" do
+    test "a scope :none rewrite encrypts under the single-key vault" do
       id = insert_signup(variant_notes: legacy("variant A wins"))
 
       assert {:ok, report} = Migrator.run(TestEnginePlans.Global, mode: :write)
@@ -516,7 +541,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
 
       assert report.counts.migratable_unverified == 1
 
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, id)
     end
 
@@ -595,7 +620,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       proven = insert_card(pan: legacy(@pan))
       assert {:ok, _run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
 
-      # Same declared context, same tenant reference, same algorithm suite,
+      # Same declared context, same scope reference, same algorithm suite,
       # different wrapping key: every pair the header comparison can check
       # matches, and the row is still the source's.
       bytes = rekeyed(@pan)
@@ -700,14 +725,14 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert raw(:cards, id, :pan) == written
     end
 
-    # The tenant-reference pair is compared for presence and not for value,
+    # The `"tenant_ref"` pair is compared for presence and not for value,
     # and a global field's messages carry none. Sabotage: inverted
-    # `target_header/2`'s `tenant_ref?` (`params.tenant == :none`) - this
+    # `target_header/2`'s `scope_ref?` (`params.scope == :none`) - this
     # field's own rows claimed a reference the message does not carry and were
-    # rewritten on every run. (The tenant-bearing half of the same inversion
+    # rewritten on every run. (The scope-bearing half of the same inversion
     # is what "a second run finds every row already in the target state"
     # catches, which is why the branch needs this row as well as that one.)
-    test "a global field's rows are recognised by carrying no tenant reference" do
+    test "a global field's rows are recognised by carrying no scope reference" do
       id = insert_signup(variant_notes: legacy("variant A wins"))
 
       assert {:ok, _first} = Migrator.run(TestEnginePlans.Global, mode: :write)
@@ -740,7 +765,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert report.failures == []
       refute raw(:cards, id, :pan) == bytes
 
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, id)
     end
 
@@ -768,7 +793,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     # which is what this plan looked like before the engine constructed the
     # source's own params. The raise is a `FunctionClauseError` from
     # `Encryptor.Ecto.Binary`'s `resolver/1` (`binary.ex:632-633`), which has
-    # a clause for `:scope` and one for a module and none for the row's tenant
+    # a clause for `:process` and one for a module and none for the row's scope
     # selector; the identifying map never reaches `params.vault` at all.
     test "a re-key rewrite classifies its rows migratable rather than undecryptable" do
       _id = insert_card(pan: rekeyed(@pan))
@@ -791,14 +816,14 @@ defmodule Encryptor.Ecto.MigratorRunTest do
 
       refute raw(:cards, id, :pan) == before
 
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, id)
     end
 
-    # Sabotage: left the source type's own declared tenant in the params
+    # Sabotage: left the source type's own declared scope in the params
     # instead of the plan's strategy - the second merchant's row was read
-    # against whatever tenant the process scope happened to hold.
-    test "each row is read under its own tenant, not the ambient scope" do
+    # against whatever scope the process scope happened to hold.
+    test "each row is read under its own scope, not the ambient scope" do
       mine = insert_card(pan: rekeyed_for(@merchant, @pan), merchant_id: @merchant)
       theirs = insert_card(pan: rekeyed_for(@other_merchant, @pan), merchant_id: @other_merchant)
 
@@ -806,15 +831,15 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert report.counts.migratable == 2
       assert report.counts.undecryptable == 0
 
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, mine)
 
-      Tenant.put(@other_merchant)
+      Scope.put(@other_merchant)
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, theirs)
     end
 
     # No sabotage here: reversing the merge order in `source!/3` is not one.
-    # The frozen source params (`:vault`, `:tenant`, `:context`, `:table`,
+    # The frozen source params (`:vault`, `:scope`, `:context`, `:table`,
     # `:column`, `:legacy`) and the resolution (`:source_module`,
     # `:source_arity`) share no key, so both orders build the same map and the
     # test stays green either way. The merge order is written the way it is as
@@ -861,7 +886,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert report.counts.undecryptable == 0
       refute raw(:cards, id, :pan) == before
 
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
       params = Pinned.init(schema: TestSchemas.Card, field: :pan)
       assert {:ok, @pan} = Pinned.load(raw(:cards, id, :pan), &Ecto.Type.load/2, params)
     end
@@ -899,7 +924,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert {:ok, report} =
                Migrator.run(TestEnginePlans.Rotation,
                  mode: :dry_run,
-                 only_tenants: [@merchant]
+                 only_scopes: [@merchant]
                )
 
       assert report.counts.already_target == 1
@@ -917,7 +942,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert {:ok, report} =
                Migrator.run(TestEnginePlans.Rotation,
                  mode: :dry_run,
-                 only_tenants: [@merchant],
+                 only_scopes: [@merchant],
                  writing_key: current_key()
                )
 
@@ -939,7 +964,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert {:ok, report} =
                Migrator.run(TestEnginePlans.Rotation,
                  mode: :write,
-                 only_tenants: [@merchant],
+                 only_scopes: [@merchant],
                  writing_key: current_key()
                )
 
@@ -963,7 +988,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert {:ok, _first} =
                Migrator.run(TestEnginePlans.Rotation,
                  mode: :write,
-                 only_tenants: [@merchant],
+                 only_scopes: [@merchant],
                  writing_key: current_key()
                )
 
@@ -973,7 +998,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert {:ok, second} =
                Migrator.run(TestEnginePlans.Rotation,
                  mode: :dry_run,
-                 only_tenants: [@merchant],
+                 only_scopes: [@merchant],
                  writing_key: current_key()
                )
 
@@ -1014,7 +1039,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert {:ok, first} =
                Migrator.run(TestEnginePlans.Rotation,
                  mode: :write,
-                 only_tenants: [@merchant],
+                 only_scopes: [@merchant],
                  writing_key: outgoing_key()
                )
 
@@ -1024,7 +1049,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert {:ok, second} =
                Migrator.run(TestEnginePlans.Rotation,
                  mode: :dry_run,
-                 only_tenants: [@merchant],
+                 only_scopes: [@merchant],
                  writing_key: current_key()
                )
 
@@ -1032,11 +1057,11 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert second.counts.already_target == 1
     end
 
-    # Sabotage: dropped the `:tenant`-profile arm of `rotatable!/5` - one
+    # Sabotage: dropped the `:scoped`-profile arm of `rotatable!/5` - one
     # merchant's key name was compared against every merchant's rows, which
-    # classifies all of them migratable and rewrites the other tenants' rows
+    # classifies all of them migratable and rewrites the other scopes' rows
     # for nothing.
-    test "a tenant-profile vault requires a tenant filter with the option" do
+    test "a scoped-profile vault requires a scope filter with the option" do
       id = insert_card(pan: outgoing(@pan))
       bytes = raw(:cards, id, :pan)
 
@@ -1045,38 +1070,38 @@ defmodule Encryptor.Ecto.MigratorRunTest do
           Migrator.run(TestEnginePlans.Rotation, mode: :write, writing_key: current_key())
         end
 
-      assert Exception.message(message) =~ "only_tenants:"
-      assert Exception.message(message) =~ ":tenant`-profile vault"
+      assert Exception.message(message) =~ "only_scopes:"
+      assert Exception.message(message) =~ ":scoped`-profile vault"
       assert raw(:cards, id, :pan) == bytes
     end
 
     # The half of the scope rule that is a fact about the option list, so it is
     # refused before any plan is resolved.
     #
-    # Sabotage: dropped the check from `options!/1` - a two-tenant filter was
-    # accepted and the second tenant's rows were classified migratable.
-    test "a tenant filter beside the option names exactly one tenant" do
+    # Sabotage: dropped the check from `options!/1` - a two-scope filter was
+    # accepted and the second scope's rows were classified migratable.
+    test "a scope filter beside the option names exactly one scope" do
       message =
         assert_raise ArgumentError, fn ->
           Migrator.run(TestEnginePlans.Rotation,
             mode: :write,
-            only_tenants: [@merchant, @other_merchant],
+            only_scopes: [@merchant, @other_merchant],
             writing_key: current_key()
           )
         end
 
-      assert Exception.message(message) =~ "exactly one tenant"
+      assert Exception.message(message) =~ "exactly one scope"
     end
 
     # Sabotage: dropped the `:single`-profile arm - the run continued to the
     # existing unfilterable refusal, which is a message about the rewrite's
-    # tenant column rather than about the option that is wrong here.
-    test "a single-profile vault permits no tenant filter with the option" do
+    # scope column rather than about the option that is wrong here.
+    test "a single-profile vault permits no scope filter with the option" do
       message =
         assert_raise ArgumentError, fn ->
           Migrator.run(TestEnginePlans.Global,
             mode: :write,
-            only_tenants: [@merchant],
+            only_scopes: [@merchant],
             writing_key: current_key()
           )
         end
@@ -1097,7 +1122,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
         assert_raise ArgumentError, fn ->
           Migrator.run(TestEnginePlans.PlainTarget,
             mode: :write,
-            only_tenants: [@merchant],
+            only_scopes: [@merchant],
             writing_key: current_key()
           )
         end
@@ -1114,7 +1139,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
         assert_raise ArgumentError, fn ->
           Migrator.run(TestEnginePlans.Rotation,
             mode: :write,
-            only_tenants: [@merchant],
+            only_scopes: [@merchant],
             writing_key: [current_key()]
           )
         end
@@ -1166,43 +1191,43 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   end
 
   defp signup(id) do
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
     TestRepo.get(TestSchemas.Signup, id)
   end
 
   # The column written under the declaration an in-place edit replaces: the
   # ordinary `Pan`, before the context pair `Pinned` adds.
   defp pan_declared(plaintext) do
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
     params = Pan.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = Pan.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
   end
 
   # The same column, written through a *different* declaration of ours: same
-  # vault, same tenant, one more declared context pair. The bytes are a
+  # vault, same scope, one more declared context pair. The bytes are a
   # well-formed message of this package's format, which is exactly why the
   # probe has to read further than "it parses".
   defp pinned(plaintext) do
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
     params = Pinned.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = Pinned.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
   end
 
-  # The same declared context and tenant under the re-keyed vault: the header
+  # The same declared context and scope under the re-keyed vault: the header
   # names a wrapping key the target's own vault has never heard of.
   defp rekeyed(plaintext) do
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
     params = PanRekeyed.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = PanRekeyed.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
   end
 
-  # The same bytes for a named tenant, for the rows a pass has to read under
-  # a tenant other than whatever the test process last put in scope.
-  defp rekeyed_for(tenant, plaintext) do
-    Tenant.put(tenant)
+  # The same bytes for a named scope, for the rows a pass has to read under
+  # a scope other than whatever the test process last set.
+  defp rekeyed_for(scope, plaintext) do
+    Scope.put(scope)
     params = PanRekeyed.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = PanRekeyed.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
@@ -1210,7 +1235,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
 
   # The same declaration over the vault writing the other algorithm suite.
   defp signed(plaintext) do
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
     params = PanSigned.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = PanSigned.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
@@ -1223,7 +1248,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   # nothing else. The mid-rotation vault decrypts them, which is what makes
   # both probes answer "already in the target state" without the option.
   defp outgoing(plaintext) do
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
     params = Pan.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = Pan.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
@@ -1238,14 +1263,14 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   # each rewrite encrypts under whatever version is actually current, and the
   # second pass under the right name reports a clean scope.
   defp current(plaintext) do
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
     params = PanRotating.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = PanRotating.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
   end
 
   defp through_rotation(bytes) do
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
     params = PanRotating.init(schema: TestSchemas.Card, field: :pan)
     {:ok, loaded} = PanRotating.load(bytes, &Ecto.Type.load/2, params)
     loaded
@@ -1324,10 +1349,10 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   # target format, written through the ordinary type, which is what the
   # application would have done.
   defp write_target_state(id, plaintext) do
-    # The application resolves its tenant from the process scope, the way it
+    # The application resolves its scope from the process scope, the way it
     # does at the edge of a request; the migrator's own row resolver is a
     # different key in a different place and is untouched by this.
-    Tenant.put(@merchant)
+    Scope.put(@merchant)
 
     params = Pan.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = Pan.dump(plaintext, &Ecto.Type.dump/2, params)

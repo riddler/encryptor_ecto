@@ -42,20 +42,20 @@ defmodule Encryptor.Ecto.Migrator.CensusTest do
   end
 
   describe "rotation progress" do
-    # Sabotage: dropped `progress/2`'s tenant `WHERE` - the per-tenant
+    # Sabotage: dropped `progress/2`'s scope `WHERE` - the per-scope
     # progress query counted the whole table, so an operator watching one
-    # tenant's rotation read every other tenant's rows as their own progress.
-    test "filters on the rewrite's own tenant column" do
+    # scope's rotation read every other scope's rows as their own progress.
+    test "filters on the rewrite's own scope column" do
       query = query_for(TestEnginePlans.Cards, :progress)
 
-      assert query.sql =~ ~s(WHERE "merchant_id" = :tenant)
-      assert query.placeholders == [:current_header, :tenant]
+      assert query.sql =~ ~s(WHERE "merchant_id" = :scope)
+      assert query.placeholders == [:current_header, :scope]
     end
 
     # Sabotage: made `progress/2`'s fallback clause render the query with no
-    # `WHERE` - a plan with no tenant column produced a whole-table count
-    # wearing a tenant's name.
-    test "is not rendered for a rewrite with no tenant column" do
+    # `WHERE` - a plan with no scope column produced a whole-table count
+    # wearing a scope's name.
+    test "is not rendered for a rewrite with no scope column" do
       kinds = TestEnginePlans.Global |> Census.queries() |> Enum.map(& &1.kind)
 
       assert :format in kinds
@@ -133,7 +133,7 @@ defmodule Encryptor.Ecto.Migrator.CensusTest do
       script = TestEnginePlans.Cards |> Census.queries() |> Census.script()
 
       assert script =~ "-- \"cards\".\"pan\": format census"
-      assert script =~ "-- \"cards\".\"pan\": rotation progress for one tenant"
+      assert script =~ "-- \"cards\".\"pan\": rotation progress for one scope"
       assert script =~ "-- \"cards\".\"pan\": nothing became NULL or empty"
     end
 

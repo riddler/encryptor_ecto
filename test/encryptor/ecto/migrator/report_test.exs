@@ -56,7 +56,7 @@ defmodule Encryptor.Ecto.Migrator.ReportTest do
     end
 
     # Sabotage: dropped the `failure_count < @failure_limit` guard - a pass
-    # over a shredded tenant's table held every failure in memory, in the one
+    # over a shredded scope's table held every failure in memory, in the one
     # process that also holds a batch of plaintext.
     test "the list is bounded and the count is not" do
       report =

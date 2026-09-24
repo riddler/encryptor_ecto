@@ -7,7 +7,7 @@ defmodule Encryptor.Ecto.BlindIndex.DerivationError do
   source* rather than an event that happens to a correct program: a
   declaration with no table, an `index_name` carrying the info string's own
   separator, a version that is not a positive integer, a selector that is
-  neither a resolved tenant nor `:global`. `Encryptor.Kdf` takes the same
+  neither a resolved scope nor `:global`. `Encryptor.Kdf` takes the same
   position for the same reason and raises `ArgumentError` at its own
   boundary; this package checks the arguments before that boundary so the
   failure names the declaration the host wrote rather than a constraint one

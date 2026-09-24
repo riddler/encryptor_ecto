@@ -216,8 +216,8 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
 
       iex> Encryptor.Ecto.Migrator.Checkpoint.prefix_text(nil)
       ""
-      iex> Encryptor.Ecto.Migrator.Checkpoint.prefix_text("tenant_a")
-      "tenant_a"
+      iex> Encryptor.Ecto.Migrator.Checkpoint.prefix_text("scope_a")
+      "scope_a"
   """
   @spec prefix_text(String.t() | nil) :: String.t()
   def prefix_text(nil), do: ""

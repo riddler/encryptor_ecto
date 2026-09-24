@@ -20,7 +20,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
      the field declared one, apply `validate:` to what it loaded. A failure
      of either is `:undecryptable`: the row cannot be read in a way anything
      trusts, and an operator has to decide what that means.
-  4. **Dump through the target**, under the row's own tenant.
+  4. **Dump through the target**, under the row's own scope.
   5. **Compare and swap** (decision 4): the update is conditional on the
      target column still holding the exact bytes step 2 read. Zero rows
      affected means the application wrote the row while the migrator was
@@ -51,7 +51,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   composes once rather than twice - and the algorithm suite the message names
   must equal the one the target's vault is configured to write. The
   `"tenant_ref"` pair the vault derives is compared for presence and not for
-  value: which tenant a row belongs to is not what the probe asks.
+  value: which scope a row belongs to is not what the probe asks.
 
   Comparing the *whole* context rather than merely parsing the header is what
   keeps a context-change rewrite correct - a rewrite whose `from:` is one of
@@ -183,7 +183,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   computed from the value step 3 loaded - the plaintext already in hand, so no
   second decrypt - through `Encryptor.Ecto.BlindIndex.Value.compute!/4`, the
   function `Encryptor.Ecto.BlindIndex.put_index/3` computes through, asked
-  with `:dump` under the row's own tenant. Step 5's compare-and-swap then
+  with `:dump` under the row's own scope. Step 5's compare-and-swap then
   sets the index column in the same `UPDATE` as the ciphertext, so the two
   land together or, on a lost swap, not at all.
 
@@ -220,7 +220,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   alias Encryptor.Ecto.Migrator.Checkpoint
   alias Encryptor.Ecto.Migrator.Keyset
   alias Encryptor.Ecto.Migrator.Report
-  alias Encryptor.Ecto.Migrator.RowTenant
+  alias Encryptor.Ecto.Migrator.RowScope
   alias Encryptor.Ecto.Migrator.Source
   alias Encryptor.Message
 
@@ -228,15 +228,15 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   What a message written by this field's target says about itself, keylessly.
 
   `:context` is every pair such a message carries except `"tenant_ref"`, and
-  `:tenant_ref?` is whether it carries that one - the value is the vault's
-  derivation of a tenant selector and is never compared. `:suite` is the
+  `:scope_ref?` is whether it carries that one - the value is the vault's
+  derivation of a scope selector and is never compared. `:suite` is the
   algorithm suite that target's vault is configured to write. Resolved once,
   before the pass starts, by `Encryptor.Ecto.Migrator`; `nil` there means the
   probe cannot be answered from a header and the load attempt runs instead.
   """
   @type target_header :: %{
           context: %{optional(String.t()) => String.t()},
-          tenant_ref?: boolean(),
+          scope_ref?: boolean(),
           suite: non_neg_integer()
         }
 
@@ -255,7 +255,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   @typedoc """
   A blind index folded into this pass: the column the pass writes, the
   declaration its value is computed through, and the encrypted field's params
-  with the plan's tenant strategy installed. Resolved once, before the pass
+  with the plan's scope strategy installed. Resolved once, before the pass
   starts, by `Encryptor.Ecto.Migrator`.
   """
   @type index :: %{
@@ -283,8 +283,8 @@ defmodule Encryptor.Ecto.Migrator.Pass do
           field: atom(),
           source_column: atom(),
           target_column: atom(),
-          tenant: Encryptor.Ecto.Migrator.Plan.tenant(),
-          tenant_column: atom() | nil,
+          scope: Encryptor.Ecto.Migrator.Plan.scope(),
+          scope_column: atom() | nil,
           from_source: Source.resolved(),
           source_authenticated: boolean(),
           validate: (term() -> term()) | nil,
@@ -301,8 +301,8 @@ defmodule Encryptor.Ecto.Migrator.Pass do
           prefix: String.t() | nil,
           checkpoint: :table | :none,
           checkpoint_table: String.t(),
-          only_tenants: [String.t()] | nil,
-          except_tenants: [String.t()],
+          only_scopes: [String.t()] | nil,
+          except_scopes: [String.t()],
           progress: (Report.t() -> any())
         }
 
@@ -315,8 +315,8 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     :field,
     :source_column,
     :target_column,
-    :tenant,
-    :tenant_column,
+    :scope,
+    :scope_column,
     :from_source,
     :source_authenticated,
     :validate,
@@ -333,8 +333,8 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     :prefix,
     :checkpoint,
     :checkpoint_table,
-    :only_tenants,
-    :except_tenants,
+    :only_scopes,
+    :except_scopes,
     :progress
   ]
   defstruct @enforce_keys
@@ -423,11 +423,11 @@ defmodule Encryptor.Ecto.Migrator.Pass do
       pass.key,
       pass.source_column,
       pass.target_column,
-      pass.tenant_column,
+      pass.scope_column,
       cursor,
       pass.batch_size
     )
-    |> filter_tenants(pass)
+    |> filter_scopes(pass)
     |> pass.repo.all(query_opts(pass))
   end
 
@@ -438,18 +438,18 @@ defmodule Encryptor.Ecto.Migrator.Pass do
       pass.key,
       pass.source_column,
       pass.target_column,
-      pass.tenant_column,
+      pass.scope_column,
       size
     )
-    |> filter_tenants(pass)
+    |> filter_scopes(pass)
     |> pass.repo.all(query_opts(pass))
   end
 
-  @spec filter_tenants(Ecto.Query.t(), t()) :: Ecto.Query.t()
-  defp filter_tenants(query, %__MODULE__{tenant_column: nil}), do: query
+  @spec filter_scopes(Ecto.Query.t(), t()) :: Ecto.Query.t()
+  defp filter_scopes(query, %__MODULE__{scope_column: nil}), do: query
 
-  defp filter_tenants(query, pass) do
-    Keyset.tenant_filter(query, pass.tenant_column, pass.only_tenants, pass.except_tenants)
+  defp filter_scopes(query, pass) do
+    Keyset.scope_filter(query, pass.scope_column, pass.only_scopes, pass.except_scopes)
   end
 
   @spec query_opts(t()) :: keyword()
@@ -535,19 +535,19 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   @spec row(t(), Report.t(), MapSet.t(identity()), list()) ::
           {Report.t(), :ok | :halt, MapSet.t(identity())}
-  defp row(_pass, report, proven, [_id, nil, _target | _tenant]),
+  defp row(_pass, report, proven, [_id, nil, _target | _scope]),
     do: {Report.count(report, :null), :ok, proven}
 
-  defp row(pass, report, proven, [id, source_value, target_value | tenant]) do
-    tenant = row_tenant(tenant)
+  defp row(pass, report, proven, [id, source_value, target_value | scope]) do
+    scope = row_scope(scope)
 
-    RowTenant.with_tenant(tenant, fn ->
+    RowScope.with_scope(scope, fn ->
       case probe(pass, proven, target_value) do
         {:already_target, proven} ->
           {Report.count(report, :already_target), :ok, proven}
 
         {:not_target, proven} ->
-          {report, status} = migrate(pass, report, id, source_value, target_value, tenant)
+          {report, status} = migrate(pass, report, id, source_value, target_value, scope)
           {report, status, proven}
       end
     end)
@@ -560,9 +560,9 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   defp migratable(%__MODULE__{source_authenticated: false}), do: :migratable_unverified
   defp migratable(_pass), do: :migratable
 
-  @spec row_tenant([term()]) :: term()
-  defp row_tenant([tenant]), do: tenant
-  defp row_tenant([]), do: nil
+  @spec row_scope([term()]) :: term()
+  defp row_scope([scope]), do: scope
+  defp row_scope([]), do: nil
 
   # Decision 5, both ways: see the moduledoc's "Two ways to probe". A
   # verification and a target this package cannot read a header claim out of
@@ -640,7 +640,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # Name equality over every encrypted data key the header names, and only
   # where the option asked for it: `nil` is every pass that is not a rotation,
   # and answers `true` without reading anything. The name is a version identity
-  # travelling in the clear and a pseudonym rather than a tenant identifier
+  # travelling in the clear and a pseudonym rather than a scope identifier
   # (`Encryptor.Message.Info`), so it is a comparison target here and nothing
   # else - a forged one can only have the pass leave a row alone, which is what
   # a header claim can always do.
@@ -661,18 +661,18 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   @spec against_declaration(target_header(), Message.Info.t()) :: {:claims, identity()} | :no
   defp against_declaration(header, info) do
-    {tenant_ref, context} =
+    {scope_ref, context} =
       info.encryption_context
       |> declared_pairs()
-      |> Map.pop(Context.tenant_ref_key())
+      |> Map.pop(Context.scope_ref_key())
 
-    # The `tenant_ref` presence comparison is a fast path rather than a guard:
-    # ADR-0001 decision 5e forbids a global field on a `:tenant`-profile vault,
-    # so a tenant-bearing and a global declaration cannot coexist over one
+    # The `"tenant_ref"` presence comparison is a fast path rather than a guard:
+    # ADR-0001 decision 5e forbids a global field on a `:scoped`-profile vault,
+    # so a scope-bearing and a global declaration cannot coexist over one
     # vault, and a header that disagreed could only change the answer for a row
     # `against_proof/4`'s load would have accepted anyway. Kept because it
     # settles the common case without a decrypt.
-    if context == header.context and is_binary(tenant_ref) == header.tenant_ref? and
+    if context == header.context and is_binary(scope_ref) == header.scope_ref? and
          info.algorithm_suite_id == header.suite do
       {:claims, %{suite: info.algorithm_suite_id, keys: info.encrypted_data_keys}}
     else
@@ -725,15 +725,15 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # can read, which is not what `:undecryptable` means.
   @spec migrate(t(), Report.t(), term(), binary(), binary() | nil, term()) ::
           {Report.t(), :ok | :halt}
-  defp migrate(%__MODULE__{mode: :verify} = pass, report, id, source_value, _target, tenant) do
-    case load_source(pass, source_value, tenant) do
+  defp migrate(%__MODULE__{mode: :verify} = pass, report, id, source_value, _target, scope) do
+    case load_source(pass, source_value, scope) do
       {:ok, _loaded} -> {Report.count(report, migratable(pass)), :ok}
       {:error, reason} -> fail(pass, report, id, reason)
     end
   end
 
-  defp migrate(pass, report, id, source_value, target_value, tenant) do
-    with {:ok, loaded} <- load_source(pass, source_value, tenant),
+  defp migrate(pass, report, id, source_value, target_value, scope) do
+    with {:ok, loaded} <- load_source(pass, source_value, scope),
          {:ok, bytes} <- write_target(pass, loaded),
          {:ok, set} <- index_set(pass, loaded) do
       swap(pass, report, id, target_value, [{pass.target_column, bytes} | set])
@@ -765,8 +765,8 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # to remember to validate, and a value that fails the check is not a value
   # this pass has read successfully.
   @spec load_source(t(), binary(), term()) :: {:ok, term()} | {:error, term()}
-  defp load_source(pass, value, tenant) do
-    with {:ok, loaded} <- read_source(pass, value, tenant),
+  defp load_source(pass, value, scope) do
+    with {:ok, loaded} <- read_source(pass, value, scope),
          :ok <- validate(pass, loaded) do
       {:ok, loaded}
     end
@@ -797,24 +797,24 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   end
 
   @spec read_source(t(), binary(), term()) :: {:ok, term()} | {:error, term()}
-  defp read_source(pass, value, tenant) do
-    Source.load(pass.from_source, value, source_params(pass, tenant))
+  defp read_source(pass, value, scope) do
+    Source.load(pass.from_source, value, source_params(pass, scope))
   end
 
   # ADR-0002 decision 3: the migrator constructs the params it hands both
   # sides, rather than reading them off a schema declaration. What a foreign
   # arity-3 `from:` module makes of them is its own business; the identifying
   # keys are here because a host's own legacy type may well need them, and the
-  # tenant is here because a per-tenant legacy scheme could not read the row
+  # scope is here because a per-scope legacy scheme could not read the row
   # without it.
   @spec source_params(t(), term()) :: map()
-  defp source_params(pass, tenant) do
+  defp source_params(pass, scope) do
     %{
       schema: pass.schema,
       field: pass.field,
       table: pass.source,
       column: Atom.to_string(pass.source_column),
-      tenant: tenant
+      scope: scope
     }
   end
 

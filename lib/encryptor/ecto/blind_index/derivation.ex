@@ -36,11 +36,11 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
 
   Three steps, each separating at its own layer. The salt is the vault's
   per-deployment `:derivation_salt` and is never this package's to supply -
-  that is what makes two deployments provisioned from the same tenant key
+  that is what makes two deployments provisioned from the same scope key
   material derive unrelated index values, and it is why a restored backup or
   a cloned staging environment cannot be joined against production on an
   index column. The outer label separates the whole blind-index tree from
-  every other use of a tenant's key material and belongs to `encryptor`; this
+  every other use of a scope's key material and belongs to `encryptor`; this
   package names the purpose `"blind-index"` and never spells the namespace by
   hand. The inner `info` separates this package's index derivation from
   anything else that might one day derive under that tree, and belongs to
@@ -74,7 +74,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   resolves the descriptor inside the vault's derivation path
   (`lib/encryptor/vault/derive.ex` in `encryptor`), derives there, and
   hands back derived bytes only. There is no argument on any function in this
-  module that a tenant master key could be passed as, which is the strongest
+  module that a scope master key could be passed as, which is the strongest
   form the property can take - a rule that cannot be broken by a call site
   beats a rule a call site is asked to follow.
 
@@ -116,7 +116,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   whose decision 5 promises none, and a host-supplied salt makes a
   cryptographic parameter a call-site constant. Deriving through the vault
   costs one HKDF expansion and gets a salt that is per deployment - because
-  the extract is under the vault's `:derivation_salt` - per index, per tenant
+  the extract is under the vault's `:derivation_salt` - per index, per scope
   (C3), and stable for the life of the index without existing anywhere but in
   the derivation.
 
@@ -134,12 +134,12 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
 
   ## Scope
 
-  `selector!/3` discharges decision 3a. It has no tenant channel of its own
-  and does not read `Encryptor.Ecto.Tenant`: it asks the *encrypted field's*
-  configured strategy through `Encryptor.Ecto.TenantContext`, so a host that
-  replaced `:scope` with a resolver module gets the same replacement here for
-  free, and a missing tenant raises `Encryptor.Ecto.MissingTenantError`
-  identically to ADR-0001 decision 5c. A `scope: :global` index asks no
+  `selector!/3` discharges decision 3a. It has no scope channel of its own
+  and does not read `Encryptor.Ecto.Scope`: it asks the *encrypted field's*
+  configured strategy through `Encryptor.Ecto.ScopeContext`, so a host that
+  replaced `:process` with a resolver module gets the same replacement here for
+  free, and a missing scope raises `Encryptor.Ecto.MissingScopeError`
+  identically to ADR-0001 decision 5c. A `derive: :global` index asks no
   resolver anything, which is decision 3c's whole point: the global choice is
   written at the field and visible to the reviewer.
 
@@ -152,8 +152,8 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   """
 
   alias Encryptor.Ecto.BlindIndex.DerivationError
-  alias Encryptor.Ecto.MissingTenantError
-  alias Encryptor.Ecto.TenantContext
+  alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.ScopeContext
   alias Encryptor.Kdf
   alias Encryptor.Vault
   alias Encryptor.Vault.Config
@@ -187,7 +187,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   @salt_component "slow-salt"
 
   @enforce_keys [:table, :column, :index_name, :version]
-  defstruct [:table, :column, :index_name, :version, scope: :tenant]
+  defstruct [:table, :column, :index_name, :version, derive: :per_scope]
 
   @typedoc """
   One index's derivation identity: everything that reaches the HKDF `info`
@@ -198,27 +198,27 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
           column: String.t(),
           index_name: String.t(),
           version: pos_integer(),
-          scope: scope()
+          derive: derive()
         }
 
   @typedoc "ADR-0003 decision 3's key scope, declared at the field."
-  @type scope :: :tenant | :global
+  @type derive :: :per_scope | :global
 
   @typedoc """
   Which scope's key material a derivation needs.
 
-  `{:tenant, tenant}` names the resolved tenant; `:global` names the
+  `{:scope, scope}` names the resolved scope; `:global` names the
   deployment-wide index root of decision 3c.
   """
-  @type selector :: {:tenant, String.t()} | :global
+  @type selector :: {:scope, String.t()} | :global
 
   @typedoc """
   The encrypted field's frozen parameters, as `Encryptor.Ecto.Binary` holds
-  them. Only the four keys the tenant strategy needs are read.
+  them. Only the four keys the scope strategy needs are read.
   """
   @type field_params :: %{
           required(:vault) => module(),
-          required(:tenant) => :scope | :none | module(),
+          required(:scope) => :process | :none | module(),
           required(:table) => String.t(),
           required(:column) => String.t(),
           optional(atom()) => term()
@@ -237,12 +237,12 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
         column: "card_number",
         index_name: "card_number_index",
         version: 1,
-        scope: :tenant
+        derive: :per_scope
       }
 
   `:version` defaults to `1`, matching `index_opts/0`'s default, so an index
   that declares no version derives under `...|<index_name>|1` and nothing
-  about an existing declaration changes. `:scope` defaults to `:tenant`,
+  about an existing declaration changes. `:derive` defaults to `:per_scope`,
   matching decision 3a.
 
   Every component is a binary, never an atom. An atom would have to be
@@ -253,7 +253,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
 
       iex> Encryptor.Ecto.BlindIndex.Derivation.new!(
       ...>   table: "payments", column: "card_number", index_name: :card_number_index)
-      ** (Encryptor.Ecto.BlindIndex.DerivationError) a blind index key could not be derived (table: "payments", column: "card_number", context keys: [], tenant: nil, reason: {:invalid, :index_name, :not_a_non_empty_binary}, index name: nil, index version: 1)
+      ** (Encryptor.Ecto.BlindIndex.DerivationError) a blind index key could not be derived (table: "payments", column: "card_number", context keys: [], scope: nil, reason: {:invalid, :index_name, :not_a_non_empty_binary}, index name: nil, index version: 1)
 
   A component may not carry the `info` string's own separator, for the reason
   `Encryptor.Kdf.label/1` refuses a purpose carrying `"/"`: a component that
@@ -263,7 +263,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
 
       iex> Encryptor.Ecto.BlindIndex.Derivation.new!(
       ...>   table: "payments", column: "card_number", index_name: "a|b")
-      ** (Encryptor.Ecto.BlindIndex.DerivationError) a blind index key could not be derived (table: "payments", column: "card_number", context keys: [], tenant: nil, reason: {:invalid, :index_name, :contains_separator}, index name: "a|b", index version: 1)
+      ** (Encryptor.Ecto.BlindIndex.DerivationError) a blind index key could not be derived (table: "payments", column: "card_number", context keys: [], scope: nil, reason: {:invalid, :index_name, :contains_separator}, index name: "a|b", index version: 1)
   """
   @spec new!(keyword()) :: t()
   def new!(opts) when is_list(opts) do
@@ -272,12 +272,12 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
       column: opts[:column],
       index_name: opts[:index_name],
       version: Keyword.get(opts, :version, 1),
-      scope: Keyword.get(opts, :scope, :tenant)
+      derive: Keyword.get(opts, :derive, :per_scope)
     }
 
     Enum.each([:table, :column, :index_name], &validate_component!(struct, &1))
     validate_version!(struct)
-    validate_scope!(struct)
+    validate_derive!(struct)
 
     struct
   end
@@ -365,19 +365,19 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
       iex> alias Encryptor.Ecto.BlindIndex.Derivation
       iex> Derivation.new!(table: "payments", column: "card_number",
       ...>   index_name: "card_number_index")
-      ...> |> Derivation.derive_opts({:tenant, "merchant_7f3"})
+      ...> |> Derivation.derive_opts({:scope, "merchant_7f3"})
       [
         info: "encryptor_ecto/blind_index/v1|payments|card_number|card_number_index|1",
         length: 32,
         key: "merchant_7f3"
       ]
 
-  A `scope: :global` index names no key, so a single-key vault's `:default`
+  A `derive: :global` index names no key, so a single-key vault's `:default`
   selector applies (decision 3c):
 
       iex> alias Encryptor.Ecto.BlindIndex.Derivation
       iex> Derivation.new!(table: "signups", column: "email",
-      ...>   index_name: "email_index", scope: :global)
+      ...>   index_name: "email_index", derive: :global)
       ...> |> Derivation.derive_opts(:global)
       [info: "encryptor_ecto/blind_index/v1|signups|email|email_index|1", length: 32]
   """
@@ -396,7 +396,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
       iex> alias Encryptor.Ecto.BlindIndex.Derivation
       iex> Derivation.new!(table: "payments", column: "card_number",
       ...>   index_name: "card_number_index")
-      ...> |> Derivation.salt_derive_opts({:tenant, "merchant_7f3"})
+      ...> |> Derivation.salt_derive_opts({:scope, "merchant_7f3"})
       [
         info: "encryptor_ecto/blind_index/v1|payments|card_number|card_number_index|1|slow-salt",
         length: 32,
@@ -405,14 +405,14 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
 
   C3 is the cheap choice and the stronger one: a deployment-wide salt would
   make the Argon2id output a function of the plaintext alone, reintroducing
-  one layer in the cross-tenant correlatability decision 3b argues against.
+  one layer in the cross-scope correlatability decision 3b argues against.
   Resolving one selector per computation and using it twice is also what makes
-  it impossible for the salt and the key to disagree about which tenant a row
+  it impossible for the salt and the key to disagree about which scope a row
   belongs to.
 
       iex> alias Encryptor.Ecto.BlindIndex.Derivation
       iex> Derivation.new!(table: "signups", column: "email",
-      ...>   index_name: "email_index", scope: :global)
+      ...>   index_name: "email_index", derive: :global)
       ...> |> Derivation.salt_derive_opts(:global)
       [info: "encryptor_ecto/blind_index/v1|signups|email|email_index|1|slow-salt", length: 32]
   """
@@ -511,59 +511,59 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
   @doc """
   Resolves which scope's key material a derivation needs (decision 3a).
 
-  A `scope: :global` index asks no resolver anything - the choice was made at
+  A `derive: :global` index asks no resolver anything - the choice was made at
   the field, out loud, and decision 3c is what makes it visible:
 
       iex> alias Encryptor.Ecto.BlindIndex.Derivation
       iex> Derivation.new!(table: "identities", column: "email",
-      ...>   index_name: "email_index", scope: :global)
-      ...> |> Derivation.selector!(%{vault: Signups.Vault, tenant: :none,
+      ...>   index_name: "email_index", derive: :global)
+      ...> |> Derivation.selector!(%{vault: Signups.Vault, scope: :none,
       ...>      table: "identities", column: "email"}, :dump)
       :global
 
-  A `scope: :tenant` index asks the encrypted field's own strategy, with the
+  A `derive: :per_scope` index asks the encrypted field's own strategy, with the
   field's declared context as the resolver's params - the same call
   `Encryptor.Ecto.Binary` makes on the encryption path, so the two cannot
-  disagree about which tenant a row belongs to.
+  disagree about which scope a row belongs to.
 
   `operation` is the caller's, because ADR-0003 does not say which of
   `:dump`/`:load` an index computation is and a resolver may legitimately
   answer differently for a write and a read.
   """
-  @spec selector!(t(), field_params(), TenantContext.operation()) :: selector()
-  def selector!(%__MODULE__{scope: :global}, _params, _operation), do: :global
+  @spec selector!(t(), field_params(), ScopeContext.operation()) :: selector()
+  def selector!(%__MODULE__{derive: :global}, _params, _operation), do: :global
 
-  def selector!(%__MODULE__{scope: :tenant} = derivation, params, operation) do
+  def selector!(%__MODULE__{derive: :per_scope} = derivation, params, operation) do
     case resolve(params, operation) do
-      {:ok, tenant} when is_binary(tenant) ->
-        {:tenant, tenant}
+      {:ok, scope} when is_binary(scope) ->
+        {:scope, scope}
 
       :none ->
-        raise MissingTenantError, missing_tenant(derivation, params, :field_declared_tenant_none)
+        raise MissingScopeError, missing_scope(derivation, params, :field_declared_scope_none)
 
       {:error, reason} ->
-        raise MissingTenantError, missing_tenant(derivation, params, reason)
+        raise MissingScopeError, missing_scope(derivation, params, reason)
 
       _off_contract ->
-        raise MissingTenantError,
-              missing_tenant(
+        raise MissingScopeError,
+              missing_scope(
                 derivation,
                 params,
-                {:resolver_off_contract, resolver(params.tenant)}
+                {:resolver_off_contract, resolver(params.scope)}
               )
     end
   end
 
-  # A `tenant: :none` field has no tenant to key with, and decision 3c makes
+  # A `scope: :none` field has no scope to key with, and decision 3c makes
   # the pairing a compile error at the declaration. Answering `:none` here
   # rather than asking a resolver keeps the runtime backstop honest: the
   # raise below says the field is global, which is the thing to fix.
-  @spec resolve(field_params(), TenantContext.operation()) ::
+  @spec resolve(field_params(), ScopeContext.operation()) ::
           {:ok, String.t()} | :none | {:error, term()} | term()
-  defp resolve(%{tenant: :none}, _operation), do: :none
+  defp resolve(%{scope: :none}, _operation), do: :none
 
   defp resolve(params, operation) do
-    resolver = resolver(params.tenant)
+    resolver = resolver(params.scope)
 
     resolver.resolve(operation, %{
       vault: params.vault,
@@ -572,17 +572,17 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
     })
   end
 
-  @spec resolver(:scope | module()) :: module()
-  defp resolver(:scope), do: TenantContext.Scope
+  @spec resolver(:process | module()) :: module()
+  defp resolver(:process), do: ScopeContext.Process
   defp resolver(module) when is_atom(module), do: module
 
-  @spec missing_tenant(t(), field_params(), term()) :: keyword()
-  defp missing_tenant(derivation, params, reason) do
+  @spec missing_scope(t(), field_params(), term()) :: keyword()
+  defp missing_scope(derivation, params, reason) do
     [
       table: params.table,
       column: params.column,
       context_keys: [],
-      tenant: nil,
+      scope: nil,
       reason: {:blind_index, derivation.index_name, reason}
     ]
   end
@@ -613,27 +613,27 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
     end
   end
 
-  @spec validate_scope!(t()) :: :ok
-  defp validate_scope!(%__MODULE__{scope: scope} = derivation) do
-    if scope in [:tenant, :global] do
+  @spec validate_derive!(t()) :: :ok
+  defp validate_derive!(%__MODULE__{derive: derive} = derivation) do
+    if derive in [:per_scope, :global] do
       :ok
     else
-      refuse!(derivation, {:invalid, :scope, :not_tenant_or_global})
+      refuse!(derivation, {:invalid, :derive, :not_per_scope_or_global})
     end
   end
 
   # The selector half of A8's `ikm_selector`, mapped onto the vault's `:key`
   # option. A `:global` index names no key, so the vault's own `:default`
-  # applies; a `:tenant` index names the tenant `selector!/3` resolved.
+  # applies; a `:per_scope` index names the scope `selector!/3` resolved.
   #
   # A selector this clause does not recognise is refused here rather than
   # passed on, because the vault would answer `{:invalid_selector, term}`
-  # naming a value this package constructed - and the value is a tenant
+  # naming a value this package constructed - and the value is a scope
   # identifier, which is the one thing in this path a host may consider
   # sensitive.
   @spec key_opt(t(), term()) :: keyword()
-  defp key_opt(_derivation, {:tenant, tenant}) when is_binary(tenant) and tenant != "",
-    do: [key: tenant]
+  defp key_opt(_derivation, {:scope, scope}) when is_binary(scope) and scope != "",
+    do: [key: scope]
 
   defp key_opt(_derivation, :global), do: []
 
@@ -649,7 +649,7 @@ defmodule Encryptor.Ecto.BlindIndex.Derivation do
       table: printable(derivation.table),
       column: printable(derivation.column),
       context_keys: [],
-      tenant: nil,
+      scope: nil,
       reason: reason,
       index_name: printable(derivation.index_name),
       version: derivation.version

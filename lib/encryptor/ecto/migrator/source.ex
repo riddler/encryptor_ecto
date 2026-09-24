@@ -194,7 +194,7 @@ defmodule Encryptor.Ecto.Migrator.Source do
     _exception -> nil
   end
 
-  @our_params [:vault, :tenant, :context, :table, :column, :legacy]
+  @our_params [:vault, :scope, :context, :table, :column, :legacy]
 
   @spec frozen_params?(term()) :: boolean()
   defp frozen_params?(params) when is_map(params),

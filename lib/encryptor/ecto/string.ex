@@ -18,7 +18,7 @@ defmodule Encryptor.Ecto.String do
 
   Everything below `cast/2` is `Encryptor.Ecto.Binary`, called rather than
   copied: the same closed option set, the same declared `"table"`/`"column"`
-  context, the same tenant resolution, the same `:binary` column, the same
+  context, the same scope resolution, the same `:binary` column, the same
   exception family, and the vault's bytes stored verbatim. Read that module for
   all of it; only the difference is documented here.
 

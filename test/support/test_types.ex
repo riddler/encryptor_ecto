@@ -3,13 +3,13 @@ defmodule Encryptor.Ecto.TestTypes do
   The host type modules the tests declare fields with.
 
   One module per declaration shape the bead has to cover: the default
-  `tenant: :scope`, a `tenant: :none` global field on the single-key vault, a
+  `scope: :process`, a `scope: :none` global field on the single-key vault, a
   host resolver module, and a declaration whose context values are pinned
   rather than derived.
   """
 
   defmodule Pan do
-    @moduledoc "The ordinary case: a per-merchant field on the tenant vault."
+    @moduledoc "The ordinary case: a per-merchant field on the scoped vault."
 
     use Encryptor.Ecto.Binary, vault: Encryptor.Ecto.TestVaults.Merchant
   end
@@ -61,18 +61,18 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.App,
-      tenant: :none
+      scope: :none
   end
 
   defmodule Misprofiled do
     @moduledoc """
-    A global field pointed at the `:tenant`-profile vault - the pairing
+    A global field pointed at the `:scoped`-profile vault - the pairing
     ADR-0001 decision 5e forbids, and the subject of the rule's raise.
     """
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.Merchant,
-      tenant: :none
+      scope: :none
   end
 
   defmodule MisprofiledUnstarted do
@@ -84,15 +84,15 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.Unstarted,
-      tenant: :none
+      scope: :none
   end
 
   defmodule Resolved do
-    @moduledoc "A field whose tenant comes from a host resolver rather than the scope."
+    @moduledoc "A field whose scope comes from a host resolver rather than the scope."
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.Merchant,
-      tenant: Encryptor.Ecto.TestResolvers.Fixed
+      scope: Encryptor.Ecto.TestResolvers.Fixed
   end
 
   defmodule Declining do
@@ -100,7 +100,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.App,
-      tenant: Encryptor.Ecto.TestResolvers.Declining
+      scope: Encryptor.Ecto.TestResolvers.Declining
   end
 
   defmodule Refusing do
@@ -108,7 +108,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.Merchant,
-      tenant: Encryptor.Ecto.TestResolvers.Refusing
+      scope: Encryptor.Ecto.TestResolvers.Refusing
   end
 
   defmodule OffContract do
@@ -116,7 +116,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.Merchant,
-      tenant: Encryptor.Ecto.TestResolvers.OffContract
+      scope: Encryptor.Ecto.TestResolvers.OffContract
   end
 
   defmodule Pinned do
@@ -134,7 +134,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.Strict,
-      tenant: :none
+      scope: :none
   end
 
   defmodule Unstarted do
@@ -150,11 +150,11 @@ defmodule Encryptor.Ecto.TestTypes do
   end
 
   defmodule GlobalName do
-    @moduledoc "A text field with no tenant, to show String carries Binary's whole option set."
+    @moduledoc "A text field with no scope, to show String carries Binary's whole option set."
 
     use Encryptor.Ecto.String,
       vault: Encryptor.Ecto.TestVaults.App,
-      tenant: :none
+      scope: :none
   end
 
   defmodule UnsaltedName do
@@ -167,7 +167,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.String,
       vault: Encryptor.Ecto.TestVaults.Unsalted,
-      tenant: :none
+      scope: :none
   end
 
   defmodule PerOperationName do
@@ -175,7 +175,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.String,
       vault: Encryptor.Ecto.TestVaults.Merchant,
-      tenant: Encryptor.Ecto.TestResolvers.PerOperation
+      scope: Encryptor.Ecto.TestResolvers.PerOperation
   end
 
   defmodule Metadata do
@@ -248,7 +248,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
   defmodule RefusingLegacy do
     @moduledoc """
-    A legacy-window field whose tenant never resolves.
+    A legacy-window field whose scope never resolves.
 
     The subject of decision 4a's first prohibition: the legacy reader could
     answer these bytes, and must not be asked.
@@ -256,7 +256,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.Merchant,
-      tenant: Encryptor.Ecto.TestResolvers.Refusing,
+      scope: Encryptor.Ecto.TestResolvers.Refusing,
       legacy: Encryptor.Ecto.TestLegacy.Anything
   end
 
@@ -268,7 +268,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Binary,
       vault: Encryptor.Ecto.TestVaults.Strict,
-      tenant: :none,
+      scope: :none,
       legacy: Encryptor.Ecto.TestLegacy.Anything
   end
 
@@ -298,13 +298,13 @@ defmodule Encryptor.Ecto.TestTypes do
 
   # -- the scalar types ------------------------------------------------------
 
-  # One declaration per scalar wrapper, on the tenant vault, plus the two arms
+  # One declaration per scalar wrapper, on the scoped vault, plus the two arms
   # that are not the ordinary case: a global field and a field in the migration
   # window. They are declared against the `readings` schema rather than `Card`,
   # so the declared context values they freeze are that table's.
 
   defmodule RetryCount do
-    @moduledoc "An integer field: the ordinary case, on the tenant vault."
+    @moduledoc "An integer field: the ordinary case, on the scoped vault."
 
     use Encryptor.Ecto.Integer, vault: Encryptor.Ecto.TestVaults.Merchant
   end
@@ -344,7 +344,7 @@ defmodule Encryptor.Ecto.TestTypes do
 
     use Encryptor.Ecto.Integer,
       vault: Encryptor.Ecto.TestVaults.App,
-      tenant: :none
+      scope: :none
   end
 
   defmodule DateOfBirthLegacy do
@@ -426,35 +426,35 @@ defmodule Encryptor.Ecto.TestSerializers do
 end
 
 defmodule Encryptor.Ecto.TestResolvers do
-  @moduledoc "Host-supplied tenant resolvers, covering each arm of the callback's contract."
+  @moduledoc "Host-supplied scope resolvers, covering each arm of the callback's contract."
 
   defmodule Fixed do
     @moduledoc "Answers with one merchant, whatever the process scope holds."
 
-    @behaviour Encryptor.Ecto.TenantContext
+    @behaviour Encryptor.Ecto.ScopeContext
 
     @doc "Always the same merchant."
-    @impl Encryptor.Ecto.TenantContext
+    @impl Encryptor.Ecto.ScopeContext
     def resolve(_operation, _params), do: {:ok, "merchant_7f3"}
   end
 
   defmodule Declining do
-    @moduledoc "Answers that this value has no tenant at all."
+    @moduledoc "Answers that this value has no scope at all."
 
-    @behaviour Encryptor.Ecto.TenantContext
+    @behaviour Encryptor.Ecto.ScopeContext
 
-    @doc "Declares the value global, the way `tenant: :none` does at the field."
-    @impl Encryptor.Ecto.TenantContext
+    @doc "Declares the value global, the way `scope: :none` does at the field."
+    @impl Encryptor.Ecto.ScopeContext
     def resolve(_operation, _params), do: :none
   end
 
   defmodule Refusing do
     @moduledoc "Answers that it could not resolve, which the type must raise on."
 
-    @behaviour Encryptor.Ecto.TenantContext
+    @behaviour Encryptor.Ecto.ScopeContext
 
     @doc "Never resolves."
-    @impl Encryptor.Ecto.TenantContext
+    @impl Encryptor.Ecto.ScopeContext
     def resolve(operation, _params), do: {:error, {:no_request_context, operation}}
   end
 
@@ -462,15 +462,15 @@ defmodule Encryptor.Ecto.TestResolvers do
     @moduledoc """
     Answers a different merchant for a write than for a read.
 
-    ADR-0001 allows it - a reporting job with a `:load` tenant it does not have
+    ADR-0001 allows it - a reporting job with a `:load` scope it does not have
     on `:dump` is the record's own example - and it is what makes the blind
     index's `:dump`/`:load` mapping observable rather than a comment.
     """
 
-    @behaviour Encryptor.Ecto.TenantContext
+    @behaviour Encryptor.Ecto.ScopeContext
 
     @doc "One merchant on the write side, another on the read side."
-    @impl Encryptor.Ecto.TenantContext
+    @impl Encryptor.Ecto.ScopeContext
     def resolve(:dump, _params), do: {:ok, "merchant_7f3"}
     def resolve(:load, _params), do: {:ok, "merchant_a19"}
   end

@@ -5,14 +5,14 @@ defmodule Encryptor.Ecto.ErrorTest do
   alias Encryptor.Ecto.EncryptError
   alias Encryptor.Ecto.Error
   alias Encryptor.Ecto.MissingContextError
-  alias Encryptor.Ecto.MissingTenantError
+  alias Encryptor.Ecto.MissingScopeError
   alias Encryptor.Ecto.SerializationError
   alias Encryptor.Ecto.VaultProfileError
 
   doctest Encryptor.Ecto.Error
 
   @family [
-    MissingTenantError,
+    MissingScopeError,
     MissingContextError,
     EncryptError,
     DecryptError,
@@ -27,7 +27,7 @@ defmodule Encryptor.Ecto.ErrorTest do
 
   describe "the family's common shape" do
     # sabotage: drop :reason from __using__/1's common field list -> red
-    test "every member carries the four identifying values and the tenant" do
+    test "every member carries the four identifying values and the scope" do
       for module <- @family do
         error = build(module)
 
@@ -35,7 +35,7 @@ defmodule Encryptor.Ecto.ErrorTest do
                  table: "payments",
                  column: "card_number",
                  context_keys: ["table", "column"],
-                 tenant: "tenant_42",
+                 scope: "scope_42",
                  reason: :decrypt_failed
                } = error
       end
@@ -52,13 +52,13 @@ defmodule Encryptor.Ecto.ErrorTest do
     end
 
     # sabotage: drop the {"table", ...} pair from common_detail/1 -> red
-    test "message/1 names the declared table, column, context keys and tenant" do
+    test "message/1 names the declared table, column, context keys and scope" do
       message = Exception.message(build(EncryptError))
 
       assert message =~ ~s(table: "payments")
       assert message =~ ~s(column: "card_number")
       assert message =~ ~s(context keys: ["table", "column"])
-      assert message =~ ~s(tenant: "tenant_42")
+      assert message =~ ~s(scope: "scope_42")
       assert message =~ "reason: :decrypt_failed"
     end
   end
@@ -174,10 +174,10 @@ defmodule Encryptor.Ecto.ErrorTest do
     # sabotage: drop the {"vault", ...} pair from extra_detail/1 -> red
     test "names the vault it was pointed at and the profile that vault resolved to" do
       message =
-        Exception.message(struct!(VaultProfileError, vault: MyApp.TenantVault, profile: :tenant))
+        Exception.message(struct!(VaultProfileError, vault: MyApp.ScopedVault, profile: :scoped))
 
-      assert message =~ "vault: MyApp.TenantVault"
-      assert message =~ "vault profile: :tenant"
+      assert message =~ "vault: MyApp.ScopedVault"
+      assert message =~ "vault profile: :scoped"
     end
 
     # sabotage: change headline/0 to MissingContextError's wording -> red
@@ -198,17 +198,17 @@ defmodule Encryptor.Ecto.ErrorTest do
     end
   end
 
-  describe "MissingTenantError" do
-    # sabotage: change headline/0 to omit "no tenant in scope" -> red
-    test "reports an empty scope rather than a resolved tenant" do
-      assert %MissingTenantError{tenant: nil} = struct!(MissingTenantError, [])
-      assert MissingTenantError.headline() =~ "no tenant in scope"
+  describe "MissingScopeError" do
+    # sabotage: change headline/0 to omit "no scope set" -> red
+    test "reports an empty scope rather than a resolved scope" do
+      assert %MissingScopeError{scope: nil} = struct!(MissingScopeError, [])
+      assert MissingScopeError.headline() =~ "no scope set"
     end
 
     # sabotage: make message/1 return only the headline -> red
     test "raises with the declared table and column in its message" do
-      assert_raise MissingTenantError, ~r/table: "payments".*column: "card_number"/, fn ->
-        raise MissingTenantError, table: "payments", column: "card_number"
+      assert_raise MissingScopeError, ~r/table: "payments".*column: "card_number"/, fn ->
+        raise MissingScopeError, table: "payments", column: "card_number"
       end
     end
   end
@@ -222,7 +222,7 @@ defmodule Encryptor.Ecto.ErrorTest do
       module,
       Keyword.merge(common(),
         reason: {:decrypt_failed, @plaintext},
-        tenant: "tenant_42"
+        scope: "scope_42"
       ) ++ extras(module)
     )
   end
@@ -232,7 +232,7 @@ defmodule Encryptor.Ecto.ErrorTest do
       table: "payments",
       column: "card_number",
       context_keys: ["table", "column"],
-      tenant: "tenant_42",
+      scope: "scope_42",
       reason: :decrypt_failed
     ]
   end

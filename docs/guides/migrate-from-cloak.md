@@ -6,8 +6,8 @@ package, with the application serving traffic throughout. It works unchanged for
 a host leaving a hand-rolled encrypted `Ecto.Type`: cloak is the named case
 because it is the common one, not because it is an integration.
 
-It assumes you already know what changes when you make this move - per-tenant
-keys, the encryption context, fail-closed tenant scope, and what a blind index
+It assumes you already know what changes when you make this move - per-scope
+keys, the encryption context, fail-closed scope, and what a blind index
 does and does not restore. If you do not,
 [what changes when you move off cloak_ecto](../explanation/moving-off-cloak.md)
 is that page, and it is worth reading before you run step 3.
@@ -23,7 +23,7 @@ by email, served today by a `Cloak.Ecto.SHA256` sibling column.
   rows.** A host whose cloak key is gone has rows that are already shredded.
   Nothing here can recover them, and the migration will classify every one of
   them `:undecryptable`.
-- **Vault key material exists for every tenant** you are about to migrate, or
+- **Vault key material exists for every scope** you are about to migrate, or
   can be provisioned in step 1. Provisioning is `encryptor`'s territory and
   this package has no verb that touches a key.
 - **You can deploy twice**, which is what steps 2 and 3 are, and you can run a
@@ -47,7 +47,7 @@ The `mix` form needs none of it, because the task starts your application.
 | # | Step | Reversible by |
 |---|---|---|
 | 0 | Finish or abandon any in-flight legacy key rotation | Nothing written |
-| 1 | Provision vault key material for every tenant | Nothing to reverse; no host data touched |
+| 1 | Provision vault key material for every scope | Nothing to reverse; no host data touched |
 | 2 | Deploy with both libraries in the tree, schema fields still naming the legacy type modules | Reverting the deploy |
 | 3 | Deploy the type modules switched over with `legacy:` set | Reverting the deploy, **while no row has been written in the new format** |
 | 4 | Dry run. Resolve every `:undecryptable` row and every `:migratable_unverified` count | Nothing written |
@@ -71,13 +71,13 @@ stop it, before continuing.
 Nothing is written in this step and there is nothing to check but your own
 deploy state.
 
-## Step 1. Provision vault key material for every tenant
+## Step 1. Provision vault key material for every scope
 
-Do this with `encryptor`'s own provisioning, for every tenant that has a row in
-a table you are about to touch - including tenants that are offboarded but whose
+Do this with `encryptor`'s own provisioning, for every scope that has a row in
+a table you are about to touch - including scopes that are offboarded but whose
 rows are still present.
 
-**If it differs:** a tenant with no key material fails at the first row of its
+**If it differs:** a scope with no key material fails at the first row of its
 own, in step 4, with a vault error rather than a decrypt failure: the row is
 counted `undecryptable`, but its failure reason names
 `Encryptor.Ecto.EncryptError` where an unreadable legacy row says
@@ -140,21 +140,21 @@ Wire the counter that tells you when the window has closed, in the same deploy:
 ```
 
 The event's metadata is the table and the column and nothing else - no value, no
-bytes, no reason, no tenant.
+bytes, no reason, no scope.
 
 **Expected:** the deploy goes out, reads keep working on every row, and the
 `legacy_load` counter climbs immediately. A counter that is flat at zero from the
 first minute means the types are not actually being exercised, or `legacy:` did
 not reach the module you thought it did.
 
-**If it differs:** an exception naming a missing tenant or a missing context is
+**If it differs:** an exception naming a missing scope or a missing context is
 host misconfiguration and is deliberately loud - the legacy fallback is not
 attempted for either, because answering a configuration bug with a successful
-legacy read buys you a silent year of unmigrated rows. Fix the tenant resolution
+legacy read buys you a silent year of unmigrated rows. Fix the scope resolution
 and redeploy.
 
 **While this window is open, an unmigrated row is read under the legacy scheme's
-rules.** For a cloak host that means no encryption context and no per-tenant key
+rules.** For a cloak host that means no encryption context and no per-scope key
 separation for those rows. The guarantee is per-row until the pass finishes,
 which is why the window is meant to be short.
 
@@ -214,11 +214,11 @@ it. Generate the skeleton if you want a starting point:
 ```
 $ mix encryptor.ecto.gen.plan --module MyApp.Encryption.CloakMigration
 * creating lib/my_app/encryption/cloak_migration.ex
-7 candidate fields across 4 schemas. It does not compile yet: finish every `tenant_from` and every `to:`, and delete the fields that are not encrypted. The file says which is which.
+7 candidate fields across 4 schemas. It does not compile yet: finish every `scope_from` and every `to:`, and delete the fields that are not encrypted. The file says which is which.
 ```
 
-The generated file does not compile on purpose: every `tenant_from` names
-`:TODO_tenant_column`, every `to:` is a comment, and the field list over-reports.
+The generated file does not compile on purpose: every `scope_from` names
+`:TODO_scope_column`, every `to:` is a comment, and the field list over-reports.
 Its `from:` is the type module each field names today, which after step 3 is
 your new one; point it at the legacy module the rows were written with. Finish
 it into something like this:
@@ -228,7 +228,7 @@ defmodule MyApp.Encryption.CloakMigration do
   use Encryptor.Ecto.Migration, repo: MyApp.Repo
 
   rewrite MyApp.Payments.Card do
-    tenant_from :merchant_id
+    scope_from :merchant_id
 
     field :pan,
       from: MyApp.Cloak.Encrypted.Binary,
@@ -338,7 +338,7 @@ reason, and never a value.
 
 | What you see | What to do |
 |---|---|
-| Exit 1 with `undecryptable` rows | Investigate before writing anything. This is the dry run doing its job. Find the rows by the primary keys in the failure list, decide what they are - a shredded tenant, a corrupt row, a column that was never cloak's - and either fix them or exclude their tenant with `except_tenants:` / `--except-tenant`. Do **not** answer this with `on_error: :continue` in write mode |
+| Exit 1 with `undecryptable` rows | Investigate before writing anything. This is the dry run doing its job. Find the rows by the primary keys in the failure list, decide what they are - a shredded scope, a corrupt row, a column that was never cloak's - and either fix them or exclude their scope with `except_scopes:` / `--except-scope`. Do **not** answer this with `on_error: :continue` in write mode |
 | A non-zero `migratable_unverified` | Every row of a field you declared `source_authenticated: false`. The pass exits on failures, so this alone is still exit 0 - but it will keep saying `migratable_unverified` in every later report, because no authentication tag ever confirmed those rows, and step 6's verification does treat it as not-in-the-target-state. Confirm your `validate:` is the strongest check you can write, then proceed |
 | Exit 2 and a message about `source_authenticated: false` | The pass refuses `mode: :write` for an acknowledged-unauthenticated field with no `validate:`, before it reads a row. A dry run and a verification are unaffected. Declare `validate:`, or narrow the run with `only:` |
 | Exit 2 naming the checkpoint table | The table is not there. Run the generated migration, or run with `checkpoint: :none` / `--no-checkpoint`, where every run is a full scan |
@@ -353,7 +353,7 @@ $ bin/my_app eval '
   {status, report} =
     MyApp.Release.with_encryption(fn ->
       Encryptor.Ecto.Migrator.run(MyApp.Encryption.CloakMigration,
-        mode: :write, except_tenants: ["tnt_offboarded"])
+        mode: :write, except_scopes: ["tnt_offboarded"])
     end)
 
   IO.inspect(report.counts, label: "counts")
@@ -363,7 +363,7 @@ $ bin/my_app eval '
 ```
 
 ```
-$ mix encryptor.ecto.migrate MyApp.Encryption.CloakMigration --mode write --except-tenant tnt_offboarded
+$ mix encryptor.ecto.migrate MyApp.Encryption.CloakMigration --mode write --except-scope tnt_offboarded
 mode: write
 null: 412
 already_target: 1908
@@ -439,7 +439,7 @@ $ echo $?
 **If it differs:** verification is deliberately stricter than the pass. A table
 of readable legacy rows is a green dry run and a **red** verification, because
 "every row is in the target state" is the question the acceptance test has to
-ask. Exit 1 with a non-zero `migratable` means rows were missed - a tenant you
+ask. Exit 1 with a non-zero `migratable` means rows were missed - a scope you
 excluded, a prefix you did not visit, or a field you narrowed away with `only:`.
 Re-run step 5 for them. A verification never halts on a row, so a table with
 unreadable rows gives you a count rather than a report that stops at the first.
@@ -463,7 +463,7 @@ the sibling field in your cloak-era schema.
 | Sibling column | What a dump discloses | What you do |
 |---|---|---|
 | `Cloak.Ecto.SHA256` - unsalted, unkeyed | Every value whose plaintext is guessable, to anyone holding the dump and no key at all | **Drop it. Not optional**, whether or not you adopt an index |
-| `Cloak.Ecto.HMAC` or `Cloak.Ecto.PBKDF2` - keyed, one global key | Nothing without the key; with the key, equality across every tenant and every table sharing that key | Replace it with a declared index, then drop it |
+| `Cloak.Ecto.HMAC` or `Cloak.Ecto.PBKDF2` - keyed, one global key | Nothing without the key; with the key, equality across every scope and every table sharing that key | Replace it with a declared index, then drop it |
 | None | - | Adopt an index or do not, freely |
 
 This is ADR-0004 decision 9. The three are not variations on one disposition,
@@ -491,19 +491,19 @@ index**, and a dump alone tells an attacker nothing about the values in it. What
 it lacks is the domain separation ADR-0003 decision 2 builds into the HKDF
 `info` string. It is derived from one key configured for the deployment, so:
 
-- two tenants storing the same value produce identical bytes, which is exactly
-  the `scope: :global` column of the *Security properties* table - equality
-  structure across the whole table rather than within a tenant;
+- two scopes storing the same value produce identical bytes, which is exactly
+  the `derive: :global` column of the *Security properties* table - equality
+  structure across the whole table rather than within a scope;
 - two columns holding the same value produce identical bytes, so a dump can be
   joined across every table configured with that key - a `signups.email_hash`
   against a `contacts.email_hash` - which a per-column `info` string makes
   structurally impossible;
 - a staging database restored from a production backup keys the same way, since
   there is no per-deployment `:derivation_salt` under the construction;
-- and it does not shred with a tenant's key. Destroy a tenant's vault key
-  material and this column still answers "does this tenant have a row with
+- and it does not shred with a scope's key. Destroy a scope's vault key
+  material and this column still answers "does this scope have a row with
   value X" for anyone holding the legacy key, which is the last row of that
-  table and the reason `scope: :global` has to be written out loud.
+  table and the reason `derive: :global` has to be written out loud.
 
 Replacing it is therefore worth doing even though it is not the emergency the
 unkeyed case is. Lookups keep working through the legacy column while the new
@@ -565,7 +565,7 @@ time:
    ```
 
    The database index is on `(merchant_id, email_index)` rather than on the
-   index column alone, because every lookup is already inside a tenant.
+   index column alone, because every lookup is already inside a scope.
 
    Leave the legacy column in place in this migration. It is still serving
    lookups in the keyed case, and it is still the validator in both.
@@ -598,12 +598,12 @@ time:
    bulk insert, an admin script or a second changeset function that skips
    `put_index/3` produces a row whose lookup silently misses.
 
-3. Backfill the index column, batched and in tenant scope, **after** the
+3. Backfill the index column, batched and under its scope, **after** the
    ciphertext rewrite of step 5 is verified. Two backfills at once make one
    report, and a failure in either stops being attributable to one of them.
 
    The backfill is a decrypt-and-recompute pass over your own rows, so it needs
-   the tenant scope the index derivation reads. There is no way around the
+   the scope the index derivation reads. There is no way around the
    decrypt: the index is computed from plaintext and nothing in the stored
    ciphertext can be transformed into one.
 
@@ -633,7 +633,7 @@ time:
 
    Before you run it, confirm the new column is fully backfilled. This is SQL
    over your own tables, it needs no key, and it is the check that catches a
-   backfill that skipped a tenant:
+   backfill that skipped a scope:
 
    ```sql
    -- rows with a value but no index: must be zero before the drop
@@ -642,7 +642,7 @@ time:
    WHERE "email" IS NOT NULL
      AND "email_index" IS NULL;
 
-   -- and per tenant, which is where a partial backfill actually shows up
+   -- and per scope, which is where a partial backfill actually shows up
    SELECT "merchant_id",
           count(*) FILTER (WHERE "email_index" IS NOT NULL) AS indexed,
           count(*) FILTER (WHERE "email" IS NOT NULL) AS encrypted
@@ -652,8 +652,8 @@ time:
         < count(*) FILTER (WHERE "email" IS NOT NULL);
    ```
 
-   The second query returning no rows is the precondition. A tenant listed
-   there is a tenant whose lookups break the moment the legacy column is gone.
+   The second query returning no rows is the precondition. A scope listed
+   there is a scope whose lookups break the moment the legacy column is gone.
 
    In the unkeyed case there is nothing to preserve and no reason to wait past
    step 6's exit 0: if you are not adopting an index, this migration is the
@@ -675,9 +675,9 @@ Four facts about this column decide when you can do it, rather than how:
   deployment: it is a full reindex, not a rekey.
 - Bumping an index's `:version`, changing its `:normalize`, or changing its
   `:bits` invalidates that column for the same reason. Each is a reindex.
-- Rotating a **tenant's key** requires reindexing that tenant's rows as well.
-  The derivation consults the current key material, so that tenant's index
-  keys change without any declaration changing, and lookups for that tenant
+- Rotating a **scope's key** requires reindexing that scope's rows as well.
+  The derivation consults the current key material, so that scope's index
+  keys change without any declaration changing, and lookups for that scope
   miss until the reindex lands. `Encryptor.Ecto.BlindIndex`'s own
   documentation is the full statement.
 - Turning `:slow` (Argon2id before the HMAC) on or off invalidates that column
@@ -694,8 +694,8 @@ forever. Dropping the column stops the disclosure growing; it does not undo it.
 Whether that means re-taking your backup set, shortening its retention, or
 accepting it, is your call and your retention policy's, not this package's.
 
-The full leakage table - what an attacker learns from a `scope: :tenant` index
-and from a `scope: :global` one, holding a dump, a guess, one tenant's key, or a
+The full leakage table - what an attacker learns from a `derive: :per_scope` index
+and from a `derive: :global` one, holding a dump, a guess, one scope's key, or a
 retained dump after a shred - is `Encryptor.Ecto.BlindIndex`'s *Security
 properties*, at the declaration where a reviewer meets it. The records behind
 this step are [ADR-0004 decision 9](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0004-migration-from-cloak.md) for the
@@ -746,7 +746,7 @@ defmodule MyApp.Encryption.CloakRollback do
   use Encryptor.Ecto.Migration, repo: MyApp.Repo
 
   rewrite MyApp.Payments.Card do
-    tenant_from :merchant_id
+    scope_from :merchant_id
 
     field :pan,
       from: MyApp.Encrypted.Binary,
@@ -792,19 +792,19 @@ SELECT count(*) AS rows,
        count(*) FILTER (WHERE octet_length("pan") = 0) AS empty
 FROM "cards";
 
--- "cards"."pan": rotation progress for one tenant
+-- "cards"."pan": rotation progress for one scope
 SELECT count(*) FILTER (
          WHERE substring("pan" from 1 for 4) = :current_header
        ) AS done,
        count(*) FILTER (WHERE "pan" IS NOT NULL) AS total
 FROM "cards"
-WHERE "merchant_id" = :tenant;
+WHERE "merchant_id" = :scope;
 
 -- ... and the same three queries again for "cards"."notes", and for every
 -- other field of every other rewrite the plan declares.
 ```
 
-Substitute `:tenant` with the tenant you are watching, and `:current_header` with
+Substitute `:scope` with the scope you are watching, and `:current_header` with
 the prefix the format census shows **growing** - that is how you get it without a
 key.
 

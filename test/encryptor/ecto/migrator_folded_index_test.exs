@@ -7,7 +7,7 @@ defmodule Encryptor.Ecto.MigratorFoldedIndexTest do
   decrypted to get it there, so every test writes rows, runs the engine, and
   reads the bytes back. The index a folded pass writes is compared against
   the value `Encryptor.Ecto.BlindIndex.put_index/3` computes for the same
-  plaintext under the same tenant, because "the same function as the
+  plaintext under the same scope, because "the same function as the
   changeset helper" is the claim the fold rests on.
   """
 
@@ -17,7 +17,7 @@ defmodule Encryptor.Ecto.MigratorFoldedIndexTest do
 
   alias Encryptor.Ecto.BlindIndex
   alias Encryptor.Ecto.Migrator
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestEnginePlans
   alias Encryptor.Ecto.TestSchemas.Cardholder
   alias Encryptor.Ecto.TestSources.CountingLegacyType
@@ -38,7 +38,7 @@ defmodule Encryptor.Ecto.MigratorFoldedIndexTest do
 
       assert raw(id, :email_index) == put_index_value(@merchant, @email)
 
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
       assert %Cardholder{email: @email} = TestRepo.get(Cardholder, id)
     end
 
@@ -57,9 +57,9 @@ defmodule Encryptor.Ecto.MigratorFoldedIndexTest do
     end
 
     # Sabotage: made `Encryptor.Ecto.Migrator`'s `index/3` keep the field's
-    # declared `:scope` strategy - the migrator never sets the process scope,
-    # so every row's index raised `MissingTenantError` and the pass halted.
-    test "keys each row's index under that row's own tenant" do
+    # declared `:process` strategy - the migrator never sets the process scope,
+    # so every row's index raised `MissingScopeError` and the pass halted.
+    test "keys each row's index under that row's own scope" do
       mine = insert_cardholder(email: legacy(@email))
       theirs = insert_cardholder(email: legacy(@email), merchant_id: @other_merchant)
 
@@ -122,15 +122,15 @@ defmodule Encryptor.Ecto.MigratorFoldedIndexTest do
   # `LegacyType`'s format: the literal prefix, then the reversed plaintext.
   defp legacy(plaintext), do: "legacy:" <> String.reverse(plaintext)
 
-  defp put_index_value(tenant, email) do
-    Tenant.put(tenant)
+  defp put_index_value(scope, email) do
+    Scope.put(scope)
 
     %Cardholder{}
     |> Ecto.Changeset.cast(%{email: email}, [:email])
     |> BlindIndex.put_index(:email, :email_index)
     |> Ecto.Changeset.fetch_change!(:email_index)
   after
-    Tenant.clear()
+    Scope.clear()
   end
 
   defp insert_cardholder(attrs) do

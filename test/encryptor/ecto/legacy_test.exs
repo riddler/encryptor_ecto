@@ -1,13 +1,13 @@
 defmodule Encryptor.Ecto.LegacyTest do
   use ExUnit.Case, async: true
 
-  import Encryptor.Ecto.TenantScope
+  import Encryptor.Ecto.ScopeSetup
   import Encryptor.Ecto.TestTelemetry, only: [capture_legacy_load: 1]
 
   alias Encryptor.Ecto.Binary
   alias Encryptor.Ecto.DecryptError
   alias Encryptor.Ecto.MissingContextError
-  alias Encryptor.Ecto.MissingTenantError
+  alias Encryptor.Ecto.MissingScopeError
   alias Encryptor.Ecto.SerializationError
   alias Encryptor.Ecto.TestLegacy
   alias Encryptor.Ecto.TestSchemas.Card
@@ -73,7 +73,7 @@ defmodule Encryptor.Ecto.LegacyTest do
 
   describe "the order of the two loads" do
     setup :capture_legacy_load
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: emit_legacy_load/1 called on load_arm/2's primary arm as
     # well, red - which is the observable shape of the primary being routed
@@ -135,11 +135,11 @@ defmodule Encryptor.Ecto.LegacyTest do
   describe "a misconfiguration" do
     setup :capture_legacy_load
 
-    # sabotage: resolve_tenant!/2's {:error, _} arm returning :none instead of
+    # sabotage: resolve_scope!/2's {:error, _} arm returning :none instead of
     # raising, red - the load then falls through to a legacy reader that
     # answers a host configuration bug with a value.
-    test "with no tenant resolved raises rather than reading the legacy bytes" do
-      assert_raise MissingTenantError, fn ->
+    test "with no scope resolved raises rather than reading the legacy bytes" do
+      assert_raise MissingScopeError, fn ->
         TestTypes.RefusingLegacy.load(legacy_bytes(), nil, params(TestTypes.RefusingLegacy))
       end
 
@@ -171,7 +171,7 @@ defmodule Encryptor.Ecto.LegacyTest do
 
   describe "when both loads fail" do
     setup :capture_legacy_load
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: legacy_arm_or_raise!/4's {:error, _} arm raising the legacy
     # reason as the exception's :reason, red.
@@ -250,7 +250,7 @@ defmodule Encryptor.Ecto.LegacyTest do
 
   describe "the legacy_load event" do
     setup :capture_legacy_load
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: emit_legacy_load/1's body replaced by :ok, red.
     test "counts one, and its metadata is exactly the table and the column" do
@@ -276,7 +276,7 @@ defmodule Encryptor.Ecto.LegacyTest do
     # sabotage: emit_legacy_load/1's metadata gaining a third key, red. The
     # set is closed by ADR-0004 decision 5 and widening it is a security
     # review, so the assertion is on the whole map rather than on two members.
-    test "carries no value, no bytes, no reason and no tenant" do
+    test "carries no value, no bytes, no reason and no scope" do
       assert {:ok, @pan} =
                TestTypes.PanLegacy.load(legacy_bytes(), nil, params(TestTypes.PanLegacy))
 
@@ -289,7 +289,7 @@ defmodule Encryptor.Ecto.LegacyTest do
 
   describe "the types built over Binary" do
     setup :capture_legacy_load
-    scope_tenant "merchant_7f3"
+    setup_scope "merchant_7f3"
 
     # sabotage: legacy_arm_or_raise!/4's %{legacy: nil} clause matching every
     # params, red - String delegates load wholesale, so the arm it inherits is

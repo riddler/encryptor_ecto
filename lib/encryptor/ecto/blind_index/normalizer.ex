@@ -138,7 +138,7 @@ defmodule Encryptor.Ecto.BlindIndex.Normalizer do
       iex> Encryptor.Ecto.BlindIndex.Normalizer.normalize!(
       ...>   {String, :to_atom}, "bob", table: "signups", column: "email",
       ...>   index_name: "email_index")
-      ** (Encryptor.Ecto.BlindIndex.NormalizationError) a blind index value could not be normalized (table: "signups", column: "email", context keys: [], tenant: nil, reason: {:returned, :not_a_binary}, index name: "email_index", normalizer: {String, :to_atom})
+      ** (Encryptor.Ecto.BlindIndex.NormalizationError) a blind index value could not be normalized (table: "signups", column: "email", context keys: [], scope: nil, reason: {:returned, :not_a_binary}, index name: "email_index", normalizer: {String, :to_atom})
   """
   @spec normalize!(t(), binary(), context()) :: binary()
   def normalize!(normalizer, value, context \\ [])
@@ -200,7 +200,7 @@ defmodule Encryptor.Ecto.BlindIndex.Normalizer do
       table: Keyword.get(context, :table),
       column: Keyword.get(context, :column),
       context_keys: [],
-      tenant: nil,
+      scope: nil,
       reason: reason,
       index_name: Keyword.get(context, :index_name),
       normalizer: normalizer

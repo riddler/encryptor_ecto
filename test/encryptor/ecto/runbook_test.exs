@@ -22,7 +22,7 @@ defmodule Encryptor.Ecto.RunbookTest do
 
   alias Encryptor.Ecto.Migrator
   alias Encryptor.Ecto.Migrator.Census
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestRunbook
   alias Encryptor.Ecto.TestRunbook.FinalIntegration
   alias Encryptor.Ecto.TestRunbook.Integration
@@ -58,7 +58,7 @@ defmodule Encryptor.Ecto.RunbookTest do
       Application.delete_env(:encryptor_ecto, TestRunbook.Keys)
     end)
 
-    Tenant.clear()
+    Scope.clear()
 
     # The release-task step starts its own vaults, the way the guide tells a
     # host to; every other step runs in an application that started them.
@@ -96,7 +96,7 @@ defmodule Encryptor.Ecto.RunbookTest do
     test "every legacy row still reads, and each legacy read is counted per column" do
       id = seed(@north, "cs-1", "at-1", "rt-1")
 
-      Tenant.put(@north)
+      Scope.put(@north)
 
       assert %Integration{client_secret: "cs-1", access_token: "at-1", refresh_token: "rt-1"} =
                TestRepo.get(Integration, id)
@@ -115,7 +115,7 @@ defmodule Encryptor.Ecto.RunbookTest do
     test "a legacy value written back is written in the new format" do
       id = seed(@north, "cs-1", "at-1", "rt-1")
 
-      Tenant.put(@north)
+      Scope.put(@north)
 
       integration = TestRepo.get(Integration, id)
       _updated = integration |> Ecto.Changeset.change(refresh_token: "rt-2") |> TestRepo.update!()
@@ -129,12 +129,12 @@ defmodule Encryptor.Ecto.RunbookTest do
                )
     end
 
-    # Sabotage: made `load_arm/2` answer a missing tenant with a default one -
+    # Sabotage: made `load_arm/2` answer a missing scope with a default one -
     # the legacy reader answered and no exception was raised.
-    test "a missing tenant is loud, and the legacy reader is not asked" do
+    test "a missing scope is loud, and the legacy reader is not asked" do
       id = seed(@north, "cs-1", "at-1", "rt-1")
 
-      assert_raise Encryptor.Ecto.MissingTenantError, fn -> TestRepo.get(Integration, id) end
+      assert_raise Encryptor.Ecto.MissingScopeError, fn -> TestRepo.get(Integration, id) end
       refute_received {:telemetry, [:encryptor_ecto, :legacy_load], _measurements, _metadata}
     end
   end
@@ -218,15 +218,15 @@ defmodule Encryptor.Ecto.RunbookTest do
   end
 
   describe "step 5: the write pass" do
-    # Sabotage: made `filter_tenants/2` ignore the tenant filters - the
+    # Sabotage: made `filter_scopes/2` ignore the scope filters - the
     # excluded workspace's first row halted the pass.
-    test "rewrites all three columns under each row's own workspace, excluding a tenant" do
+    test "rewrites all three columns under each row's own workspace, excluding a scope" do
       north = seed(@north, "cs-1", "at-1", "rt-1")
       south = seed(@south, "cs-2", "at-2", "rt-2")
       orphan = seed(@unprovisioned, "cs-9", "at-9", "rt-9")
 
       assert {:ok, report} =
-               Migrator.run(Migration, mode: :write, except_tenants: [@unprovisioned])
+               Migrator.run(Migration, mode: :write, except_scopes: [@unprovisioned])
 
       assert report.counts.migratable == 6
       assert report.failure_count == 0
@@ -237,7 +237,7 @@ defmodule Encryptor.Ecto.RunbookTest do
 
       for column <- @columns, do: assert(<<@legacy_header, _rest::binary>> = raw(orphan, column))
 
-      Tenant.put(@south)
+      Scope.put(@south)
 
       assert %FinalIntegration{client_secret: "cs-2", access_token: "at-2", refresh_token: "rt-2"} =
                TestRepo.get(FinalIntegration, south)
@@ -259,7 +259,7 @@ defmodule Encryptor.Ecto.RunbookTest do
       assert checkpoint_cursor(:client_secret) == Integer.to_string(first)
 
       # Resolve the row - here, by writing it again through the application.
-      Tenant.put(@north)
+      Scope.put(@north)
 
       _fixed =
         from(i in FinalIntegration, where: i.id == ^bad, select: struct(i, [:id, :workspace_id]))
@@ -267,7 +267,7 @@ defmodule Encryptor.Ecto.RunbookTest do
         |> Ecto.Changeset.change(client_secret: "cs-2")
         |> TestRepo.update!()
 
-      Tenant.clear()
+      Scope.clear()
 
       assert {:ok, resumed} = Migrator.run(Migration, mode: :write, batch_size: 1, resume: true)
       assert resumed.failure_count == 0
@@ -321,21 +321,21 @@ defmodule Encryptor.Ecto.RunbookTest do
   describe "step 7: the unkeyed lookup column replaced" do
     # Sabotage: made `put_index/3` return the changeset untouched - the
     # backfill wrote no index and the unindexed count stayed at two.
-    test "backfilled in tenant scope, the keyed index finds every row, and the hash can go" do
+    test "backfilled under its scope, the keyed index finds every row, and the hash can go" do
       north = seed(@north, "cs-1", "at-shared", "rt-1")
       south = seed(@south, "cs-2", "at-shared", "rt-2")
       assert {:ok, _written} = Migrator.run(Migration, mode: :write)
 
       # Before the backfill both of the guide's checks name the gap.
       assert unindexed() == 2
-      assert per_tenant_gaps() |> Enum.sort() == [@north, @south]
+      assert per_scope_gaps() |> Enum.sort() == [@north, @south]
 
       backfill(@north)
       backfill(@south)
 
       # A row written from step 7's changeset carries both columns, which is
       # what keeps the switchover gapless until the drop.
-      Tenant.put(@north)
+      Scope.put(@north)
 
       written =
         %Integration{}
@@ -343,10 +343,10 @@ defmodule Encryptor.Ecto.RunbookTest do
         |> TestRepo.insert!()
 
       assert is_binary(written.access_token_hash) and is_binary(written.access_token_index)
-      Tenant.clear()
+      Scope.clear()
 
       assert unindexed() == 0
-      assert per_tenant_gaps() == []
+      assert per_scope_gaps() == []
 
       # The unkeyed column equates the two workspaces' rows with no key at all;
       # the keyed index does not.
@@ -355,7 +355,7 @@ defmodule Encryptor.Ecto.RunbookTest do
 
       TestRepo.query!(~s(ALTER TABLE "integrations" DROP COLUMN "access_token_hash"))
 
-      Tenant.put(@south)
+      Scope.put(@south)
 
       assert %FinalIntegration{id: ^south} =
                FinalIntegration |> where_eq(:access_token, "at-shared") |> TestRepo.one()
@@ -370,7 +370,7 @@ defmodule Encryptor.Ecto.RunbookTest do
       assert {:ok, _written} = Migrator.run(Migration, mode: :write)
       missed = seed(@north, "cs-2", "at-2", "rt-2")
 
-      Tenant.put(@north)
+      Scope.put(@north)
 
       assert %FinalIntegration{client_secret: "cs-1"} = TestRepo.get(FinalIntegration, migrated)
       assert_raise Encryptor.Ecto.DecryptError, fn -> TestRepo.get(FinalIntegration, missed) end
@@ -408,7 +408,7 @@ defmodule Encryptor.Ecto.RunbookTest do
     test "the format census separates the two formats on four bytes" do
       _north = seed(@north, "cs-1", "at-1", "rt-1")
       _south = seed(@south, "cs-2", "at-2", "rt-2")
-      assert {:ok, _written} = Migrator.run(Migration, mode: :write, only_tenants: [@north])
+      assert {:ok, _written} = Migrator.run(Migration, mode: :write, only_scopes: [@north])
 
       [format | _rest] = Census.queries(Migration)
       assert format.kind == :format
@@ -431,7 +431,7 @@ defmodule Encryptor.Ecto.RunbookTest do
       for column <- @columns do
         assert script =~ ~s("integrations"."#{column}": format census, grouped on 4 bytes)
         assert script =~ ~s("integrations"."#{column}": nothing became NULL or empty)
-        assert script =~ ~s("integrations"."#{column}": rotation progress for one tenant)
+        assert script =~ ~s("integrations"."#{column}": rotation progress for one scope)
       end
     end
   end
@@ -547,7 +547,7 @@ defmodule Encryptor.Ecto.RunbookTest do
   # workspace's scope. `put_index/3` computes from a change, so the loaded
   # value is put back as one.
   defp backfill(workspace) do
-    Tenant.wrap(workspace, fn ->
+    Scope.wrap(workspace, fn ->
       from(i in Integration, where: i.workspace_id == ^workspace)
       |> TestRepo.all()
       |> Enum.each(fn integration ->
@@ -573,7 +573,7 @@ defmodule Encryptor.Ecto.RunbookTest do
     count
   end
 
-  defp per_tenant_gaps do
+  defp per_scope_gaps do
     %{rows: rows} =
       TestRepo.query!("""
       SELECT "workspace_id",

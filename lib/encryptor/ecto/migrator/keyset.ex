@@ -14,7 +14,7 @@ defmodule Encryptor.Ecto.Migrator.Keyset do
   with params it constructs. A query built on the schema module would run
   every encrypted field through its own `load/3` on the way out - which is to
   say it would decrypt the column the migrator is here to re-encrypt, under
-  whatever tenant happened to be in scope, and raise before the pass ever
+  whatever scope happened to be set, and raise before the pass ever
   reached its own probe. So the queries here name the table's **source**
   string, and what comes back is what the adapter returned.
 
@@ -83,9 +83,9 @@ defmodule Encryptor.Ecto.Migrator.Keyset do
   @doc """
   One batch of rows, as `[primary_key, source_value, target_value]` lists.
 
-  `tenant_column` is the column a `tenant_from` rewrite reads the tenant off,
-  and `nil` for a rewrite whose tenant is `:none` or a resolver module; where
-  it is given, the tenant is appended to each row.
+  `scope_column` is the column a `scope_from` rewrite reads the scope off,
+  and `nil` for a rewrite whose scope is `:none` or a resolver module; where
+  it is given, the scope is appended to each row.
 
   `source_column` and `target_column` are the same column for an ordinary
   rewrite and different ones for the backfill leg of an adoption migration
@@ -93,13 +93,13 @@ defmodule Encryptor.Ecto.Migrator.Keyset do
   """
   @spec batch_query(String.t(), key(), atom(), atom(), atom() | nil, term(), pos_integer()) ::
           Ecto.Query.t()
-  def batch_query(source, key, source_column, target_column, tenant_column, cursor, size) do
+  def batch_query(source, key, source_column, target_column, scope_column, cursor, size) do
     {column, type} = key
 
     source
     |> base_query(column, size)
     |> after_cursor(column, type, cursor)
-    |> select_row(column, source_column, target_column, tenant_column)
+    |> select_row(column, source_column, target_column, scope_column)
   end
 
   @doc """
@@ -124,9 +124,9 @@ defmodule Encryptor.Ecto.Migrator.Keyset do
   """
   @spec sample_query(String.t(), key(), atom(), atom(), atom() | nil, pos_integer()) ::
           Ecto.Query.t()
-  def sample_query(source, {column, _type}, source_column, target_column, tenant_column, size) do
+  def sample_query(source, {column, _type}, source_column, target_column, scope_column, size) do
     query = from(r in source, order_by: fragment("random()"), limit: ^size)
-    select_row(query, column, source_column, target_column, tenant_column)
+    select_row(query, column, source_column, target_column, scope_column)
   end
 
   @doc """
@@ -155,18 +155,18 @@ defmodule Encryptor.Ecto.Migrator.Keyset do
   end
 
   @doc """
-  Restricts a query to the tenants a run named (ADR-0002 decision 11).
+  Restricts a query to the scopes a run named (ADR-0002 decision 11).
 
-  The filter is a `where` on the tenant column rather than a decision made per
-  row: a crypto-shredded tenant's rows are permanently undecryptable by
+  The filter is a `where` on the scope column rather than a decision made per
+  row: a crypto-shredded scope's rows are permanently undecryptable by
   design, and the point of the filter is that the pass never visits them and
   still exits zero.
   """
-  @spec tenant_filter(Ecto.Query.t(), atom(), [String.t()] | nil, [String.t()]) :: Ecto.Query.t()
-  def tenant_filter(query, column, only, except) do
+  @spec scope_filter(Ecto.Query.t(), atom(), [String.t()] | nil, [String.t()]) :: Ecto.Query.t()
+  def scope_filter(query, column, only, except) do
     query
-    |> only_tenants(column, only)
-    |> except_tenants(column, except)
+    |> only_scopes(column, only)
+    |> except_scopes(column, except)
   end
 
   @spec single_column_key(module(), atom()) :: {:ok, key()} | {:error, String.t()}
@@ -225,28 +225,28 @@ defmodule Encryptor.Ecto.Migrator.Keyset do
     )
   end
 
-  defp select_row(query, key_column, source_column, target_column, tenant_column) do
+  defp select_row(query, key_column, source_column, target_column, scope_column) do
     from(r in query,
       select: [
         field(r, ^key_column),
         field(r, ^source_column),
         field(r, ^target_column),
-        field(r, ^tenant_column)
+        field(r, ^scope_column)
       ]
     )
   end
 
-  @spec only_tenants(Ecto.Query.t(), atom(), [String.t()] | nil) :: Ecto.Query.t()
-  defp only_tenants(query, _column, nil), do: query
+  @spec only_scopes(Ecto.Query.t(), atom(), [String.t()] | nil) :: Ecto.Query.t()
+  defp only_scopes(query, _column, nil), do: query
 
-  defp only_tenants(query, column, tenants),
-    do: from(r in query, where: field(r, ^column) in ^tenants)
+  defp only_scopes(query, column, scopes),
+    do: from(r in query, where: field(r, ^column) in ^scopes)
 
-  @spec except_tenants(Ecto.Query.t(), atom(), [String.t()]) :: Ecto.Query.t()
-  defp except_tenants(query, _column, []), do: query
+  @spec except_scopes(Ecto.Query.t(), atom(), [String.t()]) :: Ecto.Query.t()
+  defp except_scopes(query, _column, []), do: query
 
-  defp except_tenants(query, column, tenants),
-    do: from(r in query, where: field(r, ^column) not in ^tenants)
+  defp except_scopes(query, column, scopes),
+    do: from(r in query, where: field(r, ^column) not in ^scopes)
 
   defp no_primary_key_message(schema) do
     "#{inspect(schema)} declares no primary key, so the migrator has nothing " <>

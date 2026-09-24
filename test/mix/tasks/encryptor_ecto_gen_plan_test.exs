@@ -7,7 +7,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.PlanTest do
   a field list that over-reports - and the assertions below are mostly about
   keeping them. A test suite is the obvious place for somebody to "fix" one of
   them, so each is asserted positively, with the reason attached: guessing the
-  tenant column re-encrypts every row under one tenant's key, and a skeleton
+  scope column re-encrypts every row under one scope's key, and a skeleton
   that compiles is a skeleton somebody runs.
 
   The fixture schemas live in this file rather than in `test/support/`. They
@@ -173,16 +173,16 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.PlanTest do
 
   # -- the three deliberate non-features ------------------------------------
 
-  # Sabotage: emitted `tenant_from :merchant_id` by picking the first column
+  # Sabotage: emitted `scope_from :merchant_id` by picking the first column
   # whose name ends in `_id`. The plan compiled, `mix encryptor.ecto.migrate`
-  # ran, and every row of a table whose tenant is not `merchant_id` was
-  # rewritten under one tenant's key - the exact failure ADR-0004 decision 7
+  # ran, and every row of a table whose scope is not `merchant_id` was
+  # rewritten under one scope's key - the exact failure ADR-0004 decision 7
   # refuses to make reachable.
-  test "it emits a tenant column that does not exist, so the plan will not compile" do
+  test "it emits a scope column that does not exist, so the plan will not compile" do
     source = Plan.source(MyApp.Encryption.Migration, MyApp.Repo, Plan.candidates(@schemas))
 
-    assert source =~ "tenant_from :TODO_tenant_column"
-    refute source =~ "tenant_from :merchant_id"
+    assert source =~ "scope_from :TODO_scope_column"
+    refute source =~ "scope_from :merchant_id"
     assert source =~ "THIS FILE DOES NOT COMPILE YET"
   end
 
@@ -221,9 +221,9 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.PlanTest do
   end
 
   # The promise of decision 7 end to end: the file parses, reaches the DSL, and
-  # is stopped there by the tenant column rather than by a syntax error - a
+  # is stopped there by the scope column rather than by a syntax error - a
   # skeleton that failed to parse would say nothing about which fact is missing.
-  test "the DSL rejects the generated tenant column, naming the schema" do
+  test "the DSL rejects the generated scope column, naming the schema" do
     source =
       Plan.source(
         Encryptor.Ecto.GenPlanSkeleton,
@@ -236,8 +236,8 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.PlanTest do
     error = assert_raise CompileError, fn -> Code.compile_string(source) end
     message = Exception.message(error)
 
-    assert message =~ "TODO_tenant_column"
-    assert message =~ "tenant_from"
+    assert message =~ "TODO_scope_column"
+    assert message =~ "scope_from"
   end
 
   # -- the task ------------------------------------------------------------
@@ -252,7 +252,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.PlanTest do
     assert source =~ "use Encryptor.Ecto.Migration, repo: MyApp.Repo"
     assert source =~ "rewrite Encryptor.Ecto.TestSchemas.Card do"
     assert source =~ "field :pan, from: Encryptor.Ecto.TestTypes.Pan"
-    assert source =~ "tenant_from :TODO_tenant_column"
+    assert source =~ "scope_from :TODO_scope_column"
   end
 
   test "--repo defaults to the application's single configured :ecto_repos", %{out: out} do
@@ -280,8 +280,8 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.PlanTest do
   end
 
   # Sabotage: dropped `unwritten/1`, so a second run overwrote the first. The
-  # tenant columns and `to:` types a human had worked out were replaced with
-  # `:TODO_tenant_column` again, silently, with the exit code still 0.
+  # scope columns and `to:` types a human had worked out were replaced with
+  # `:TODO_scope_column` again, silently, with the exit code still 0.
   test "refuses to overwrite a plan that already exists", %{out: out} do
     assert {0, _first} = generate(["--output", out])
     finished = File.read!(out) <> "\n# finished by hand\n"

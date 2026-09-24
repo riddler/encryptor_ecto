@@ -6,7 +6,7 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
   The construction itself has its golden vectors in
   `Encryptor.Ecto.BlindIndex.DerivationTest`; what is asserted here is that
   the value is that key's HMAC over the *normalized* plaintext, and that the
-  operation the tenant strategy is asked with is the caller's.
+  operation the scope strategy is asked with is the caller's.
   """
 
   use ExUnit.Case, async: true
@@ -17,7 +17,7 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
   alias Encryptor.Ecto.BlindIndex.Derivation
   alias Encryptor.Ecto.BlindIndex.DerivationError
   alias Encryptor.Ecto.BlindIndex.Value
-  alias Encryptor.Ecto.Tenant
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestSchemas.Capture
   alias Encryptor.Ecto.TestSchemas.Customer
   alias Encryptor.Ecto.TestSchemas.Enrollment
@@ -29,7 +29,7 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
   @merchant "merchant_7f3"
 
   setup do
-    on_exit(&Tenant.clear/0)
+    on_exit(&Scope.clear/0)
     :ok
   end
 
@@ -38,13 +38,13 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # red - the value becomes the unkeyed folk fingerprint ADR-0003's context
     # exists to argue against, and a dump with no keys at all discloses it.
     test "the value is HMAC-SHA256 of the normalized plaintext under the index key" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       declaration = Declaration.fetch!(Customer, :email, :email_index)
       derivation = Declaration.derivation!(declaration)
 
       {:ok, index_key} =
-        Derivation.derive(TestVaults.Merchant, derivation, {:tenant, @merchant})
+        Derivation.derive(TestVaults.Merchant, derivation, {:scope, @merchant})
 
       assert Value.compute!(declaration, " Bob@Example.COM ", :load) ==
                :crypto.mac(:hmac, :sha256, index_key, "bob@example.com")
@@ -54,7 +54,7 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # nothing about the output width, so this arm is what says a default
     # declaration stores the whole 32 bytes decision 1 stores.
     test "a bits: 256 declaration stores the full 32 bytes" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       full = Declaration.fetch!(Customer, :email, :email_index)
 
@@ -81,7 +81,7 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # This is the vector the operator's crypto read checks: 8 bytes, and
     # *which* 8 - the leading ones, RFC 2104 section 5's "leftmost t bits".
     test "a bits: 64 declaration stores the leading 8 bytes of the HMAC" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       narrow = Declaration.fetch!(Customer, :email, :email_short_index)
       value = Value.compute!(narrow, "bob@example.com", :load)
@@ -95,13 +95,13 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # red here and green on every width assertion, which is exactly why the
     # vector above and this prefix relation are both asserted.
     test "the stored bytes are a prefix of the full-width HMAC under the same key" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       narrow = Declaration.fetch!(Customer, :email, :email_short_index)
       derivation = Declaration.derivation!(narrow)
 
       {:ok, index_key} =
-        Derivation.derive(TestVaults.Merchant, derivation, {:tenant, @merchant})
+        Derivation.derive(TestVaults.Merchant, derivation, {:scope, @merchant})
 
       full_mac = :crypto.mac(:hmac, :sha256, index_key, "bob@example.com")
 
@@ -116,14 +116,14 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # collision knob on the stored value, and a shortened HMAC key is a
     # weakened HMAC rather than a blurred column.
     test "the index key is the full 32 bytes at every width" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       for column <- [:email_index, :email_short_index] do
         {:ok, key} =
           Customer
           |> Declaration.fetch!(:email, column)
           |> Declaration.derivation!()
-          |> then(&Derivation.derive(TestVaults.Merchant, &1, {:tenant, @merchant}))
+          |> then(&Derivation.derive(TestVaults.Merchant, &1, {:scope, @merchant}))
 
         assert byte_size(key) == 32
       end
@@ -147,7 +147,7 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # and the column holds bytes, and eight times the intended width is a
     # `binary_part/3` that raises rather than a value that is merely wrong.
     test "every declared width stores bits / 8 bytes" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       widths =
         for declaration <- Declaration.list(Variant),
@@ -167,11 +167,11 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # parameters are the vault's, and the HMAC is taken over the 32 bytes
     # Argon2id returns rather than over the normalized value.
     test "the value is the HMAC over slow_hash(normalized, index_salt, params)" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       declaration = Declaration.fetch!(Customer, :phone, :phone_index)
       derivation = Declaration.derivation!(declaration)
-      selector = {:tenant, @merchant}
+      selector = {:scope, @merchant}
 
       {:ok, index_key} = Derivation.derive(TestVaults.Merchant, derivation, selector)
       {:ok, index_salt} = Derivation.derive_salt(TestVaults.Merchant, derivation, selector)
@@ -189,13 +189,13 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # the one invalidation a host cannot avoid by changing nothing, and this
     # is the assertion that it is genuinely invalidated.
     test "a slow index no longer stores the plain-HMAC bytes" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       declaration = Declaration.fetch!(Customer, :phone, :phone_index)
       derivation = Declaration.derivation!(declaration)
 
       {:ok, index_key} =
-        Derivation.derive(TestVaults.Merchant, derivation, {:tenant, @merchant})
+        Derivation.derive(TestVaults.Merchant, derivation, {:scope, @merchant})
 
       refute Value.compute!(declaration, "+1 (555) 0100", :load) ==
                :crypto.mac(:hmac, :sha256, index_key, "15550100")
@@ -205,7 +205,7 @@ defmodule Encryptor.Ecto.BlindIndex.ValueTest do
     # Decision 6's own wording puts Argon2id "before the HMAC and over the
     # normalized value", and normalization is what makes an index an index.
     test "the slow hash is taken over the normalized value, so the normalizer still holds" do
-      Tenant.put(@merchant)
+      Scope.put(@merchant)
 
       declaration = Declaration.fetch!(Customer, :phone, :phone_index)
 

@@ -7,7 +7,7 @@ defmodule Encryptor.Ecto.Declarations do
   declaration time, and every message it writes is authenticated under that
   pair. Two fields that share one declared pair are therefore *mutually
   substitutable*: bytes written by one decrypt cleanly when loaded by the
-  other, under the same tenant key. That is exactly the property the
+  other, under the same scope key. That is exactly the property the
   encryption context exists to deny, and nothing about the declarations
   themselves makes the overlap visible - the two modules need never mention
   each other.
@@ -275,7 +275,7 @@ defmodule Encryptor.Ecto.Declarations do
 
     Fields sharing a declared table and column are mutually substitutable: \
     bytes written by one decrypt cleanly when loaded by the other, under the \
-    same tenant key, which is the property the encryption context exists to \
+    same scope key, which is the property the encryption context exists to \
     deny (ADR-0001 decision 4).
 
     Give each field a declared pair of its own with the :table and :column \

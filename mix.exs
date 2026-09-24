@@ -97,7 +97,7 @@ defmodule Encryptor.Ecto.MixProject do
       # any pre-1.0 releases, so a range here would let a host's deps.update
       # change what stored rows mean; the pin widens when the vault's
       # guarantees do.
-      {:encryptor, "== 0.4.1"},
+      {:encryptor, "== 0.5.0"},
 
       # The serializer `Encryptor.Ecto.Map` defaults to (ADR-0001 decision 8).
       # A direct dependency rather than a transitive one: the vault happens to
