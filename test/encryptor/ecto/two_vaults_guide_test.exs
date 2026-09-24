@@ -21,6 +21,7 @@ defmodule Encryptor.Ecto.TwoVaultsGuideTest do
   alias Encryptor.Ecto.DecryptError
   alias Encryptor.Ecto.EncryptError
   alias Encryptor.Ecto.KeyStore
+  alias Encryptor.Ecto.KeyStore.Shred
   alias Encryptor.Ecto.MissingScopeError
   alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestTwoVaults.Account
@@ -197,10 +198,11 @@ defmodule Encryptor.Ecto.TwoVaultsGuideTest do
   end
 
   describe "step 6: shred one agreement" do
-    # Sabotage: made `Keys.shred_agreement/1` delete from the default table;
-    # the deleted-count assertion went red. Removing the vault restart below
-    # left this test green: the answers after the delete do not depend on
-    # the drain here, so this test does not pin the cache's behaviour.
+    # Sabotage: made `Keys.shred_agreement/2` shred through the customer
+    # vault; the record assertion went red on `{:error, {:unknown_key, _}}`.
+    # Removing the vault restart below left this test green: after a
+    # whole-scope shred the answers do not depend on the drain, so this test
+    # does not pin the cache's behaviour.
     test "deleting the agreement's key rows ends that agreement and nothing else" do
       {:ok, _loan} = record(@agreement, "reader@example.com")
       {:ok, _loan} = record(@other_agreement, "other@example.com")
@@ -212,11 +214,13 @@ defmodule Encryptor.Ecto.TwoVaultsGuideTest do
 
       assert [_loan] = Loans.list(@agreement)
 
-      assert {:ok, 1} = Keys.shred_agreement(@agreement)
+      assert {:ok, %Shred{procedure: :scope, versions: [1]}} =
+               Keys.shred_agreement(@agreement, drain: :skip)
+
       assert [] = key_versions(Keys.agreement_table(), ref(@agreement))
 
       # The runbook's cache drain (encryptor ADR-0005, P3 step 3), done the
-      # way the guide offers: restart the vault.
+      # way the guide offers beside the default wait: restart the vault.
       :ok = stop_supervised(AgreementVault)
       start_supervised!(AgreementVault)
 

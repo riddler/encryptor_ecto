@@ -30,8 +30,6 @@ defmodule Encryptor.Ecto.TestTwoVaults.Keys do
   either key table, and the agreement shred.
   """
 
-  import Ecto.Query, only: [from: 2]
-
   alias Encryptor.Ecto.KeyStore
   alias Encryptor.Ecto.TestRepo, as: Repo
   alias Encryptor.Envelope
@@ -78,13 +76,12 @@ defmodule Encryptor.Ecto.TestTwoVaults.Keys do
     end
   end
 
-  def shred_agreement(agreement_id) do
-    {:ok, ref} = Envelope.scope_ref(reference_subkey(), agreement_id)
-
-    {count, _rows} =
-      Repo.delete_all(from(k in @agreement_table, where: k.tenant_ref == ^ref))
-
-    {:ok, count}
+  def shred_agreement(agreement_id, opts \\ []) do
+    KeyStore.shred(
+      Encryptor.Ecto.TestTwoVaults.AgreementVault,
+      agreement_id,
+      Keyword.put(opts, :version, :all)
+    )
   end
 end
 
