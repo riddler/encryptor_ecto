@@ -26,7 +26,7 @@ wraps for the Ecto layer.
 
 | Situation | Rule |
 |---|---|
-| A decision is recorded in both trackers and they disagree | The repository whose files change owns the decision. The Ecto types, the schema conventions, the migration and backfill story and the blind index are this repo's call; the vault surface, the key-provider behaviour, the envelope and key-derivation scheme, the encryption-context convention, the rotation model, and re-wrap and crypto-shred are encryptor's. ADR-0002 decision 9 draws the seam: re-wrap touches the key store, the key store is the vault's, and this package's task list contains no verb that operates on a key |
+| A decision is recorded in both trackers and they disagree | The repository whose files change owns the decision. The Ecto types, the schema conventions, the migration and backfill story and the blind index are this repo's call; the vault surface, the key-provider behaviour, the envelope and key-derivation scheme, the encryption-context convention, the rotation model, key creation, re-wrap and the crypto-shred procedures are encryptor's. The row delete a crypto-shred ends in is this repo's: `Encryptor.Ecto.KeyStore.shred/3`, because encryptor's ADR-0005 decision 1 gives the shred's walk to the key store's package (ADR-0007 decision 6); destroying a wrapping key held in a KMS stays the host's own call. ADR-0002 decision 9 draws the seam, as ADR-0007 decision 6 qualifies it: key creation (`Encryptor.Envelope.provision/3`) and re-wrap (`Encryptor.Envelope.rewrap/2`) stay in the vault, and this package's task list contains no verb that operates on a key |
 | A bead pairs with one in the other repo | Both halves carry `mirrors: <id>` as the first line of the description |
 | You are about to schedule, claim, plan against, or cite the status of a mirrored bead | Re-read the other tracker first and write a new dated note above the old one, then act |
 | A `mirrors:` line names an id that no longer resolves | Broken immediately, not stale. Fix it with one `bd update` the moment you notice |
@@ -108,7 +108,7 @@ which key a given record's data belongs to, and how that key rotates. What it
 does not do is put any of that behind a schema field. Hand-rolling that glue is
 where application-level encryption usually goes wrong - the cast, load, and
 dump arms disagree about `nil`, the ciphertext lands in a column nobody
-remembered to widen, and the tenant a value belongs to gets resolved a slightly
+remembered to widen, and the scope a value belongs to gets resolved a slightly
 different way at every call site. This package is that glue:
 
 - **Encrypted field types.** An encrypted field is a type module - an
@@ -127,12 +127,12 @@ different way at every call site. This package is that glue:
   decision 8). The stored bytes are the vault's format, stored verbatim -
   this layer adds no envelope, no version prefix and no magic bytes, and has
   no opinion on ciphertext size (ADR-0001 decision 11).
-- **Tenant context, resolved once.** Which tenant a value belongs to is
+- **Scope context, resolved once.** Which scope a value belongs to is
   resolved by a declared strategy the type reads, rather than being threaded
   through every changeset by hand.
 - **Blind indexes.** A keyed, equality-only fingerprint in a second column
   beside an encrypted one, so equality on plaintext becomes equality on
-  fingerprint. Per-tenant by default, and equality only - no ordering, no
+  fingerprint. Per-scope by default, and equality only - no ordering, no
   prefix search (ADR-0003).
 - **A key store, because the vault has none.** The vault owns the six fields
   of a wrapped key and nothing about where they live (encryptor ADR-0003
