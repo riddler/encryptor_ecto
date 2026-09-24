@@ -973,7 +973,7 @@ Provenance: campaign RF048.
 
 ## Note (2026-09-24): Q1 is answered - a blind index may be folded into the rewrite, per field
 
-Status: proposed (2026-09-24).
+Status: accepted (2026-09-24).
 
 Q1 asked whether the migrator should backfill blind indexes in the same pass
 as the ciphertext rewrite, and deferred the answer until both engines
@@ -1038,3 +1038,44 @@ calling the helper's function rather than the helper.
 Decision 9's text, its runbook table and the worked example are unchanged:
 the default is still two passes, and step 7 is still how a host that does
 not fold adopts an index. No status word above flips.
+
+## Note (2026-09-24): the operator accepted the Note on Q1
+
+The Status line of the Note above, "Q1 is answered - a blind index may be
+folded into the rewrite, per field", now reads `accepted (2026-09-24)`. The
+record's own Status line and its index row, `accepted (2026-08-27, with
+amendments)`, do not change. That Note's closing sentence, "No status word
+above flips.", was true of it and stays true: the one status word that flips
+is the Note's own, and it flips here.
+
+Every claim the Note makes was re-verified immediately before the flip against
+this package's main at `cf4fd54`, the commit tagged `v0.6.0` and published as
+`encryptor_ecto` 0.6.0 on Hex, which ships the fold:
+
+- A plan field takes `index:`, refused at compile when the schema declares no
+  such blind index (`Encryptor.Ecto.Migration`'s `validate_index!/4`), and
+  `field_spec/0` carries `index: atom() | nil` (`Encryptor.Ecto.Migration`,
+  `@type field_spec`).
+- `Encryptor.Ecto.BlindIndex.Value.compute!/3` delegates to `compute!/4`, and
+  `Encryptor.Ecto.BlindIndex.put_index/3` computes through `compute!/3` with
+  `:dump`; the folded value is `compute!/4` with `:dump` over the same
+  declaration (`Encryptor.Ecto.Migrator.Pass`'s `index_set/2`).
+- The value and the ciphertext go in one `update_all` `set`
+  (`Encryptor.Ecto.Migrator.Pass`'s `migrate/6` and `swap/5`); a failure is
+  `{:blind_index, column, {:raised, module}}` (`index_set/2`); a dry run
+  computes and discards (`swap/5`'s `:dry_run` clause); a verify pass stops at
+  the source load (`migrate/6`'s `:verify` clause).
+- The suite's tests "is written by the rewrite pass alone, with put_index/3's
+  value" and "costs one decrypt per row" are in
+  `test/encryptor/ecto/migrator_folded_index_test.exs`.
+
+One spelling in the Note was overtaken by a later record on main. The Note
+says the migrator replaces "the tenant strategy in the field params" so that
+"each row's index is keyed under that row's own tenant". ADR-0006 renamed that
+params key from `:tenant` to `:scope` (its rename table, row 22): the
+migrator's `index/3` (`Encryptor.Ecto.Migrator`) now puts the plan's strategy
+under `:scope`, and the suite's test is "keys each row's index under that
+row's own scope". The rule the Note states is unchanged; read its owner noun
+through ADR-0006.
+
+Provenance: bead ece-60gg.

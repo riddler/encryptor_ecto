@@ -1,6 +1,6 @@
 # ADR-0007: A Repo-backed suspension store, and a shred on the key store that returns what it destroyed
 
-Status: proposed (2026-09-24)
+Status: accepted (2026-09-24)
 
 ## Context
 
@@ -284,3 +284,57 @@ green verification:
 3. **Whether the suspension table should record who suspended a scope, and
    why.** It records when. A reason column is the host's audit trail, not the
    vault's, and nothing here reads it.
+
+## Note (2026-09-24): the operator accepted this record, and with it decision 6's qualification of ADR-0002 decision 9
+
+The Status line at the head of this file now reads `accepted (2026-09-24)`,
+and the index row in `docs/adr/README.md` says the same. The store and the
+shred shipped in `encryptor_ecto` 0.6.0 on Hex, the commit tagged `v0.6.0`
+(`cf4fd54`).
+
+**Accepting this record qualifies an accepted one.** Decision 6 opens "If
+this record is accepted"; it now is. ADR-0002 decision 9's second bullet reads
+with decision 6's qualification: re-wrap and key creation stay out of this
+package, and so does any shred as a `mix` task, but
+`Encryptor.Ecto.KeyStore.shred/3` deletes from the key store this package
+owns. ADR-0002's text is unchanged, as decision 6 says; this Note is where the
+qualification is recorded as accepted. The open questions stay open:
+acceptance answers none of them.
+
+Every claim was re-verified immediately before the flip, against this
+package's main at `cf4fd54` and against `encryptor` `v0.5.0` (`9ad74e2`), the
+release 0.6.0 pins:
+
+- Context. `Encryptor.Vault.Suspension.Store` has the four callbacks, and
+  `Encryptor.Vault.Suspension.refresh/2` and its `call_store/3` are in
+  `encryptor` 0.5.0; `Encryptor.Vault.Decrypt`'s module comment orders the
+  provider's `decryption_keys/2` at step 3 and the CMM stack at step 7; the
+  describe block "the drain" is in
+  `test/encryptor/ecto/key_store_shred_repo_test.exs`.
+- Decision 1. `Encryptor.Ecto.SuspensionStore` implements the behaviour, keys
+  its rows by `inspect(vault)` (`init/2`), inserts with `on_conflict:
+  :nothing` over `[:vault, :selector]` (`suspend/2`), refuses a selector that
+  is not a non-empty string as `{:unsupported_selector, selector}`
+  (`suspend/2`), answers `:ok` for one in `reinstate/2`, rescues nothing, and
+  refuses unknown options (`known_options/1`), with `"encryptor_suspensions"`
+  the default table (`default_table/0`).
+- Decision 2. `mix encryptor.ecto.gen.suspension_store_migration` takes
+  `--table` and `--migrations-path`, runs through
+  `Encryptor.Ecto.Migrator.CLI.gen/2`, and writes the three columns and the
+  unique index over `[:vault, :selector]`.
+- Decision 3. `Encryptor.Ecto.KeyStore.shred/3` takes the provider state the
+  vault froze (`key_store_state/1`, refusing `{:not_a_key_store_vault,
+  vault}`), requires `:version` (`shred_version/1`), defaults `:drain` to
+  `:wait` (`shred_drain/1`), reads `FOR UPDATE` and deletes in one transaction
+  (`delete_versions/4`), refuses `{:unknown_key, selector}`,
+  `{:unknown_version, n}` and `{:current_version, n}` (`doomed/3`), and waits
+  out `max_age`, or nothing under `cache: false` (`drain_seconds/1`).
+- Decision 4. `%Encryptor.Ecto.KeyStore.Shred{}` has the ten fields and
+  `drain: :waited | :skipped` (`Encryptor.Ecto.KeyStore.Shred`, `@type t`).
+- Decision 5. `[:encryptor_ecto, :shred]` is emitted after the delete and
+  before the wait, with `count` and metadata closed at `vault`, `procedure`
+  and `table` (`emit_shred/4`).
+- Decision 6. The README's "no shred verb" sentence is gone: it names
+  `shred/3` as the row delete a crypto-shred ends in.
+
+Provenance: bead ece-60gg.

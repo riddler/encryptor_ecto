@@ -6,14 +6,18 @@
 | [0002](0002-migrator.md) | The migrator: a plan-driven, resumable, compare-and-swap row rewriter | accepted (2026-08-27, with amendments) |
 | [0003](0003-blind-index.md) | keyed blind indexes, per-tenant by default, equality only | accepted (2026-08-27, with amendments) |
 | [0004](0004-migration-from-cloak.md) | Migration from a prior encryption scheme, with cloak_ecto as the named case | accepted (2026-08-27, with amendments) |
-| [0005](0005-wrapped-key-row-shape.md) | A wrapped-key row declares its wrapping shape, in a column of its own | accepted (2026-09-13) |
-| [0006](0006-scope-names-the-keys-owner.md) | Scope names the key's owner here too, and the key store's column keeps its name | proposed (2026-09-24) |
-| [0007](0007-suspension-store-and-shred.md) | A Repo-backed suspension store, and a shred on the key store that returns what it destroyed | proposed (2026-09-24) |
+| [0005](0005-wrapped-key-row-shape.md) | A wrapped-key row declares its wrapping shape, in a column of its own | accepted (2026-09-13, with amendments) |
+| [0006](0006-scope-names-the-keys-owner.md) | Scope names the key's owner here too, and the key store's column keeps its name | accepted (2026-09-24) |
+| [0007](0007-suspension-store-and-shred.md) | A Repo-backed suspension store, and a shred on the key store that returns what it destroyed | accepted (2026-09-24) |
 
 Every amendment section in these four records - the 2026-08-27 and
 2026-08-28 sets, and ADR-0003's Amendment C of 2026-09-12 - was accepted by
 the operator's reading of 2026-09-13. Each amendment says what it changes; the
 decision text above it is unchanged.
+
+ADR-0004's Note of 2026-09-24 (Q1, the folded index) and ADR-0005's
+Amendment A of 2026-09-24 were accepted on 2026-09-24, and ADR-0006 and
+ADR-0007 with them; each record's foot Note says what was verified.
 
 New ADRs: next number, same three-section format (Context, Decision,
 Consequences), plus the typespecs and worked-example sections this family's
