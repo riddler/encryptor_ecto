@@ -1,0 +1,181 @@
+# Planning-id scan allowlist for this repository.
+#
+# Every entry below is an exact string covering one of this repository's
+# OWN numbered lists, never a reference to anything outside it:
+#   - Q<n> is an "Open questions" entry numbered inside an ADR under
+#     docs/adr/ (ADR-0002, ADR-0003, ADR-0004 each number their own), and
+#     the lines elsewhere (CHANGELOG.md, docs/, lib/, test/) that cite
+#     them as "ADR-000N Q<n>" or "its Q<n>".
+#   - R<n> is a row of ADR-0002's operations table (rotate the
+#     key-encrypting key, rotate a data key, change format, crypto-shred),
+#     and the lines that cite those rows.
+#
+# One exact string per line; a line starting with "# " is a comment. An
+# entry allows a match only where it covers it, so each entry is kept to
+# the few words around the one it allows. Grouped by the file it covers.
+
+# CHANGELOG.md
+Q6): reading `__schema__(:type,
+answering Q2 on the
+
+# docs/adr/0001-vault-backed-ecto-types.md
+Q1) that loads
+R3 migration. The
+R3 migration (ADR-0002).
+
+# docs/adr/0002-migrator.md
+Q6 is answered:
+Q3 named, and
+Q4 is proposed
+Q4 asks whether
+Q4 names, progress
+Q4 itself gives
+Q5 is proposed
+Q5's three candidates.*
+R1 | Rotate
+R2 | Rotate
+R3 | Change
+R4 | Crypto-shred
+R1 is the
+R1 touches only
+questions as Q1
+shred (R1 and R4
+tenant (R4
+| 3, R2 |
+them | R2, 11 |
+R1) is offered
+R1/R4 need a
+R2 would require
+R2), months later,
+Q1. The `legacy:`
+Q2. Whether A9
+Q3. Where the
+R1 truly needs
+R1/R4 get a
+Q4. Whether shipping
+Q4's alternative alive
+Q5. Multi-repo, per-tenant
+Q6. Ordering guarantees
+R2) and the
+R1) are separated,
+R2) "is the
+assigns R2 to this
+assignment of R2 to this
+stands, and R1 and R4
+R2 invocation gains
+R2 example belongs
+R1's check, not
+R2's, and a
+R2 invocation still
+
+# docs/adr/0003-blind-index.md
+Q1 records the
+Q1. Per-field derivation,
+Q2. Whether index-key
+Q3. Where `where_eq/3`
+Q4. Whether a
+Q5. The `:digits`
+
+# docs/adr/0004-migration-from-cloak.md
+Q2 is answered
+Q2 asked whether
+reason Q2
+Q1. Whether the
+Q2. Whether `source_authenticated:
+unlike Q3 and Q4
+Q3. What the
+Q6 already holds
+Q6 to answer.
+ADR-0002's Q6 as that
+Q4. Whether the
+Q5. Whether the
+Q6. Whether `gen.plan`
+Q5 records that
+Q1 is answered
+Q1 asked whether
+Q1 sketched.** A
+Note on Q1
+
+# docs/adr/0005-wrapped-key-row-shape.md
+one. Its Q3 asked
+
+# docs/adr/README.md
+Q1, the folded
+
+# docs/plans/260827-ece-wdm-c3-implementation-graph.md
+Q5 (`:digits` and
+Q3 (a query
+Q6, ADR-0004 Q3
+ADR-0002 Q4, Q5 |
+Q1 | `ece-l8v`,
+ADR-0002 Q5 and Q6,
+ADR-0004 Q3, which
+Q6. ADR-0002 Q4
+Q1 says explicitly
+R1 and R4**
+R1/R4 do need
+
+# lib/encryptor/ecto/binary.ex
+Q4 names the
+
+# lib/encryptor/ecto/blind_index.ex
+Q4): a global
+Q3, a query
+Q4). A global
+
+# lib/encryptor/ecto/blind_index/normalizer.ex
+Q5, carried here
+
+# lib/encryptor/ecto/blind_index/value.ex
+Q1). It installs
+
+# lib/encryptor/ecto/migration.ex
+Q1). Without it
+Q2. A field
+Q1). The column
+Q2). Silence
+
+# lib/encryptor/ecto/migrator.ex
+Q1): the declaration
+
+# lib/encryptor/ecto/migrator/keyset.ex
+Q6 with the
+
+# lib/encryptor/ecto/migrator/pass.ex
+R3 rewrites a
+so an R3 rewrite
+Q1) adds one
+R3 rewrite (ADR-0002's
+
+# lib/encryptor/ecto/migrator/source.ex
+2026-08-28 (Q2
+
+# lib/mix/tasks/encryptor.ecto.gen.plan.ex
+Q6 records that
+
+# test/encryptor/ecto/blind_index/normalizer_test.exs
+Q5, asserted rather
+resolving Q5 the
+Q5 flags" do
+
+# test/encryptor/ecto/blind_index_test.exs
+Q4: a global
+
+# test/encryptor/ecto/migration_test.exs
+Q2 was answered
+
+# test/encryptor/ecto/migrator_folded_index_test.exs
+Q1), against real
+
+# test/encryptor/ecto/migrator_run_test.exs
+ADR-0002's R3
+
+# test/support/test_engine_plans.ex
+gives R2 - "the
+Q1), through a
+
+# test/support/test_index_schemas.ex
+2026-09-24 on Q1
+
+# test/support/test_vaults.ex
+R3 dimension the

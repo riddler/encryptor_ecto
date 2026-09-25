@@ -969,7 +969,7 @@ silence being earned.
 Nothing in decision 3 or decision 3a changes, the compile-time check is
 unchanged, and no status word above flips.
 
-Provenance: campaign RF048.
+Provenance: bead ece-cr2 (folding ece-5du and ece-4mo).
 
 ## Note (2026-09-24): Q1 is answered - a blind index may be folded into the rewrite, per field
 

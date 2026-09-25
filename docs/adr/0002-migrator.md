@@ -1011,7 +1011,7 @@ and it is that test, not this record, that enumerates the declaration pairs.
 Nothing else in decision 3 changes, no other decision changes, and no status
 word above flips.
 
-Provenance: campaign RF045, bead ece-lqz (the record half); the code half is
+Provenance: bead ece-lqz (the record half); the code half is
 ece-4vz.
 
 ## Amendment (2026-09-13): the rotation pass - one option, a key-name comparison, and no new report class
@@ -1227,7 +1227,7 @@ enumerates the cases.
 Nothing in the decision text above changes, no other amendment changes, and no
 status word above flips.
 
-Provenance: campaign RF045, bead ece-a7s (the record half); the code half is
+Provenance: bead ece-a7s (the record half); the code half is
 ece-uiw.
 
 ## Note (2026-09-14): what the same-module spelling loses varies by the edit, and `source_params/3` has two paths rather than one
@@ -1283,7 +1283,7 @@ migrator run suite's in-place-edit tests: it is those tests, not this record,
 that say which edits the two-declaration form rewrites. No decision changes,
 neither amendment's rule changes, and no status word above flips.
 
-Provenance: campaign RF048.
+Provenance: bead ece-cr2 (folding ece-5du and ece-4mo).
 
 ## Note (2026-09-14): five readings of the rotation amendment above, and a header naming no keys is not the target
 
@@ -1368,4 +1368,4 @@ This Note asserts the readings above and leaves the enumeration to the
 migrator run suite's rotation tests. No decision changes, none of the
 amendment's rules changes, and no status word above flips.
 
-Provenance: campaign RF048.
+Provenance: bead ece-cr2 (folding ece-5du and ece-4mo).
