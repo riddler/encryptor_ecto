@@ -863,4 +863,4 @@ it delegates, `Ecto.ParameterizedType` is satisfied by the wrapper itself, and
 is narrowed is only the typographic claim the rendering implies. No decision,
 amendment or status word above changes.
 
-Provenance: campaign RF048, bead ece-42x (folding ece-2bc).
+Provenance: bead ece-42x (folding ece-2bc).

@@ -873,7 +873,7 @@ enumeration of the generators' exit behaviour to the generator tasks' own
 suite. No decision, assumption, open question or consequence changes, and no
 status word above flips.
 
-Provenance: campaign RF048, bead ece-42x (folding ece-2bc and ece-8pt).
+Provenance: bead ece-42x (folding ece-2bc and ece-8pt).
 
 ## Amendment A (2026-09-24): open question 2 answered - the GCP branch's client is a `:gcp_kms` option, delegated one row at a time
 

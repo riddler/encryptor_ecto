@@ -1,7 +1,7 @@
 # The C3 implementation graph
 
 Bead: `ece-wdm`. Date: 2026-08-27. Status: design only - no implementation
-work is authorized against any bead below in campaign 008.
+work is authorized against any bead below in the campaign that wrote it.
 
 This document turns four ADRs into an ordered, dependency-linked set of work
 items. It is a map of decisions to beads, not a plan for any one of them: each
