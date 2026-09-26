@@ -58,9 +58,9 @@
   # package's docs. The Docs stage runs `mix docs` and fails on any ExDoc
   # warning. The doc_links stage fails on the link rules ExDoc accepts
   # silently: a README relative link to a file not in the package files, a
-  # relative link in a Markdown extra to a file that is not itself an extra,
-  # two extras sharing a basename, and a silent rewrite of a link to a
-  # different extra.
+  # relative link in a Markdown extra to a file that is not itself an extra
+  # (moduledoc links are the Docs stage's), two extras sharing a basename, and
+  # a silent rewrite of a link to a different extra.
   # They are a deliberate enlargement of this gate: a broken link on HexDocs
   # or hex.pm is a defect in what this package publishes, and nothing else
   # here catches it before the publish does.
