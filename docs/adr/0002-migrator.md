@@ -929,7 +929,7 @@ short-circuit changes, and no status word flips.
 
 ## Amendment (2026-09-13): an in-place declaration edit is migrated as two declarations, and the field options stay closed
 
-Status: proposed
+Status: accepted (2026-09-26)
 
 Decision 3's third bullet, the one beginning "**`from` and `to` may be the
 same module with different params.**"
@@ -1016,7 +1016,7 @@ ece-4vz.
 
 ## Amendment (2026-09-13): the rotation pass - one option, a key-name comparison, and no new report class
 
-Status: proposed
+Status: accepted (2026-09-26)
 
 The worked example says that a single tenant's data-key rotation (R2) "is the
 same tool with a filter and `from`/`to` naming the same module"
@@ -1369,3 +1369,50 @@ migrator run suite's rotation tests. No decision changes, none of the
 amendment's rules changes, and no status word above flips.
 
 Provenance: bead ece-cr2 (folding ece-5du and ece-4mo).
+
+## Note (2026-09-26): the operator accepted the two amendments of 2026-09-13
+
+The Status lines of the two amendments above, "an in-place declaration edit
+is migrated as two declarations, and the field options stay closed" and "the
+rotation pass - one option, a key-name comparison, and no new report class",
+now read `accepted (2026-09-26)`. The record's own Status line and its index
+row, `accepted (2026-08-27, with amendments)`, do not change. Each
+amendment's closing "no status word above flips" was true of it and stays
+true: the status words that flip are the amendments' own, and they flip here.
+
+Both code halves shipped in `encryptor_ecto` 0.5.0, the commit tagged
+`v0.5.0` (`eae0fd3`) and published on Hex; its changelog's `[0.5.0]` section
+carries the `Added` entry for `writing_key:` and the `Changed` entry for the
+two-declaration form. Each claim was re-verified at that tag before the flip:
+
+- The two-declaration amendment (code half in pull request 77).
+  `@field_options` is `[:from, :to, :into, :source_authenticated, :validate]`
+  (`lib/encryptor/ecto/migration.ex`), so the field spec gained no source-side
+  params or context option. `Encryptor.Ecto.Migration`'s moduledoc section
+  "`from:` and `to:` may be the same module" states the two-declaration form,
+  and the run suite's describe block "an in-place declaration edit, expressed
+  as two declarations" (`test/encryptor/ecto/migrator_run_test.exs`) is the
+  test the amendment delegates to.
+- The rotation amendment (code half in pull request 78). `run/2` takes
+  `:writing_key` (`Encryptor.Ecto.Migrator`'s option table and
+  `writing_key!/1`), a non-string value is refused at option validation, and
+  `rotatable!/5` refuses at plan resolution a target that carries no header
+  claim, a tenant-profile pass without a tenant filter, and a filtered pass
+  over a single-profile vault. The header probe hands the option to
+  `claimed/3` (`Encryptor.Ecto.Migrator.Pass`'s `probe/3`), `Report.classes/0`
+  is still the five classes, and `verify/2` does not take the option. The run
+  suite's describe block "a rotation (`writing_key:`)" is the delegated test.
+
+The two Notes of 2026-09-14 above still read these amendments as they say:
+the rewrite after a rejected claim spends one source decrypt, the refusal
+happens in two places, and the worked example's single-tenant rotation invocation does not
+carry the option.
+
+Several spellings were overtaken by a later record on main, ADR-0006, and are
+read through it: the `only_tenants:` filter is `only_scopes:` (its rename
+table, row 19), the tenant profile the scope rule names is `:scoped`, and the
+`tenant: :none` to `tenant: :scope` example is `scope: :none` to
+`scope: :process` in the moduledoc today. The rules the amendments state are
+unchanged.
+
+Provenance: accepted by the operator, 2026-09-26.
