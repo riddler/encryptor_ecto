@@ -179,3 +179,8 @@ Q1), through a
 
 # test/support/test_vaults.ex
 R3 dimension the
+
+# Tracker titles (closed beads): ADR-0002's rotate-a-data-key row label,
+# as those titles name it
+R2 rotation
+the R2 re-anchor
