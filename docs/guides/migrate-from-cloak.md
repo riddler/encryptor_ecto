@@ -902,12 +902,16 @@ The encryption context of a new column binds its own name: this package's types
 derive the declared `"column"` from the field, so `pan_encrypted`'s rows are
 written under `"pan_encrypted"`. Step 8 comes back to that.
 
-**Expected:** new and updated rows carry both columns, the old one in the legacy
-format and the new one in this package's, and reads are unchanged.
+**Expected:** a new row carries both columns, the old one in the legacy format
+and the new one in this package's. An update carries both columns of every field
+it changes; a field it leaves alone keeps its pair as it was, `NULL` until step 5
+reaches it. Reads are unchanged.
 
-**If it differs:** a row whose new column stays `NULL` after an update is a write
-path the dual write does not reach. Step 5 backfills it, but a write path that
-stays uncovered keeps producing rows step 6 reports.
+**If it differs:** a field an update changed whose new column is still `NULL`, or
+still holds the value from before the update, is a write path the dual write does
+not reach. Step 5 backfills a `NULL` pair but not a stale one: the pass and
+step 6 both find a stale pair already in the target state, so an uncovered write
+path is found here or not at all.
 
 ### Parallel step 4. Write the plan and rehearse it
 
