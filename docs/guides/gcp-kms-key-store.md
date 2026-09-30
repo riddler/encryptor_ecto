@@ -240,11 +240,12 @@ work" - the one a caller retries. Here it also covers a version that will
 never decrypt again, because `Encryptor.Provider.GcpKms` answers every
 refused `Decrypt` - an unreachable service, a row that no longer matches its
 binding, a destroyed version - with that one term, and the key store
-returns it unrelabelled. That behaviour is ADR-0005 Amendment A5, which is
-**proposed, not accepted**: the accepted decision 5 would call a found row
-that does not unwrap `{:invalid_key_descriptor, :unwrap_failed}`, and the
-amendment records why the key store cannot tell the two apart through the
-provider's public answer.
+returns it unrelabelled. That behaviour is ADR-0005 Amendment A5, accepted
+by that record's Note of 2026-09-24: it amends decision 5, which would
+otherwise call a found row that does not unwrap `{:invalid_key_descriptor,
+:unwrap_failed}`, and it records why the key store cannot tell the two
+apart through the provider's public answer. "When Cloud KMS refuses, or
+does not answer" below covers the same answer outside a shred.
 
 So between the two shred steps a retry loop keyed on `:key_unavailable`
 will spin on a scope that is gone. Call `shred/3` promptly after the
@@ -255,6 +256,71 @@ A shred is also not immediate: `Encryptor.Vault`'s documentation of
 the vault's materials cache, and that drain is what `shred/3` waits for by
 default. The answers above are what a vault configured with `cache: false`
 sees on the very next call.
+
+## When Cloud KMS refuses, or does not answer
+
+Two things about a GCP row are true today and easy to miss until they
+happen: a permanent refusal reads as retryable, and an outage costs a wait
+per row.
+
+### A permanent refusal answers `{:key_unavailable, selector}`
+
+`Encryptor.Provider.GcpKms`, in `encryptor` 0.5.0 (the version this
+package pins), answers every failed `Decrypt` with
+`{:key_unavailable, selector}`: a response with any status outside 2xx and
+a request that failed in transport arrive at the same term (the
+`{:error, _failure}` arm of the provider's private `unwrap/3`). The key
+store returns that term unrelabelled (ADR-0005 Amendment A5). So these
+answer exactly as an outage does, although no retry will ever succeed:
+
+- a destroyed key version (the shred's middle row above);
+- a row whose `tenant_ref`, `version` or `namespace` no longer matches the
+  additional authenticated data its wrapping was bound to;
+- a service account that lacks `useToDecrypt` on the ring (Step 1), or
+  whose grant was revoked.
+
+What your application sees depends on which row refuses, because of the
+key store's "one bad row is not the whole store" rule:
+
+- **The newest row refuses.** `encryption_key/2` unwraps the newest row and
+  no other, so every write for the scope answers `{:key_unavailable,
+  selector}` until the row or the grant is fixed, or the scope is shredded.
+  `decryption_keys/2` still answers with any older rows that unwrap, and
+  answers the newest row's `{:key_unavailable, selector}` only when none
+  does.
+- **An older row refuses.** `decryption_keys/2` leaves it out and answers
+  with the rest; values written under that version do not decrypt, and
+  nothing else fails.
+
+A caller that retries on `:key_unavailable` cannot tell these cases from an
+outage by the term. Bound its retries, and when one scope keeps answering
+it while others read and write normally, check that scope's key versions,
+its rows and the service account's grant before treating it as an outage.
+
+### An outage costs one request timeout per GCP row
+
+Each GCP row is unwrapped by its own `Decrypt` request, and the request
+waits up to the provider's `:timeout` - per call, 5,000 ms unless you set
+it in `:gcp_kms` - before it answers (`Encryptor.Provider.GcpKms`'s
+`## Configuration`; the value is handed to your HTTP client as its `timeout:`
+option, so the bound is only as good as your client's handling of it).
+The key store unwraps a scope's rows one after another, newest first, and
+tries every row before it answers (`Encryptor.Ecto.KeyStore`'s private
+`unwrap_all/3`).
+
+So while Cloud KMS does not answer:
+
+- `decryption_keys/2` for a scope with N GCP rows waits about N times the
+  timeout before it answers `{:key_unavailable, selector}`: with the
+  default and three versions, about 15 seconds.
+- `encryption_key/2` waits about one timeout, because it unwraps the newest
+  row only.
+
+That wait is paid on every call that reaches the provider during the
+outage. If your callers have a deadline of their own, set `:timeout` in
+`:gcp_kms` with the number of GCP versions a scope carries in mind, and
+keep the count down: a version whose values have all been rewritten under
+a newer one can be shredded with `shred/3`'s `version: n`.
 
 ## What this guide checked
 
