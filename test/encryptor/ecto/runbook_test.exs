@@ -70,6 +70,46 @@ defmodule Encryptor.Ecto.RunbookTest do
     :ok
   end
 
+  describe "step 0: no legacy rotation in flight" do
+    # Sabotage: narrowed `Census`'s `@header_bytes` to 1 - the one group's
+    # header was one byte, not the legacy envelope's four.
+    test "before the pass the plan's format census shows the legacy format and nothing else" do
+      _north = seed(@north, "cs-1", "at-1", "rt-1")
+      _south = seed(@south, "cs-2", "at-2", "rt-2")
+
+      for query <- Census.queries(Migration), query.kind == :format do
+        assert %{rows: [[@legacy_header, 2]]} = TestRepo.query!(query.sql)
+      end
+    end
+  end
+
+  describe "step 1: key material for every scope" do
+    # Sabotage: made `Pass.write_target/2`'s rescue report `:load_failed` -
+    # the provisioning gap read exactly like an unreadable legacy row.
+    test "a workspace with no key material fails at its own row, as a vault error, until it is provisioned" do
+      _north = seed(@north, "cs-1", "at-1", "rt-1")
+      orphan = seed(@unprovisioned, "cs-9", "at-9", "rt-9")
+
+      assert {:error, report} = Migrator.run(Migration, mode: :dry_run, on_error: :continue)
+
+      assert report.counts.migratable == 3
+      assert report.counts.undecryptable == 3
+
+      for failure <- report.failures do
+        assert failure.id == orphan
+        assert failure.reason == {:raised, Encryptor.Ecto.EncryptError}
+      end
+
+      # "Go back and fill it": the same dry run, once the workspace has key
+      # material, is clean.
+      provision(@unprovisioned, <<0x25>>)
+
+      assert {:ok, clean} = Migrator.run(Migration, mode: :dry_run)
+      assert clean.counts.migratable == 6
+      assert clean.counts.undecryptable == 0
+    end
+  end
+
   describe "step 2: both libraries in the tree, schemas on the legacy types" do
     # Sabotage: made the fixture's `LegacyVault.decrypt/1` decline every
     # envelope - the legacy schema stopped reading its own rows.
@@ -508,6 +548,22 @@ defmodule Encryptor.Ecto.RunbookTest do
   end
 
   # -- helpers --------------------------------------------------------------
+
+  # Step 1's fix: the workspace gets key material, and the vault, which reads
+  # its configuration when it starts, is restarted to pick it up.
+  defp provision(workspace, byte) do
+    keys = Application.fetch_env!(:encryptor_ecto, TestRunbook.Keys)
+    workspaces = Map.put(Keyword.fetch!(keys, :workspaces), workspace, :binary.copy(byte, 32))
+
+    Application.put_env(
+      :encryptor_ecto,
+      TestRunbook.Keys,
+      Keyword.put(keys, :workspaces, workspaces)
+    )
+
+    :ok = stop_supervised(Vault)
+    start_supervised!(Vault)
+  end
 
   # A row as the host's legacy deploy wrote it: through the legacy types, with
   # the unkeyed hash beside the access token.
