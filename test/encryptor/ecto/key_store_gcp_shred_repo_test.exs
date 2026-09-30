@@ -23,10 +23,12 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
   @context %{"table" => "cards", "column" => "pan"}
   @selector "merchant_shredded"
 
-  # The destroyed-version answer is ADR-0005 Amendment A5's, at proposed: the
-  # provider merges a refused `Decrypt` with an unreachable service into
-  # `{:key_unavailable, selector}`, and the store returns it unrelabelled.
-  # The row delete then turns it into the settled `{:unknown_key, selector}`.
+  # The destroyed-version answer is the provider's, returned unrelabelled
+  # (ADR-0005 Amendment A5): Cloud KMS answers a `Decrypt` under a version
+  # that is not enabled with a `400`, which `encryptor` 0.6.0 reports as
+  # `{:invalid_key_descriptor, {:kms_refused, 400}}` rather than the
+  # retryable `{:key_unavailable, selector}`. The row delete then turns it
+  # into the settled `{:unknown_key, selector}`.
   #
   # Sabotage: relabelled the delegate's failure in `KeyStore.unwrap_row/4`'s
   # GCP clause to `{:invalid_key_descriptor, :unwrap_failed}`; the first
@@ -34,7 +36,7 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
   # `destroyed/2` a no-op; the same assertion went red on `{:ok, [_]}`.
   # Separately, made `KeyStore.shred/3` resolve the scope's keys through
   # `decryption_keys/2` before its delete; the `shred/3` assertion went red
-  # on `{:error, {:key_unavailable, "merchant_shredded"}}`.
+  # on `{:error, {:invalid_key_descriptor, {:kms_refused, 400}}}`.
   test "provision, write, read, destroy the version, delete the row" do
     provisioned = TestGcpKms.provision!(@selector)
     state = TestGcpKms.state()
@@ -49,10 +51,13 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
 
     TestGcpKms.destroyed(provisioned.key_id, true)
 
-    assert {:error, {:key_unavailable, @selector}} = KeyStore.decryption_keys(state, @selector)
-    assert {:error, {:key_unavailable, @selector}} = KeyStore.encryption_key(state, @selector)
+    assert {:error, {:invalid_key_descriptor, {:kms_refused, 400}}} =
+             KeyStore.decryption_keys(state, @selector)
 
-    assert {:error, %Error{reason: {:key_unavailable, @selector}}} =
+    assert {:error, {:invalid_key_descriptor, {:kms_refused, 400}}} =
+             KeyStore.encryption_key(state, @selector)
+
+    assert {:error, %Error{reason: {:invalid_key_descriptor, {:kms_refused, 400}}}} =
              TestGcpKms.Scope.decrypt(ciphertext, key: @selector, encryption_context: @context)
 
     # Inside the scheduled-destruction window a restore, while the row still

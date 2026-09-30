@@ -217,9 +217,9 @@ the `CryptoKey`'s scheduled-destruction duration, and a
 KMS leaves a restored version disabled; enable it to use it). `provision/2`
 does not set the duration, so the service's default applies, and it is fixed
 when the key is created. The `Encryptor.Provider.GcpKms` moduledoc in
-`encryptor` 0.5.0 gives that default as 24 hours; Cloud KMS's own reference
-for `destroyScheduledDuration` gives 30 days. Read it off your key with
-`gcloud kms keys describe` rather than trusting either.
+`encryptor` 0.6.0 and Cloud KMS's own reference for
+`destroyScheduledDuration` both give that default as 30 days. Read it off
+your key with `gcloud kms keys describe` rather than trusting either.
 
 A restore only helps while the row still holds its wrapping. Once the row is
 deleted there is nothing for a restored version to decrypt, and the key
@@ -231,25 +231,22 @@ delay, not as an undo you plan around.
 | After | `decryption_keys/2` and `encryption_key/2` | a scoped vault's `decrypt/2` |
 |---|---|---|
 | provisioning | `{:ok, ...}` | the value |
-| destroying the version, row still present | `{:error, {:key_unavailable, selector}}` | `{:error, %Encryptor.Error{reason: {:key_unavailable, selector}}}` |
+| destroying the version, row still present | `{:error, {:invalid_key_descriptor, {:kms_refused, 400}}}` | `{:error, %Encryptor.Error{reason: {:invalid_key_descriptor, {:kms_refused, 400}}}}` |
 | `shred/3` deleting the row | `{:error, {:unknown_key, selector}}` | `{:error, %Encryptor.Error{reason: {:unknown_key, selector}}}` |
 
-The middle row needs care. `{:key_unavailable, selector}` is the answer the
-provider contract reserves for "could not ask, and asking again later could
-work" - the one a caller retries. Here it also covers a version that will
-never decrypt again, because `Encryptor.Provider.GcpKms` answers every
-refused `Decrypt` - an unreachable service, a row that no longer matches its
-binding, a destroyed version - with that one term, and the key store
-returns it unrelabelled. That behaviour is ADR-0005 Amendment A5, accepted
-by that record's Note of 2026-09-24: it amends decision 5, which would
-otherwise call a found row that does not unwrap `{:invalid_key_descriptor,
-:unwrap_failed}`, and it records why the key store cannot tell the two
-apart through the provider's public answer. "When Cloud KMS refuses, or
-does not answer" below covers the same answer outside a shred.
+The middle row is a refusal, not an outage. Cloud KMS answers a `Decrypt`
+under a destroyed version with HTTP 400, and `Encryptor.Provider.GcpKms`, in
+`encryptor` 0.6.0 (the version this package pins), reports a 400 or a 404 as
+`{:invalid_key_descriptor, {:kms_refused, status}}`: the permanent family,
+not the `{:key_unavailable, selector}` a caller retries. The key store
+returns the provider's answer unrelabelled, as ADR-0005 Amendment A5 sets
+out for a GCP row. "When Cloud KMS refuses, or does not answer" below covers
+the same answers outside a shred.
 
 So between the two shred steps a retry loop keyed on `:key_unavailable`
-will spin on a scope that is gone. Call `shred/3` promptly after the
-destroy, and keep the scope out of your retry paths while the shred runs.
+leaves the scope alone. Call `shred/3` promptly after the destroy all the
+same: until the row is deleted, a restore inside the window above brings the
+values back.
 
 A shred is also not immediate: `Encryptor.Vault`'s documentation of
 `suspend/2` notes that, unlike a suspension, a shred's runbook has to drain
@@ -259,43 +256,47 @@ sees on the very next call.
 
 ## When Cloud KMS refuses, or does not answer
 
-Two things about a GCP row are true today and easy to miss until they
-happen: a permanent refusal reads as retryable, and an outage costs a wait
-per row.
+Two things about a GCP row are easy to miss until they happen: an IAM
+denial reads as retryable, and an outage costs a wait per row.
 
-### A permanent refusal answers `{:key_unavailable, selector}`
+### Which refusals are permanent
 
-`Encryptor.Provider.GcpKms`, in `encryptor` 0.5.0 (the version this
-package pins), answers every failed `Decrypt` with
-`{:key_unavailable, selector}`: a response with any status outside 2xx and
-a request that failed in transport arrive at the same term (the
-`{:error, _failure}` arm of the provider's private `unwrap/3`). The key
-store returns that term unrelabelled (ADR-0005 Amendment A5). So these
-answer exactly as an outage does, although no retry will ever succeed:
+`Encryptor.Provider.GcpKms`, in `encryptor` 0.6.0 (the version this package
+pins), answers a failed `Decrypt` by its HTTP status (its moduledoc's
+"What a failed `Decrypt` answers"), and the key store returns that answer
+unrelabelled (ADR-0005 Amendment A5):
 
-- a destroyed key version (the shred's middle row above);
-- a row whose `tenant_ref`, `version` or `namespace` no longer matches the
-  additional authenticated data its wrapping was bound to;
-- a service account that lacks `useToDecrypt` on the ring (Step 1), or
-  whose grant was revoked.
+- **HTTP 400 or 404** is `{:invalid_key_descriptor, {:kms_refused,
+  status}}`, which no retry changes: a destroyed key version (the shred's
+  middle row above), a version an operator disabled, a key that is not
+  there, or a row whose `tenant_ref`, `version` or `namespace` no longer
+  matches the additional authenticated data its wrapping was bound to. Two
+  of these an operator can reverse: a disabled version, by enabling it
+  again, and a destroyed one inside the restore window above, by restoring
+  it.
+- **HTTP 403** stays `{:key_unavailable, selector}`, as an outage does: a
+  service account that lacks `useToDecrypt` on the ring (Step 1), or whose
+  grant was revoked. A revoked grant is how a provider-level suspension is
+  made, so the term is the retryable one, and no retry succeeds until the
+  grant is back.
 
 What your application sees depends on which row refuses, because of the
 key store's "one bad row is not the whole store" rule:
 
 - **The newest row refuses.** `encryption_key/2` unwraps the newest row and
-  no other, so every write for the scope answers `{:key_unavailable,
-  selector}` until the row or the grant is fixed, or the scope is shredded.
-  `decryption_keys/2` still answers with any older rows that unwrap, and
-  answers the newest row's `{:key_unavailable, selector}` only when none
-  does.
+  no other, so every write for the scope answers that row's term until the
+  row or the grant is fixed, or the scope is shredded. `decryption_keys/2`
+  still answers with any older rows that unwrap, and answers the newest
+  row's term only when none does.
 - **An older row refuses.** `decryption_keys/2` leaves it out and answers
   with the rest; values written under that version do not decrypt, and
   nothing else fails.
 
-A caller that retries on `:key_unavailable` cannot tell these cases from an
-outage by the term. Bound its retries, and when one scope keeps answering
-it while others read and write normally, check that scope's key versions,
-its rows and the service account's grant before treating it as an outage.
+A caller that retries on `:key_unavailable` cannot tell a missing grant
+from an outage by the term. Bound its retries, and when one scope keeps
+answering it while others read and write normally, check the service
+account's grant before treating it as an outage. A `:kms_refused` answer
+needs no retry: check that scope's key versions and rows instead.
 
 ### An outage costs one request timeout per GCP row
 
