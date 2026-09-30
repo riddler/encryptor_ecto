@@ -400,7 +400,7 @@ waits for no drain and leaves no record.
    passed since the delete, which is P3's cache drain. A host that restarts
    the agreement vault on every node instead passes `drain: :skip` and
    restarts; the record's `drained_at` still says when waiting would have
-   finished. With `encryptor` 0.5.0 a read of the shredded agreement already
+   finished. With `encryptor` 0.6.0 a read of the shredded agreement already
    fails when the delete commits, because the vault asks the key store before
    it consults its cache; the drain stays because P3 makes it a step
    (this package's ADR-0007).

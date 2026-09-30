@@ -452,10 +452,11 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
     # A GCP wrapping is bound to its row's `tenant_ref`, `version` and
     # `namespace` through the additional authenticated data, so a row filed
-    # under another scope fails closed at `Decrypt`. The provider's public
-    # answer is `{:key_unavailable, selector}`, which merges a refused
-    # `Decrypt` with an unreachable service, and the store returns it
-    # unrelabelled (ADR-0005 Amendment A5).
+    # under another scope fails closed at `Decrypt`, which Cloud KMS refuses
+    # with a `400`. The provider's public answer for that refusal is
+    # `{:invalid_key_descriptor, {:kms_refused, 400}}` in `encryptor` 0.6.0,
+    # apart from the `{:key_unavailable, selector}` of an unreachable
+    # service, and the store returns it unrelabelled (ADR-0005 Amendment A5).
     #
     # Sabotage: translated every delegate failure into `{:invalid_key_descriptor,
     # :unwrap_failed}`. The first assertion went red on that term.
@@ -476,10 +477,10 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
       state = TestGcpKms.state()
 
-      assert {:error, {:key_unavailable, "merchant_moved_to"}} =
+      assert {:error, {:invalid_key_descriptor, {:kms_refused, 400}}} =
                KeyStore.decryption_keys(state, "merchant_moved_to")
 
-      assert {:error, {:key_unavailable, "merchant_moved_to"}} =
+      assert {:error, {:invalid_key_descriptor, {:kms_refused, 400}}} =
                KeyStore.encryption_key(state, "merchant_moved_to")
     end
 

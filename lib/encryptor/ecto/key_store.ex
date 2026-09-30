@@ -286,12 +286,15 @@ defmodule Encryptor.Ecto.KeyStore do
   inside `{:invalid_key_descriptor, term()}`, which is open by construction.
 
   A GCP row in a store configured *with* `:gcp_kms` answers whatever
-  `Encryptor.Provider.GcpKms` answers for that row, unrelabelled. Its
-  `Decrypt` failing - the service unreachable, or the row's `tenant_ref`,
+  `Encryptor.Provider.GcpKms` answers for that row, unrelabelled. A `Decrypt`
+  that Cloud KMS refuses with HTTP 400 or 404 - the row's `tenant_ref`,
   `version` or `namespace` no longer matching the data its wrapping was bound
-  to - is `{:key_unavailable, selector}`, because the provider does not tell
-  those apart and this store cannot either; a stored row it would never have
-  written is `{:invalid_key_descriptor, :invalid_row}`.
+  to, a key version destroyed or disabled, a key that is not there - is
+  `{:invalid_key_descriptor, {:kms_refused, status}}`, which a retry does not
+  change. An IAM denial (403), a throttle, a server error, or the service
+  unreachable is `{:key_unavailable, selector}`, the term a caller retries.
+  A stored row it would never have written is
+  `{:invalid_key_descriptor, :invalid_row}`.
 
   ## The failure that is not in the vocabulary
 

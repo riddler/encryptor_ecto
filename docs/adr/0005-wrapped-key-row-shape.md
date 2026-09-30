@@ -1251,3 +1251,49 @@ none of the strings the earlier Notes count, so it moves none of their
 figures.
 
 Provenance: bead ece-tdw0 (section 1) and bead ece-few (sections 2 and 3).
+
+## Note (2026-09-30): A5's refused `Decrypt` row at the 0.6.0 pin
+
+This Note decides nothing: no decision, assumption, open question,
+consequence or Amendment changes, no text above it is edited, and no status
+word flips. Upstream cites were read in `encryptor` `v0.6.0` (`91e9643`),
+the version this package now pins (`{:encryptor, "== 0.6.0"}` in `mix.exs`,
+`deps/0`, moved in the commit this Note ships in). Cites into this package
+were read at `8bcd03f`, where `unwrap_row/4` is unchanged by that commit.
+
+A5's decision is that a `"gcp_kms_ciphertext"` row in a store configured
+with `:gcp_kms` answers whatever `Encryptor.Provider.GcpKms` answers for it,
+unrelabelled (the delegating clause of `Encryptor.Ecto.KeyStore`'s
+`unwrap_row/4`). That still holds. What the provider answers has moved, so
+three sentences that describe its answer are read with this Note:
+
+- A5's table, second row, and the acceptance Note of 2026-09-24's "a refused
+  `Decrypt` answers `{:key_unavailable, selector}`, as an outage does". At
+  0.6.0 a `Decrypt` that Cloud KMS refuses with HTTP 400 or 404 answers
+  `{:invalid_key_descriptor, {:kms_refused, status}}`, and every other
+  failure, an HTTP 403 and an unreachable service included, still answers
+  `{:key_unavailable, selector}` (`GcpKms`'s private `decrypt_failure/2` and
+  `@refused_statuses`). So a row moved between scopes, the table's example
+  of a refusal, now answers `{:invalid_key_descriptor, {:kms_refused, 400}}`
+  through the key store; read the second row as true at 0.6.0 for a 403 and
+  an unreachable service only.
+- A5's "The provider's private `unwrap/3` then merges both, in its
+  `{:error, _failure}` arm, into one public answer". At 0.6.0 that arm hands
+  the failure to `decrypt_failure/2`, which keeps a 400 or 404 apart. The
+  Note of 2026-09-29's reading of A4, "unmet for decision 5's failure
+  vocabulary", holds at 0.5.0 as that Note says; at 0.6.0 the provider's
+  public answer carries the failure class for those two statuses.
+- A5's last paragraph, which names a public reason that tells a refusal
+  from an outage as what would let the store answer `:unwrap_failed` for a
+  refusal. That reason now exists. The store does not relabel it: the code
+  keeps A5's pass-through, and the provider's term is already in the
+  `{:invalid_key_descriptor, detail}` family decision 5 gives a found row
+  that does not unwrap. Whether to relabel is not taken up here.
+
+Tests: `test/encryptor/ecto/key_store_repo_test.exs`, "a row moved to
+another scope fails closed, in the provider's own term", and
+`test/encryptor/ecto/key_store_gcp_shred_repo_test.exs`, "provision, write,
+read, destroy the version, delete the row", assert the new term as the
+commit this Note ships in leaves them.
+
+Provenance: bead ece-h9qm.
