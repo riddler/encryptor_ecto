@@ -1114,7 +1114,7 @@ Provenance: bead ece-60gg.
 
 ## Amendment B (2026-09-29): `:root_vault` is required only when `:gcp_kms` is absent
 
-Status: proposed. Ruled by the operator, 2026-09-29. No text above this
+Status: accepted (2026-09-30). Ruled by the operator, 2026-09-29. No text above this
 Amendment is edited in place, and no status word above flips.
 
 Cites into this package name the function they point at, as it stands in
@@ -1297,3 +1297,54 @@ read, destroy the version, delete the row", assert the new term as the
 commit this Note ships in leaves them.
 
 Provenance: bead ece-h9qm.
+
+## Note (2026-09-30): Amendment B is accepted
+
+Amendment B's Status line now reads `accepted (2026-09-30)`. The record's own
+Status line, `accepted (2026-09-13)`, and its index row, `accepted
+(2026-09-13, with amendments)`, do not change. Amendment B's "no status word
+above flips" was true of it and stays true: the status word that flips is
+its own, and it flips here. The two Notes after it decide nothing and have
+no status word to flip.
+
+The code half shipped in `encryptor_ecto` 0.7.0, the commit tagged `v0.7.0`
+(`1fcb204`) and published on Hex; its changelog's `[0.7.0]` section carries
+the `Added` entry for a store started without `:root_vault`. Every claim was
+re-verified at that commit before the flip, and against `encryptor` `v0.6.0`
+(`91e9643`), the release 0.7.0 pins (`{:encryptor, "== 0.6.0"}` in
+`mix.exs`, `deps/0`):
+
+- B1. `Encryptor.Ecto.KeyStore`'s `root_vault/1` answers `{:ok, nil}` when
+  `:root_vault` is absent and `:gcp_kms` is present, and otherwise defers to
+  `module_option/2`, which refuses an absent option as `{:missing_config,
+  [:provider, :root_vault]}` and a value that is not a module as
+  `{:invalid_config, :root_vault, :not_a_module}`. `root_vault/1` reads only
+  whether `:gcp_kms` is present; `init/1` then runs `gcp_kms/2`, which
+  refuses a malformed value in its own terms. The `state/0` type reads
+  `root_vault: module() | nil`.
+- B2. The `%{root_vault: nil}` clause of `unwrap_row/4` matches an
+  `:engine_message` row whose `key_id` is `nil` and answers
+  `{:invalid_key_descriptor, {:no_root_vault, "engine_message"}}`; an
+  engine-message row carrying a `key_id` falls through to the clause that
+  answers `{:invalid_key_descriptor, :unexpected_key_id}`, as the
+  `:missing_key_id` clause answers before the GCP delegation. In `encryptor`
+  0.6.0, `t:Encryptor.Provider.reason/0` carries `{:invalid_key_descriptor,
+  term()}` (`lib/encryptor/provider.ex`), so the term widens nothing.
+  `encryption_key/2` unwraps the newest row only, and the repo test "costs
+  only the engine-message rows of a mixed scope" asserts the read keeping
+  the GCP version and the write answering the refusal.
+- B3. Once `init/1` has placed it in the state, the root vault is read by
+  `unwrap_row/4` alone: the engine-message clause unwraps under it, and the
+  clause B2 adds matches its absence.
+- B4. The commit that shipped the code half changes no `wrapping_shape`
+  value, column or `tenant_ref` derivation in
+  `lib/encryptor/ecto/key_store.ex`: beside its moduledoc and doc text, its
+  code changes are the `state/0` type, `init/1`'s call to `root_vault/1`,
+  `root_vault/1` itself and the new `unwrap_row/4` clause.
+- The tests. `test/encryptor/ecto/key_store_test.exs` has the describe block
+  "init/1's :root_vault, with :gcp_kms set" beside "refuses a missing root
+  vault", and `test/encryptor/ecto/key_store_repo_test.exs` has the describe
+  block "a store configured with :gcp_kms and no root vault", over the fake
+  in `test/support/test_gcp_kms.ex`.
+
+Provenance: bead ece-vvez.
