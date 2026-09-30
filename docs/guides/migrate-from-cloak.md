@@ -93,7 +93,7 @@ legacy type modules; nothing about how a row is read or written changes yet.
 
 ```elixir
 # mix.exs - both, for now. Step 8 removes the second.
-{:encryptor_ecto, "~> 0.1"},
+{:encryptor_ecto, "~> 0.6.0"},
 {:cloak_ecto, "~> 1.2"}
 ```
 
