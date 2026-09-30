@@ -157,8 +157,9 @@ defmodule Encryptor.Ecto.Migration do
 
   ADR-0004's proposed amendment of 2026-08-28 answers Q2. A field whose
   `from:` is one of this package's own vault-backed types needs no
-  declaration, because the package that wrote those bytes authenticates them
-  and `Encryptor.Ecto.Migrator.Source.vault_backed?/2` can prove it - that is
+  declaration, unless that type also declares `legacy:` (below), because the
+  package that wrote those bytes authenticates them and
+  `Encryptor.Ecto.Migrator.Source.vault_backed?/2` can prove it - that is
   the case above where `from:` names one of this package's declarations,
   whether it is the same module as `to:` or the earlier declaration a
   two-declaration edit keeps. Every other `from:` is the host's own legacy
@@ -170,7 +171,14 @@ defmodule Encryptor.Ecto.Migration do
   capability this package checks; it is the host asserting that someone looked
   at the legacy cipher, in a line a reviewer sees in the diff.
 
-  A host upgrading across this change sees its plan stop compiling, with a
+  One of this package's own types that declares `legacy:` is not silent
+  either (ADR-0004's Amendment of 2026-09-29). Its vault authenticates what
+  the vault wrote, but a row the vault cannot read is read through the
+  `legacy:` module, which is the host's legacy reader again - so a plan whose
+  `from:` is such a type - a reverse plan run while `legacy:` is still set,
+  above all - declares `source_authenticated:` exactly as the forward plan did.
+
+  A host upgrading across either change sees its plan stop compiling, with a
   message naming the field and saying what to write.
   """
 
@@ -299,8 +307,8 @@ defmodule Encryptor.Ecto.Migration do
   `source_authenticated:`, `validate:` and `index:`.
 
   `source_authenticated:` is required rather than optional wherever the
-  `from:` type is not one of this package's own - see "What the legacy cipher
-  does not prove".
+  `from:` type is not one of this package's own, or is one that declares
+  `legacy:` - see "What the legacy cipher does not prove".
   """
   defmacro field(name, opts) do
     meta = meta(__CALLER__)
@@ -514,11 +522,12 @@ defmodule Encryptor.Ecto.Migration do
     do: raise_at!(meta, not_an_index_message(other))
 
   # ADR-0004 decision 3 and its proposed amendment of 2026-08-28 (Q2). Silence
-  # compiles to `true` exactly where `Source.vault_backed?/2` proves it, and is
-  # a `CompileError` naming the field everywhere else. The proof runs only when
-  # the plan said nothing: a field that declared `true` has already answered
-  # the question, and re-deriving it would let this package's own opinion
-  # override the host's assertion.
+  # compiles to `true` exactly where `Source.vault_backed?/2` proves it and the
+  # `from:` type names no `legacy:` module (ADR-0004's Amendment of
+  # 2026-09-29), and is a `CompileError` naming the field everywhere else. The
+  # proof runs only when the plan said nothing: a field that declared `true`
+  # has already answered the question, and re-deriving it would let this
+  # package's own opinion override the host's assertion.
   @spec source_authenticated!(keyword(), module(), Source.field_opts(), meta()) :: boolean()
   defp source_authenticated!(opts, from, source_opts, meta) do
     case Keyword.fetch(opts, :source_authenticated) do
@@ -529,9 +538,36 @@ defmodule Encryptor.Ecto.Migration do
         raise_at!(meta, not_an_acknowledgement_message(source_opts, other))
 
       :error ->
-        Source.vault_backed?(from, source_opts) or
-          raise_at!(meta, undeclared_source_message(source_opts, from))
+        undeclared_source!(from, source_opts, meta)
     end
+  end
+
+  # A vault-backed `from:` that names a `legacy:` module reads every row its
+  # vault refuses through that module, which is the host's own legacy reader:
+  # `Source.vault_backed?/2` proves the vault's half only, so such a field is
+  # asked like any other legacy field.
+  @spec undeclared_source!(module(), Source.field_opts(), meta()) :: true
+  defp undeclared_source!(from, source_opts, meta) do
+    cond do
+      not Source.vault_backed?(from, source_opts) ->
+        raise_at!(meta, undeclared_source_message(source_opts, from))
+
+      legacy = legacy_reader(from, source_opts) ->
+        raise_at!(meta, undeclared_legacy_message(source_opts, from, legacy))
+
+      true ->
+        true
+    end
+  end
+
+  # The `legacy:` module a vault-backed type's frozen params name, or `nil`
+  # where the declaration named none. Called only after `Source.vault_backed?/2`
+  # answered `true`, so `init/1` exists and returns the frozen map, `:legacy`
+  # among its keys.
+  @spec legacy_reader(module(), Source.field_opts()) :: module() | nil
+  defp legacy_reader(from, source_opts) do
+    %{legacy: legacy} = from.init(schema: source_opts[:schema], field: source_opts[:field])
+    legacy
   end
 
   # A validator is escaped into the compiled plan, so it has to be a remote
@@ -779,6 +815,18 @@ defmodule Encryptor.Ecto.Migration do
       "3). Declaring `false` counts that field's rows " <>
       "`:migratable_unverified` and needs a `validate:` before `--mode " <>
       "write` will run it."
+  end
+
+  defp undeclared_legacy_message(source_opts, from, legacy) do
+    "#{field_at(source_opts)} declares no `source_authenticated:`, and its " <>
+      "`from:` type #{inspect(from)} is one of this package's own types but " <>
+      "declares `legacy: #{inspect(legacy)}`. A row the vault cannot read is " <>
+      "read through that legacy module, and nothing here can prove that its " <>
+      "bytes are authenticated. Write `source_authenticated: true` if someone " <>
+      "has checked that the legacy cipher authenticates - an AEAD cipher such " <>
+      "as AES-GCM does - or `source_authenticated: false` if it does not, or " <>
+      "if nobody knows - the answer the forward plan gave for that legacy " <>
+      "module (ADR-0004 decision 3)."
   end
 
   defp not_an_acknowledgement_message(source_opts, given) do

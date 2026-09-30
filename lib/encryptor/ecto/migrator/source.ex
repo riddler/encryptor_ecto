@@ -144,10 +144,13 @@ defmodule Encryptor.Ecto.Migrator.Source do
   Whether a `from:` module is provably one of this package's own vault-backed
   types.
 
-  This is the whole of what ADR-0004's proposed amendment of 2026-08-28 (Q2)
-  lets a plan stay silent about. A field whose `from:` answers `true` here has
-  its authentication proven by the package that wrote the bytes, so it needs
-  no `source_authenticated:` declaration; every other `from:` is the host's own
+  This is the proof ADR-0004's proposed amendment of 2026-08-28 (Q2) requires
+  before a plan may stay silent about a field. A field whose `from:` answers
+  `true` here has its authentication proven by the package that wrote the
+  bytes, so it needs no `source_authenticated:` declaration - unless that
+  declaration also names `legacy:`, whose rows are read by the host's own
+  legacy reader, and which `Encryptor.Ecto.Migration` asks about anyway
+  (ADR-0004's Amendment of 2026-09-29). Every other `from:` is the host's own
   legacy reader, this package cannot tell an AEAD cipher from a stream cipher
   by looking (decision 1), and `Encryptor.Ecto.Migration` asks at `mix
   compile`.
