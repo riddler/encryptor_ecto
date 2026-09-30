@@ -355,4 +355,130 @@ defmodule Encryptor.Ecto.TestRunbook do
         source_authenticated: true
     end
   end
+
+  # -- the parallel-column exit ---------------------------------------------
+
+  defmodule ParallelIntegration do
+    @moduledoc """
+    The parallel-column shape's schema during the window: both fields of each
+    pair declared.
+
+    The old field keeps its legacy type and stays the one the application
+    reads; the new `<field>_encrypted` field names this package's type with no
+    `legacy:`, because nothing but the new format is ever written into it. The
+    changeset writes both, which is the host's dual write: the package ships
+    no dual-write type.
+    """
+
+    use Ecto.Schema
+
+    alias Encryptor.Ecto.TestRunbook.Final
+    alias Encryptor.Ecto.TestRunbook.Legacy
+
+    @type t :: %__MODULE__{}
+
+    @pairs [
+      client_secret: :client_secret_encrypted,
+      access_token: :access_token_encrypted,
+      refresh_token: :refresh_token_encrypted
+    ]
+
+    schema "integrations" do
+      field(:workspace_id, :string)
+      field(:client_secret, Legacy.Binary)
+      field(:access_token, Legacy.String)
+      field(:refresh_token, Legacy.String)
+      field(:client_secret_encrypted, Final.Binary)
+      field(:access_token_encrypted, Final.String)
+      field(:refresh_token_encrypted, Final.String)
+    end
+
+    @doc "The dual write: every change to an old field is also put on its pair."
+    @spec changeset(t(), map()) :: Ecto.Changeset.t()
+    def changeset(integration, attrs) do
+      integration
+      |> Ecto.Changeset.cast(attrs, [:workspace_id | Keyword.keys(@pairs)])
+      |> dual_write()
+    end
+
+    defp dual_write(changeset) do
+      Enum.reduce(@pairs, changeset, fn {old, new}, changeset ->
+        case Ecto.Changeset.fetch_change(changeset, old) do
+          {:ok, value} -> Ecto.Changeset.put_change(changeset, new, value)
+          :error -> changeset
+        end
+      end)
+    end
+  end
+
+  defmodule CutOverIntegration do
+    @moduledoc """
+    The parallel-column shape's schema reading the new columns: the read
+    cut-over, in the shape the guide's last step allows once the old columns
+    are gone.
+
+    Reads come from the new columns, under the old field names: `source:`
+    points each field at its `<field>_encrypted` column, and `column:` pins
+    the encryption context to the name the pass wrote under. The derived
+    context column is the field's name, so without the pin every row would be
+    read under `"client_secret"` and refused.
+    """
+
+    use Ecto.Schema
+
+    alias Encryptor.Ecto.TestRunbook.Final
+
+    @type t :: %__MODULE__{}
+
+    schema "integrations" do
+      field(:workspace_id, :string)
+
+      field(:client_secret, Final.Binary,
+        source: :client_secret_encrypted,
+        column: "client_secret_encrypted"
+      )
+
+      field(:access_token, Final.String,
+        source: :access_token_encrypted,
+        column: "access_token_encrypted"
+      )
+
+      field(:refresh_token, Final.String,
+        source: :refresh_token_encrypted,
+        column: "refresh_token_encrypted"
+      )
+    end
+  end
+
+  defmodule ParallelMigration do
+    @moduledoc """
+    The parallel-column shape's plan: each old field, read through its legacy
+    type, written `into:` its `<field>_encrypted` pair through this package's
+    type with no `legacy:`.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestRunbook.ParallelIntegration do
+      scope_from :workspace_id
+
+      field :client_secret,
+        from: Encryptor.Ecto.TestRunbook.Legacy.Binary,
+        to: Encryptor.Ecto.TestRunbook.Final.Binary,
+        into: :client_secret_encrypted,
+        source_authenticated: true
+
+      field :access_token,
+        from: Encryptor.Ecto.TestRunbook.Legacy.String,
+        to: Encryptor.Ecto.TestRunbook.Final.String,
+        into: :access_token_encrypted,
+        source_authenticated: true
+
+      field :refresh_token,
+        from: Encryptor.Ecto.TestRunbook.Legacy.String,
+        to: Encryptor.Ecto.TestRunbook.Final.String,
+        into: :refresh_token_encrypted,
+        source_authenticated: true
+    end
+  end
 end

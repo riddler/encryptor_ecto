@@ -61,7 +61,10 @@ defmodule Encryptor.Ecto.TestRepo do
     {13, Encryptor.Ecto.TestMigrationSuspensions},
     # The scope-in-jobs guide's host: a process-scoped table and a
     # projector's read model.
-    {14, Encryptor.Ecto.TestMigrationScopeInJobs}
+    {14, Encryptor.Ecto.TestMigrationScopeInJobs},
+    # The runbook's host again, taking the parallel-column exit instead: a
+    # `<field>_encrypted` column beside each of the three encrypted ones.
+    {15, Encryptor.Ecto.TestMigrationRunbookParallel}
   ]
 
   @doc """
