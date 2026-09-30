@@ -17,6 +17,11 @@ encrypted `pan` and an encrypted `notes`, a `signups` table with an encrypted
 `email` and an A/B `variant` column, and one exact-match lookup - find a signup
 by email, served today by a `Cloak.Ecto.SHA256` sibling column.
 
+The steps below rewrite each encrypted column in place, which is the default
+and the shorter walk. A host that would rather keep the old column untouched
+until the very end can take [the parallel-column exit](#the-other-exit-a-parallel-column)
+instead: a new column beside each old one, backfilled and verified, then read.
+
 ## Before you start
 
 - **The legacy key material still exists and the legacy modules still read the
@@ -770,6 +775,263 @@ gave it. Its `from:` is one of this package's own types, but that type still
 declares `legacy:` until step 8, so a row the pass has not rewritten is read
 through the cloak module - and the plan does not compile without the
 declaration.
+
+## The other exit: a parallel column
+
+The in-place walk above is the default. This is the other shape: a new binary
+column beside each encrypted one, named `<field>_encrypted` by convention -
+`pan_encrypted` beside `pan` - which the host's schema writes alongside the old
+one during the window. The migrator backfills it, reads stay on the old column
+until the backfill verifies, one deploy moves reads to the new column, and only
+then do the old column and the legacy library go.
+
+What it buys is an old column nobody but the application writes: the pass reads
+it and never writes it, so until the drop the way back from any step is
+reverting a deploy. What it costs is a second column per field for the length of
+the window, a dual write in the host's own changeset, and one more deploy.
+
+The package ships no DDL and no dual-write type for this. The two columns are
+the host's own migrations, and the dual write is the host's own changeset. The
+package's part is the backfill leg, which is the same `into:` a plan uses to
+adopt encryption on a plaintext column.
+
+| # | Step | Reversible by |
+|---|---|---|
+| 0 | Finish or abandon any in-flight legacy key rotation | Nothing written |
+| 1 | Provision vault key material for every scope | Nothing to reverse; no host data touched |
+| 2 | Deploy with both libraries in the tree and the `<field>_encrypted` columns added | Reverting the deploy; the new columns are empty |
+| 3 | Deploy the dual write: both fields declared, the changeset writing both. Reads stay on the old column | Reverting the deploy |
+| 4 | Dry run of the parallel plan | Nothing written |
+| 5 | Write the new columns. The old ones are not written | Reverting the step 3 deploy; the new columns are ignored |
+| 6 | Verify over the new columns. Exit 0 is the acceptance test | n/a |
+| 7 | Cut reads over to the new columns, in one deploy | Reverting that deploy; the old columns are still current |
+| 8 | Drop the old columns, the legacy types and the legacy library | Nothing; this is the end of the window |
+
+### Parallel step 0. Finish or abandon any in-flight legacy rotation
+
+The same as [step 0](#step-0-finish-or-abandon-any-in-flight-legacy-rotation)
+of the in-place walk, with one thing to know about checking it. The census a
+parallel plan renders reads the **new** column, because that is the column the
+pass writes, so before step 5 its format query shows only the rows the dual
+write has written and never a legacy one. To see which formats the old column
+holds, run the same format query over the old column yourself:
+
+```sql
+SELECT substring("pan" from 1 for 4) AS header,
+       count(*) AS rows
+FROM "cards"
+WHERE "pan" IS NOT NULL
+GROUP BY 1
+ORDER BY 2 DESC;
+```
+
+**Expected:** the prefixes of the legacy format and nothing else. Two legacy
+prefixes growing against each other is a legacy rotation still running.
+
+### Parallel step 1. Provision vault key material for every scope
+
+The same as [step 1](#step-1-provision-vault-key-material-for-every-scope) of the
+in-place walk.
+
+### Parallel step 2. Deploy with both libraries and the new columns
+
+Add this package beside `cloak_ecto`, as [step 2](#step-2-deploy-with-both-libraries-in-the-tree)
+of the in-place walk does, and add the new columns in your own migration. They
+are nullable binary columns: a row the backfill has not reached is `NULL` there.
+
+```elixir
+alter table(:cards) do
+  add :pan_encrypted, :binary
+  add :notes_encrypted, :binary
+end
+```
+
+**Expected:** an ordinary deploy, with every new column `NULL` on every row.
+
+### Parallel step 3. Deploy the dual write
+
+The old fields keep their legacy types and stay the fields the application
+reads. Beside each, the schema declares its `<field>_encrypted` pair on this
+package's type with **no `legacy:`**, because nothing but the new format is ever
+written into it, and the changeset writes both.
+
+```elixir
+defmodule MyApp.Encrypted.Binary do
+  use Encryptor.Ecto.Binary, vault: MyApp.Vault
+end
+
+defmodule MyApp.Encrypted.String do
+  use Encryptor.Ecto.String, vault: MyApp.Vault
+end
+
+schema "cards" do
+  field :merchant_id, :string
+  field :pan, MyApp.Cloak.Encrypted.Binary
+  field :notes, MyApp.Cloak.Encrypted.String
+  field :pan_encrypted, MyApp.Encrypted.Binary
+  field :notes_encrypted, MyApp.Encrypted.String
+end
+
+@pairs [pan: :pan_encrypted, notes: :notes_encrypted]
+
+def changeset(card, attrs) do
+  card
+  |> cast(attrs, [:merchant_id | Keyword.keys(@pairs)])
+  |> dual_write()
+end
+
+defp dual_write(changeset) do
+  Enum.reduce(@pairs, changeset, fn {old, new}, changeset ->
+    case fetch_change(changeset, old) do
+      {:ok, value} -> put_change(changeset, new, value)
+      :error -> changeset
+    end
+  end)
+end
+```
+
+The dual write has to be live before step 5, and it has to cover every write
+that changes the old column. The pass's compare-and-swap compares the **new**
+column only: a row the application writes while the pass holds it is left alone
+because its new column changed, and an application write that changed only the
+old column would leave the pass free to store a value that is already stale.
+A write that bypasses the changeset - an `update_all`, a raw SQL statement - is
+a write the dual write does not see, so find those before this deploy.
+
+The encryption context of a new column binds its own name: this package's types
+derive the declared `"column"` from the field, so `pan_encrypted`'s rows are
+written under `"pan_encrypted"`. Step 8 comes back to that.
+
+**Expected:** new and updated rows carry both columns, the old one in the legacy
+format and the new one in this package's, and reads are unchanged.
+
+**If it differs:** a row whose new column stays `NULL` after an update is a write
+path the dual write does not reach. Step 5 backfills it, but a write path that
+stays uncovered keeps producing rows step 6 reports.
+
+### Parallel step 4. Write the plan and rehearse it
+
+Each field reads the old column through the legacy type module the rows were
+written with and writes `into:` its `<field>_encrypted` pair through this
+package's type, the one step 3 declared without `legacy:`:
+
+```elixir
+defmodule MyApp.Encryption.CloakParallel do
+  use Encryptor.Ecto.Migration, repo: MyApp.Repo
+
+  rewrite MyApp.Payments.Card do
+    scope_from :merchant_id
+
+    field :pan,
+      from: MyApp.Cloak.Encrypted.Binary,
+      to: MyApp.Encrypted.Binary,
+      into: :pan_encrypted,
+      source_authenticated: true
+
+    field :notes,
+      from: MyApp.Cloak.Encrypted.String,
+      to: MyApp.Encrypted.String,
+      into: :notes_encrypted,
+      source_authenticated: true
+  end
+end
+```
+
+`source_authenticated:` is required exactly as in [step 4](#step-4-rehearse-with-a-dry-run)
+of the in-place walk, with the same answers and the same `validate:` for a
+cipher that does not authenticate. The checkpoint table, the release task and
+the dry run are that step's too, with this plan's name in place of the in-place
+one.
+
+**Expected:** exit 0 with `undecryptable: 0`. The rows the dual write has
+already written count `already_target`; every other row with a value counts
+`migratable`.
+
+**If it differs:** the in-place step 4 table applies unchanged.
+
+### Parallel step 5. Write the new columns
+
+Run the plan in `mode: :write`, with the same options and the same resume as
+[step 5](#step-5-run-the-pass) of the in-place walk. The pass reads each old
+column and writes only its pair: every old column is byte for byte what it was
+before the pass, and a row whose old column is `NULL` leaves its pair `NULL` and
+counts `null`.
+
+**Expected:** exit 0, `failures: 0`. The integrity query the plan's census
+renders compares the two columns: `target_non_null` reaching `source_non_null`
+is the backfill catching up, and a non-zero `target_empty` is the failure it
+watches for.
+
+### Parallel step 6. Verify over the new columns
+
+```
+$ mix encryptor.ecto.verify MyApp.Encryption.CloakParallel --sample all
+```
+
+`verify/2` reads the column the plan writes, so over this plan it reads the
+`<field>_encrypted` columns. The release `eval` form is
+[step 6](#step-6-verify-over-the-whole-scope)'s with this plan's name.
+
+**Expected:** exit 0, with every row `already_target` or `null`.
+
+**If it differs:** a non-zero `migratable` is a row whose new column the pass
+did not reach or a write path the dual write missed. Re-run step 5 and look for
+the write path.
+
+Reads are still on the old columns here, and nothing has depended on the new
+ones yet. There is no `legacy_load` count in this shape - the new types carry
+no `legacy:` - so exit 0 over `sample: :all` is the whole of the signal that
+step 7 is due.
+
+### Parallel step 7. Cut reads over, in one deploy
+
+Move every read of an encrypted field to its `<field>_encrypted` pair, in one
+deploy of its own. Keep the dual write in this deploy: the old columns stay
+current, so reverting it is the whole of the way back.
+
+A legacy lookup column is dealt with as in
+[step 7](#step-7-replace-the-legacy-lookup-column) of the in-place walk, with
+the keyed index declared over the `<field>_encrypted` field, since that is the
+field reads now come from.
+
+**Expected:** every read succeeds, and every value read equals what the old
+column held.
+
+**If it differs:** a `DecryptError` on a row step 6 verified is a read through a
+declaration whose `"column"` is not the one the pass wrote under - see step 8's
+note on renaming.
+
+### Parallel step 8. Drop the old columns and the legacy library
+
+Once step 7 has been live long enough to trust:
+
+- remove the old fields and the dual write from the schema and the changeset,
+- delete the plan module, the legacy type modules and their vault,
+- drop `cloak_ecto` from `mix.exs`,
+- then drop the old columns in your own migration, once no deployed code names
+  them.
+
+A host that wants the old field names back can have them without re-encrypting
+anything, provided it pins the context to the name the rows were written under:
+
+```elixir
+field :pan, MyApp.Encrypted.Binary, source: :pan_encrypted, column: "pan_encrypted"
+```
+
+Without `column:` the declared context would be derived from the field name,
+`"pan"`, and every row would be refused. The same pin keeps a later physical
+rename of the column readable.
+
+**Expected:** the suite is green and the deploy is ordinary.
+
+### Why there is no reverse plan here
+
+The pass never writes an old column, and the dual write keeps every old column
+current until step 8. So up to step 7 the way back from any step is reverting a
+deploy: the application reads the old columns again and the new ones are
+ignored. After step 8 there is no old column to walk back into, which is also
+where the in-place walk's [reverse plan](#if-you-must-go-back-the-reverse-plan)
+stops being possible.
 
 ## Watching a pass without a key
 
