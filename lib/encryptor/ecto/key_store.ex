@@ -44,7 +44,7 @@ defmodule Encryptor.Ecto.KeyStore do
   | Option | | |
   |---|---|---|
   | `:repo` | required | The `Ecto.Repo` the wrapped-key table lives in |
-  | `:root_vault` | required | The vault the wrappings were produced by. `Static` provider, `cache: false` |
+  | `:root_vault` | required unless `:gcp_kms` is set | The vault the `"engine_message"` wrappings were produced by. `Static` provider, `cache: false` |
   | `:reference_subkey` | required | 32 bytes: the pinned reference root expanded under `"tenant-ref"` |
   | `:table` | `"encryptor_wrapped_keys"` | The table to read |
   | `:prefix` | `nil` | The schema prefix the table lives in; the repo's default when absent |
@@ -108,6 +108,20 @@ defmodule Encryptor.Ecto.KeyStore do
   own `c:Encryptor.Provider.init/1` at start, so a misconfigured client fails
   the vault's boot rather than its first GCP read. The decision is this
   package's ADR-0005, "Amendment A (2026-09-24)".
+
+  ### `:root_vault` is required only when `:gcp_kms` is absent
+
+  The root vault unwraps `"engine_message"` rows and nothing else. A table
+  that holds only `"gcp_kms_ciphertext"` rows has no use for one, so a store
+  configured with `:gcp_kms` starts without it. A store configured with
+  neither is refused at start as `{:missing_config, [:provider,
+  :root_vault]}`: it could serve no row at all.
+
+  Without a root vault, an `"engine_message"` row is answered rather than
+  crashed on, as `{:invalid_key_descriptor, {:no_root_vault,
+  "engine_message"}}`, and the "one bad row" rule below keeps that answer to
+  the one row. The decision is this package's ADR-0005, "Amendment B
+  (2026-09-29)".
 
   ## What it does, and the three things it will not do
 
@@ -262,8 +276,13 @@ defmodule Encryptor.Ecto.KeyStore do
       without `:gcp_kms`. The branch has no client to unwrap with, so it
       answers rather than crashes. A store with no GCP-shaped rows never
       reaches it.
+    * `{:invalid_key_descriptor, {:no_root_vault, "engine_message"}}` - a
+      well-formed engine-message row in a store configured with `:gcp_kms`
+      and without `:root_vault`. There is no vault to unwrap it under, so it
+      answers rather than crashes. A store with no engine-message rows never
+      reaches it, and the `key_id` rule above runs first.
 
-  None of those five widens `t:Encryptor.Provider.reason/0`: they are new terms
+  None of those six widens `t:Encryptor.Provider.reason/0`: they are new terms
   inside `{:invalid_key_descriptor, term()}`, which is open by construction.
 
   A GCP row in a store configured *with* `:gcp_kms` answers whatever
@@ -326,7 +345,7 @@ defmodule Encryptor.Ecto.KeyStore do
   """
   @type state :: %{
           repo: module(),
-          root_vault: module(),
+          root_vault: module() | nil,
           reference_subkey: binary(),
           table: String.t(),
           prefix: String.t() | nil,
@@ -374,7 +393,7 @@ defmodule Encryptor.Ecto.KeyStore do
   @spec init(keyword()) :: {:ok, state()} | {:error, term()}
   def init(opts) when is_list(opts) do
     with {:ok, repo} <- module_option(opts, :repo),
-         {:ok, root_vault} <- module_option(opts, :root_vault),
+         {:ok, root_vault} <- root_vault(opts),
          {:ok, subkey} <- reference_subkey(opts),
          {:ok, table} <- table(opts),
          {:ok, prefix} <- prefix(opts),
@@ -925,6 +944,13 @@ defmodule Encryptor.Ecto.KeyStore do
   # name, so neither arm carries one out.
   @spec unwrap_row(state(), wrapping_shape(), row(), Provider.selector()) ::
           {:ok, Aes.t()} | {:error, Provider.reason()}
+  # ADR-0005 Amendment B: a store configured with `:gcp_kms` may start without
+  # a root vault, and an engine-message row it meets then is an answer rather
+  # than a crash. It matches only a well-formed row, so the `key_id` rule
+  # below still answers first, as `missing_key_id` does on the GCP side.
+  defp unwrap_row(%{root_vault: nil}, :engine_message, %{key_id: nil}, _selector),
+    do: {:error, {:invalid_key_descriptor, {:no_root_vault, "engine_message"}}}
+
   defp unwrap_row(state, :engine_message, %{key_id: nil} = row, _selector) do
     case Envelope.unwrap(state.root_vault, wrapped_key(row)) do
       {:ok, descriptor} -> {:ok, descriptor}
@@ -978,6 +1004,18 @@ defmodule Encryptor.Ecto.KeyStore do
       value when is_atom(value) -> {:ok, value}
       _other -> {:error, {:invalid_config, key, :not_a_module}}
     end
+  end
+
+  # ADR-0005 Amendment B. The root vault unwraps engine messages and nothing
+  # else, so a store with the GCP branch's client may go without one. A store
+  # with neither could serve no row, and is refused in the terms the option
+  # was always refused in. Presence is all that is read here: a `:gcp_kms`
+  # that is malformed is refused by `gcp_kms/2`, further down the chain.
+  @spec root_vault(keyword()) :: {:ok, module() | nil} | {:error, term()}
+  defp root_vault(opts) do
+    if Keyword.get(opts, :root_vault) == nil and Keyword.get(opts, :gcp_kms) != nil,
+      do: {:ok, nil},
+      else: module_option(opts, :root_vault)
   end
 
   @spec reference_subkey(keyword()) :: {:ok, binary()} | {:error, term()}

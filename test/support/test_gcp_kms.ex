@@ -43,6 +43,25 @@ defmodule Encryptor.Ecto.TestGcpKms do
   def state(overrides \\ []), do: TestKeyStore.state(Keyword.put(overrides, :gcp_kms, opts()))
 
   @doc """
+  The provider options of a store that holds only GCP rows: `:gcp_kms` set,
+  and no `:root_vault` at all.
+  """
+  @spec gcp_only_provider_opts() :: keyword()
+  def gcp_only_provider_opts do
+    [gcp_kms: opts()]
+    |> TestKeyStore.provider_opts()
+    |> Keyword.delete(:root_vault)
+  end
+
+  @doc "Key store state for `gcp_only_provider_opts/0`, resolved as the vault resolves it."
+  @spec gcp_only_state() :: term()
+  def gcp_only_state do
+    {:ok, state} = KeyStore.init(gcp_only_provider_opts())
+
+    state
+  end
+
+  @doc """
   Mints a selector's master key through the provider and stores the row.
 
   `Encryptor.Provider.GcpKms.provision/2` mints version 1 and nothing else;
@@ -213,6 +232,37 @@ defmodule Encryptor.Ecto.TestGcpKms do
       {:ok,
        Keyword.merge(config,
          provider: {KeyStore, TestKeyStore.provider_opts(gcp_kms: TestGcpKms.opts())},
+         reference_subkey: TestKeyStore.reference_subkey()
+       )}
+    end
+  end
+
+  defmodule GcpOnlyScope do
+    @moduledoc """
+    A scoped vault over a key store configured with `:gcp_kms` and no
+    `:root_vault`.
+
+    The test that uses it starts it, rather than `test_helper.exs`, so a key
+    store that refused to start without a root vault fails that test's
+    assertion rather than the suite's boot.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :scoped,
+      algorithm_suite_id: 0x0478,
+      required_context: ["table", "column"],
+      cache: false
+
+    alias Encryptor.Ecto.KeyStore
+    alias Encryptor.Ecto.TestGcpKms
+    alias Encryptor.Ecto.TestKeyStore
+
+    @doc "Layer 5: the provider and the reference subkey, both key material."
+    def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: {KeyStore, TestGcpKms.gcp_only_provider_opts()},
          reference_subkey: TestKeyStore.reference_subkey()
        )}
     end
