@@ -1416,3 +1416,33 @@ table, row 19), the tenant profile the scope rule names is `:scoped`, and the
 unchanged.
 
 Provenance: accepted by the operator, 2026-09-26.
+
+## Note (2026-09-29): decision 3's "ciphertext columns only" is read through ADR-0004's Note on a folded blind index
+
+Decision 3 above writes "with `update_all` over the ciphertext columns only".
+ADR-0004 carries the Note that says how a field which folds its blind index
+into the rewrite reads into that sentence: "Note (2026-09-24): Q1 is answered -
+a blind index may be folded into the rewrite, per field", in its paragraph
+headed "What this reads into ADR-0002 decision 3". This record carried no pointer to
+it; this Note is that pointer, and decides nothing.
+
+In short, as that Note states it: a folded field adds the one index column its
+plan names (`index:`) to the same `update_all`, and the migrator still builds
+no changeset, calls no `Repo.update/2` and stays below the schema layer. A
+field that folds nothing writes exactly the columns decision 3 names. At
+`6ac293c` the extra column is the one entry `Encryptor.Ecto.Migrator.Pass`'s
+`index_set/2` returns (none when the plan names no index), and it goes into
+the same `set` as the ciphertext in `swap/5`.
+
+The same Note answers ADR-0004 decision 9's first reason for a separate index
+pass, that a failure in either is attributable to one of them. Decision 9 also
+places the index backfill "after the ciphertext rewrite is verified". That
+heading, "the migrator does not do it", still holds for the default path,
+which is unchanged. For a folded field the index is computed from the
+plaintext the pass's own source load produced, not from the ciphertext it
+writes (`Encryptor.Ecto.Migrator.Pass`'s `migrate/6` hands `index_set/2` the
+value `load_source/3` returned), so running the index after a verify of the
+rewrite would check nothing the folded value depends on, and a `verify/2` run
+after the pass still checks the ciphertext as before.
+
+Provenance: bead ece-be4.
