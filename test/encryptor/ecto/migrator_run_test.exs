@@ -82,7 +82,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, id)
     end
 
-    # Sabotage: made `probe/2` answer `:not_target` unconditionally - the
+    # Sabotage: made `probe/3` answer `:not_target` unconditionally - the
     # second run re-encrypted every already-migrated row, which is exactly the
     # idempotence decision 5 buys.
     test "a second run finds every row already in the target state" do
@@ -386,7 +386,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert %TestSchemas.Signup{email_encrypted: "buyer@example.com"} = signup(id)
     end
 
-    # Sabotage: made `probe/2` read the source column instead of the target -
+    # Sabotage: made `probe/3` read the source column instead of the target -
     # the second adoption pass re-encrypted a row that was already backfilled.
     test "a second adoption pass finds the row already backfilled" do
       _id = insert_signup(email: "buyer@example.com")
