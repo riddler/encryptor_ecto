@@ -1446,3 +1446,38 @@ rewrite would check nothing the folded value depends on, and a `verify/2` run
 after the pass still checks the ciphertext as before.
 
 Provenance: bead ece-be4.
+
+## Note (2026-09-29): two corrections to item 1 of the rotation Note of 2026-09-14
+
+The Note of 2026-09-14 headed "five readings of the rotation amendment above"
+stands. Two things in its item 1 are corrected here, by addition.
+
+**Each cite on the rewrite path carries its own commit.** Item 1 cites
+`migrate/6` as (`pass.ex:700-707`, ece ec26828) and then `load_source/3` as
+(`:712-718`) and `read_source/3` as (`:744-747`), the last two with no commit
+of their own; they were read at the commit the group opens with. Labelled one
+by one: `load_source/3` is `lib/encryptor/ecto/migrator/pass.ex:712-718` at
+ece ec26828, and `read_source/3` is `pass.ex:744-747` at ece ec26828, each
+range starting at the function's `@spec`. At ece aa78d82 the same three are
+`migrate/6` at `pass.ex:735-743`, `load_source/3` at `pass.ex:767-773` and
+`read_source/3` at `pass.ex:799-802`, and `read_source/3` still hands the
+value to `Encryptor.Ecto.Migrator.Source.load/3`.
+
+**"They are right" holds for the probe, not for the pass.** Item 1 says the
+header arm of `probe/3` answers `:not_target` without calling `load_probe/2`,
+"which is exactly what the two sentences after it say, and they are right".
+The amendment's sentence about `load_probe/2` (`:1168-1170`) ends "so
+rotation costs no decrypt it did not already cost". Of the probe that is
+true: a row the key-name comparison rejects is never handed to
+`load_probe/2` (`pass.ex:581-586`, ece aa78d82). Of the pass it is not: the
+rejected row is rewritten, and the rewrite reads the source side through
+`load_source/3` and `read_source/3`, so each row the comparison sends to the
+rewrite costs one source decrypt. Item 1's own next sentences say so ("A
+rotation spends one decrypt per rewritten row rather than none"), as does the
+Note of 2026-09-26 above; the endorsement is read as covering the probe path
+only.
+
+This Note decides nothing: no decision, no amendment's rule and no status
+word above changes.
+
+Provenance: bead ece-ygr.
