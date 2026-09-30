@@ -269,6 +269,112 @@ Both types name the same vault and resolve to the same library id, so a
 projection row is under its library's key like that library's patron rows,
 and a shred of the library's key reaches both.
 
+## Step 5. Run the projector in a process of its own
+
+A projector usually runs as a handler process of its own: subscribed to the
+event log, started under the host's supervision tree, and on whichever node
+the tree put it. Nothing that process inherits carries a scope. It never set
+one, and a process dictionary crosses neither a process nor a node, so the
+scope of the process that emitted an event, or of the process that asks for
+a projection row, is not there to read. The handler reads the scope off the
+data it is handed instead: off the event for a write, and off the row for a
+read-back.
+
+A write needs nothing new. The event carries its library id, and Step 4's
+`project/1` hands it to the resolver. A read-back is the case Step 4 does
+not cover: the caller has a projection row's id and nothing else, so no
+library id arrives with the request. The row carries one, in its own
+plaintext `library_id` column. Read that column first, in a query that
+selects nothing encrypted and so needs no scope, and then load the row
+inside `with_library/2` under the library it named:
+
+```elixir
+defmodule Library.LoanViews do
+  import Ecto.Query, only: [from: 2]
+
+  alias Library.LoanScope
+  alias Library.LoanView
+  alias Library.Repo
+
+  def fetch!(id) do
+    library_id = Repo.one!(from(v in LoanView, where: v.id == ^id, select: v.library_id))
+
+    LoanScope.with_library(library_id, fn -> Repo.get!(LoanView, id) end)
+  end
+end
+```
+
+The handler takes each event the log delivers as an `{:event, event}`
+message and answers read-backs by call:
+
+```elixir
+defmodule Library.LoanProjectionHandler do
+  use GenServer
+
+  alias Library.LoanProjector
+  alias Library.LoanViews
+
+  def start_link(opts), do: GenServer.start_link(__MODULE__, :ok, opts)
+
+  def fetch_view(server, id), do: GenServer.call(server, {:fetch_view, id})
+
+  @impl GenServer
+  def init(:ok), do: {:ok, nil}
+
+  @impl GenServer
+  def handle_info({:event, event}, state) do
+    LoanProjector.project(event)
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_call({:fetch_view, id}, _from, state) do
+    {:reply, LoanViews.fetch!(id), state}
+  end
+end
+```
+
+The handler sets no scope of its own and needs none: each write is under
+its event's library and each read-back under its row's, whichever process
+sent the message and whatever that process's scope was. The same code runs
+unchanged on every node, because everything it reads the scope from - the
+event and the row - is data that crosses the node with it.
+
+## On more than one node
+
+The steps above hold on a cluster as they stand: the scope travels in a
+closure, in a job's arguments, on an event and in a row's own column, and
+never in a process dictionary. One piece of a vault's state is different in
+kind, and that is whether a scope is suspended.
+
+By default a vault keeps its suspended set in a table on the node the vault
+runs on: `Encryptor.Vault.Suspension.Store.Ets` is the default
+`:suspension_store`. Under that default a suspension is per node.
+`Encryptor.Vault.suspend/2` stops the library on the node it ran on and
+nowhere else, a handler process on another node goes on writing and reading
+that library's rows, and the suspension is lost when the vault restarts. A
+host running on more than one node would have to suspend on each, and again
+after every deploy.
+
+A deployment on more than one node configures its vault with
+`Encryptor.Ecto.SuspensionStore`, a store over the host's own repo that
+every node reads:
+
+```elixir
+config :library, Library.Vault,
+  suspension_store: {Encryptor.Ecto.SuspensionStore, repo: Library.Repo},
+  suspension_poll_interval: 5_000
+```
+
+A suspension then holds on the node that wrote it once the table has it,
+and every other node reads the table back on the vault's own poll, every
+`:suspension_poll_interval` milliseconds: the interval bounds how long a
+node goes on serving a library after it was suspended elsewhere. The
+suspension also survives restarts. The table arrives as migration source the
+host reviews and runs, from `mix encryptor.ecto.gen.suspension_store_migration`;
+`Encryptor.Ecto.SuspensionStore`'s moduledoc covers its options, its table
+and what it answers.
+
 ## What this guide checked
 
 `test/encryptor/ecto/scope_in_jobs_guide_test.exs` compiles every module
@@ -280,4 +386,10 @@ package. The test then shows that a new process starts with no scope, runs
 the `Task` of Step 2 and the job of Step 3 in processes of their own - the
 job's arguments through a JSON round trip first - and replays interleaved
 events of two libraries through the projector of Step 4, with no process
-scope at all and inline under the other library's process scope.
+scope at all and inline under the other library's process scope. It starts
+the handler of Step 5 as a process of its own, delivers it events of two
+libraries from a process with no scope and from one under the other library's
+scope, and reads each row back through the handler by its id alone. The
+section on more than one node is not run: a test suite on one node cannot
+show a second node's view, and `Encryptor.Ecto.SuspensionStore` has tests of
+its own.

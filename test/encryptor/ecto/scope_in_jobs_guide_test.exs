@@ -3,21 +3,27 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
   The scope-in-jobs guide's host, run against a real vault and real tables.
 
   `docs/guides/scope-in-jobs-and-projectors.md` shows a host carrying the
-  scope into a `Task`, into a background job, and into an event projector.
+  scope into a `Task`, into a background job, and into an event projector,
+  inline and as a handler process of its own.
   `Encryptor.Ecto.TestScopeInJobs` is that code; the first tests below hold it
   to the guide's text, and the rest assert what the guide says happens, one
   describe per step.
 
   Every process the guide talks about is a real one here: the `Task` of
   Step 2 is a `Task`, and the job of Step 3 runs in a `Task` of its own - the
-  stand-in for a queue process - after a JSON round trip of its arguments.
+  stand-in for a queue process - after a JSON round trip of its arguments,
+  and the handler of Step 5 is a `GenServer` the test starts.
   """
 
   use Encryptor.Ecto.RepoCase, async: true
 
+  import Ecto.Query, only: [from: 2]
+
+  alias Ecto.Adapters.SQL.Sandbox
   alias Encryptor.Ecto.DecryptError
   alias Encryptor.Ecto.MissingScopeError
   alias Encryptor.Ecto.Scope
+  alias Encryptor.Ecto.TestScopeInJobs.LoanProjectionHandler
   alias Encryptor.Ecto.TestScopeInJobs.LoanProjector
   alias Encryptor.Ecto.TestScopeInJobs.LoanScope
   alias Encryptor.Ecto.TestScopeInJobs.LoanView
@@ -57,7 +63,7 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
       support = source |> strip_moduledocs() |> without_aliases() |> normalize()
       blocks = Enum.reject(guide_modules(), &oban_worker?/1)
 
-      assert length(blocks) == 8
+      assert length(blocks) == 10
 
       for block <- Enum.map(blocks, &substitute/1) do
         assert String.contains?(support, block |> without_aliases() |> normalize()),
@@ -214,6 +220,46 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
       assert_raise DecryptError, fn ->
         LoanScope.with_library(@library, fn -> TestRepo.all(LoanView) end)
       end
+    end
+  end
+
+  describe "step 5: run the projector in a process of its own" do
+    setup do
+      handler = start_supervised!(LoanProjectionHandler)
+      Sandbox.allow(TestRepo, self(), handler)
+      %{handler: handler}
+    end
+
+    # Sabotage: made `LoanViews.fetch!/1` wrap the load in
+    # `LoanScope.with_library("merchant_7f3", ...)` instead of the row's own
+    # library id; the read-back of the other library's row raised
+    # `DecryptError` and this test went red. Separately, dropped the
+    # `LoanProjector.project/1` call from the handler's `handle_info/2`; no
+    # row was written and the listing assertion went red.
+    test "events from any process are written under their own library and read back by id alone",
+         %{handler: handler} do
+      send(handler, {:event, loan(@library, "Middlemarch", "one@example.com")})
+
+      Scope.wrap(@library, fn ->
+        send(handler, {:event, loan(@other_library, "Persuasion", "two@example.com")})
+      end)
+
+      # A call after the sends: the handler has handled both events by the
+      # time it answers, since messages from one sender arrive in order.
+      :sys.get_state(handler)
+
+      assert [{middlemarch, @library}, {persuasion, @other_library}] =
+               TestRepo.all(from(v in LoanView, order_by: v.id, select: {v.id, v.library_id}))
+
+      assert %LoanView{title: "Middlemarch", patron_email: "one@example.com"} =
+               Scope.wrap(@other_library, fn ->
+                 LoanProjectionHandler.fetch_view(handler, middlemarch)
+               end)
+
+      assert %LoanView{title: "Persuasion", patron_email: "two@example.com"} =
+               LoanProjectionHandler.fetch_view(handler, persuasion)
+
+      assert :error = Scope.get()
     end
   end
 
