@@ -338,3 +338,49 @@ release 0.6.0 pins:
   `shred/3` as the row delete a crypto-shred ends in.
 
 Provenance: bead ece-60gg.
+
+## Note (2026-09-29): decision 5's reason reads with encryptor's ADR-0006 Amendment A, and the shred event stays outside that opt-in
+
+Decision 5 closes `[:encryptor_ecto, :shred]`'s metadata at `vault`,
+`procedure` and `table`, and gives as its reason that "enc-ADR-0006 decision 6
+puts no per-scope dimension on any event". That reason drops a qualification
+encryptor's record already carries. In the `encryptor` repository, ADR-0006's
+section "Amendment A (2026-09-13; accepted 2026-09-13): the opt-in keyed
+tenant dimension" narrows decision 6's rule in its A6: no event carries a
+per-scope dimension unless the vault opted in, and then the only dimension is
+the keyed reference, never the partition id. encryptor's ADR-0009, "Scope
+names the key's owner, and the v1 wire spellings stay constants behind it"
+(accepted on encryptor's main), renames that option to `:telemetry_scope_ref`
+and its metadata key to `scope_ref`, and `encryptor` 0.5.0, the version this
+package pins, spells them so (`Encryptor.Telemetry`'s moduledoc and metadata
+table). Read with the amendment, the reason is: enc-ADR-0006 decision 6 puts
+no per-scope dimension on any event unless the vault sets
+`telemetry_scope_ref: true`, and Amendment A's A3 confines what that option
+adds to the encrypt, decrypt, rekey and provider span names.
+
+**The shred event is outside that opt-in, and the exclusion is decision 5's
+own.** Decision 5 closes the metadata at three keys for every vault, after
+naming what the closure costs: "a shred is the event an operator would most
+want to label with its scope". Amendment A reaches only events `encryptor`
+emits, and `[:encryptor_ecto, :shred]` is this package's; this record did not
+extend the opt-in to it. The code agrees: `emit_shred/4` in
+`Encryptor.Ecto.KeyStore` builds the metadata from the vault module, the
+procedure and the store state's table, and reads no vault configuration, so a
+vault started with `telemetry_scope_ref: true` emits the same three keys.
+Carrying the scope reference on the shred event under that option would be an
+amendment to decision 5, not a reading of it. The "Telemetry" section of
+`shred/3`'s documentation states the same reason without the qualification.
+
+**Decision 6 has a third site.** Decision 6 names ADR-0002 decision 9 and the
+README's "no shred verb" sentence. This repository's `CLAUDE.md` stated the
+same seam in its cross-repo row, which gave crypto-shred to `encryptor`; that
+row now names `Encryptor.Ecto.KeyStore.shred/3` as the row delete a
+crypto-shred ends in, citing decision 6, and keeps key creation and re-wrap in
+the vault (pull request 104, `aaf3f9a`).
+
+This Note decides nothing. This package's cites were read at `1a75a52`;
+`encryptor`'s at `v0.5.0` (`9ad74e2`) for the code and at its main (`2a92c3f`)
+for the two records, which agree with `v0.5.0` on ADR-0006 and on
+`Encryptor.Telemetry`.
+
+Provenance: bead ece-jpa.
