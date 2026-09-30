@@ -44,6 +44,11 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.SuspensionStoreMigration do
   One unique index over `{vault, selector}`. It is what makes a repeated
   `Encryptor.Vault.suspend/2` one row rather than two, and what keeps two
   vaults' sets apart in one table.
+
+  `selector` is written `:string`, which is `varchar(255)` on Postgres: a
+  longer selector fails the suspension rather than being stored, as
+  `Encryptor.Ecto.SuspensionStore` says. A host whose selectors can be longer
+  widens the column in the generated file before running it.
   """
 
   use Mix.Task

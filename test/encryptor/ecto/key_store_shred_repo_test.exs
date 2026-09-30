@@ -48,6 +48,33 @@ defmodule Encryptor.Ecto.KeyStoreShredRepoTest do
     end
   end
 
+  defmodule LongCachedScope do
+    @moduledoc """
+    The same vault with a thirty-second cache, for the test that reads from
+    the cache after a skipped drain: its read has to land before
+    `drained_at`, and thirty seconds leaves a slow host room that one second
+    did not.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :scoped,
+      algorithm_suite_id: 0x0478,
+      required_context: ["table", "column"],
+      cache: [max_age: 30]
+
+    alias Encryptor.Ecto.KeyStore
+    alias Encryptor.Ecto.TestKeyStore
+
+    def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: {KeyStore, TestKeyStore.provider_opts()},
+         reference_subkey: TestKeyStore.reference_subkey()
+       )}
+    end
+  end
+
   defmodule UnreachableScope do
     @moduledoc "A scoped vault whose key store's repo is never started."
 
@@ -268,20 +295,32 @@ defmodule Encryptor.Ecto.KeyStoreShredRepoTest do
                CachedScope.decrypt(old, key: selector, encryption_context: @context)
     end
 
+    # The vault here caches for thirty seconds rather than one, so the read
+    # after the shred lands before `drained_at` on any host that reaches it
+    # within thirty seconds; under a one-second cache a host that took a
+    # second between the shred and the read would go red on
+    # `:decrypt_failed` with nothing wrong.
+    #
     # Sabotage: made `drain: :skip` wait as well. The call slept out
-    # `max_age` and the cached read went red on `:decrypt_failed`.
+    # `max_age` and the elapsed-time assertion went red at 30 002 ms.
     test "drain: :skip returns at once, and the cache still serves until drained_at" do
-      start_supervised!(CachedScope)
+      start_supervised!(LongCachedScope)
       selector = "merchant_drain_skip"
-      old = cached_retire_setup!(selector)
+      old = cached_retire_setup!(LongCachedScope, selector)
 
-      assert {:ok, shred} = KeyStore.shred(CachedScope, selector, version: 1, drain: :skip)
+      started = System.monotonic_time(:millisecond)
 
+      assert {:ok, shred} =
+               KeyStore.shred(LongCachedScope, selector, version: 1, drain: :skip)
+
+      elapsed = System.monotonic_time(:millisecond) - started
+
+      assert elapsed < 30_000
       assert shred.drain == :skipped
-      assert DateTime.diff(shred.drained_at, shred.deleted_at, :millisecond) == 1_000
+      assert DateTime.diff(shred.drained_at, shred.deleted_at, :millisecond) == 30_000
 
       assert {:ok, "a value"} =
-               CachedScope.decrypt(old, key: selector, encryption_context: @context)
+               LongCachedScope.decrypt(old, key: selector, encryption_context: @context)
     end
 
     # encryptor 0.5.0 asks the provider before it consults the materials
@@ -368,24 +407,22 @@ defmodule Encryptor.Ecto.KeyStoreShredRepoTest do
 
   # Writes a value under version 1, mints version 2, and reads the old value
   # once, so the cached vault holds its materials when version 1 is retired.
-  defp cached_retire_setup!(selector) do
+  defp cached_retire_setup!(vault \\ CachedScope, selector) do
     TestKeyStore.provision!(selector, 1)
-    old = cached_round_trip!(selector)
+    old = cached_round_trip!(vault, selector)
     TestKeyStore.provision!(selector, 2)
 
-    {:ok, "a value"} = CachedScope.decrypt(old, key: selector, encryption_context: @context)
+    {:ok, "a value"} = vault.decrypt(old, key: selector, encryption_context: @context)
 
     old
   end
 
   # Encrypts and decrypts once, so the cached vault holds materials for the
   # scope when the shred runs.
-  defp cached_round_trip!(selector) do
-    {:ok, ciphertext} =
-      CachedScope.encrypt("a value", key: selector, encryption_context: @context)
+  defp cached_round_trip!(vault \\ CachedScope, selector) do
+    {:ok, ciphertext} = vault.encrypt("a value", key: selector, encryption_context: @context)
 
-    {:ok, "a value"} =
-      CachedScope.decrypt(ciphertext, key: selector, encryption_context: @context)
+    {:ok, "a value"} = vault.decrypt(ciphertext, key: selector, encryption_context: @context)
 
     ciphertext
   end

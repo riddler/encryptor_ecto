@@ -225,6 +225,34 @@ defmodule Encryptor.Ecto.SuspensionStoreRepoTest do
                 engine: %{__struct__: Postgrex.Error, postgres: %{code: :undefined_table}}
               }} = Encryptor.Vault.suspend(UnmigratedScope, "merchant_x")
     end
+
+    # The generated `selector` column is `:string`, `varchar(255)` on
+    # Postgres, and the moduledoc documents the width rather than hiding it:
+    # 255 characters are stored, 256 fail the write with the database's own
+    # error and store nothing.
+    #
+    # Sabotage: made `suspend/2` store `String.slice(selector, 0, 255)`. The
+    # long selector was stored truncated, the write answered `:ok`, and the
+    # `{:error, _}` match went red.
+    test "a selector longer than the generated column fails the write and stores nothing" do
+      start_supervised!(SuspendedScope)
+      fits = String.duplicate("s", 255)
+      too_long = String.duplicate("s", 256)
+
+      assert :ok = Encryptor.Vault.suspend(SuspendedScope, fits)
+      assert row_count() == 1
+
+      assert {:error,
+              %Error{
+                reason: {:suspension_store_unavailable, SuspensionStore},
+                engine: %{
+                  __struct__: Postgrex.Error,
+                  postgres: %{code: :string_data_right_truncation}
+                }
+              }} = Encryptor.Vault.suspend(SuspendedScope, too_long)
+
+      assert row_count() == 1
+    end
   end
 
   @doc false
