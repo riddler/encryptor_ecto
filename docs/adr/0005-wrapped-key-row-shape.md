@@ -1192,3 +1192,62 @@ describe block "a store configured with :gcp_kms and no root vault", over
 the fake in `test/support/test_gcp_kms.ex`.
 
 Provenance: bead ece-woy.
+
+## Note (2026-09-29): A4 read at the 0.5.0 pin, three readings of the 2026-09-14 Note, and how this file's counts are read
+
+This Note decides nothing: no decision, assumption, open question,
+consequence or Amendment changes, no text above it is edited, and no status
+word flips. Upstream cites were read in `encryptor` `v0.5.0` (`9ad74e2`),
+the version this package pins (`{:encryptor, "== 0.5.0"}` in `mix.exs`,
+`deps/0`), and at `v0.4.1` (`4c8fbe9`) where that tag is named. Cites into
+this package were read at `4722b05`.
+
+### 1. A4's two claims that name 0.4.1
+
+The acceptance Note of 2026-09-24 reads two of Amendment A's claims through
+ADR-0006: A6's pin and A3's `tenant_ref` field names. A4 names 0.4.1 twice
+more, and neither is among them:
+
+- "the module is shipped at the pinned 0.4.1". The pin is now `== 0.5.0`,
+  the move ADR-0006's call-site table names in its `mix.exs` row, and the
+  module ships there too: `Encryptor.Provider.GcpKms` in `encryptor` 0.5.0
+  has the public `init/1` and `decryption_keys/2` the delegation calls. Read
+  the phrase as "shipped at the pinned version".
+- "The **failure** half is not fully met through the 0.4.1 public surface."
+  It is not met through 0.5.0's either: the provider's private `unwrap/3`
+  still answers `{:key_unavailable, selector}` from its `{:error, _failure}`
+  arm, as the acceptance Note verified for A5's table. A4's conclusion, met
+  for serving a GCP row and unmet for decision 5's failure vocabulary, holds
+  at 0.5.0 as written, and A5, accepted, is the answer this package gives
+  meanwhile.
+
+### 2. Three readings of the 2026-09-14 Note
+
+- **Its section 2's advice.** Section 2 closes "So a reader wanting today's
+  whole-file figure should count it at a named SHA and say which SHA", and
+  the Note closes that it "asserts no rule of its own". Read the first as
+  advice to a reader, not a rule that Note adopted; the closing sentence
+  holds for the three cites it corrects. Section 3 below is where the advice
+  is stated for this file.
+- **"Off by ... a counting scope".** The Note's lead-in says three cites
+  are "off by an arity, by a counting scope, or by a commit". For the
+  second, the Note's own section 2 says the figure is exact for the body the
+  sentence was written of. Read that cite as under-scoped rather than off:
+  it was right about what it counted and did not say what that was.
+- **The `crypto_key_name` head.** Section 1 renders the head as one line,
+  `def crypto_key_name(state, selector) when is_binary(selector)`. At
+  `v0.4.1` the head line ends in a comma and its `do:` body is the next line
+  (`lib/encryptor/provider/gcp_kms.ex:376-377`); at `v0.5.0` the head is
+  `:379`, in the same two-line form. Read the rendering as the head with its
+  trailing comma dropped, not a line quoted byte for byte. The arity it
+  supports, two, is unaffected.
+
+### 3. How a count in this file is read
+
+A count of a string's mentions in this file is read as scoped to the lines
+and the SHA it names, and a new count names both, because a bare whole-file
+recount moves with every later Note that names the string. This Note names
+none of the strings the earlier Notes count, so it moves none of their
+figures.
+
+Provenance: bead ece-tdw0 (section 1) and bead ece-few (sections 2 and 3).
