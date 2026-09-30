@@ -14,11 +14,11 @@ defmodule Encryptor.Ecto.KeyStore.Shred do
   | `:vault` | the vault whose key store was shredded |
   | `:procedure` | `:scope` for enc-ADR-0005's P3 (every version) or `:version` for its P4 (one version) |
   | `:scope_ref` | `Encryptor.Envelope.scope_ref/2` of the selector: the value in the table's `tenant_ref` column. Never the selector itself |
-  | `:versions` | the versions whose rows were deleted, ascending |
-  | `:remaining` | the versions still live for the scope after the delete, ascending. `[]` after P3 |
+  | `:versions` | the versions whose rows were deleted, ascending. Under P3 this includes a version provisioned while the shred ran, when its re-check found one |
+  | `:remaining` | the versions still live for the scope after the delete, ascending. `[]` after P3, which is what P3's re-check found; after P4, the versions the shred read under its lock, less the one it deleted |
   | `:table`, `:prefix` | where the rows were deleted from, as the key store is configured |
   | `:deleted_at` | when the delete committed, UTC |
-  | `:drained_at` | when every vault serving the scope has stopped decrypting under a deleted version: `:deleted_at` plus the vault's cache `max_age`, or `:deleted_at` for a vault with `cache: false` |
+  | `:drained_at` | when every vault serving the scope has stopped decrypting under a deleted version from a cache entry made before the delete committed: `:deleted_at` plus the vault's cache `max_age`, or `:deleted_at` for a vault with `cache: false`. Not a hard bound: `Encryptor.Ecto.KeyStore.shred/3` says which entry can outlive it |
   | `:drain` | `:waited` when the call returned at or after `:drained_at`, `:skipped` when the caller asked it not to wait |
 
   `:drained_at` is the moment enc-ADR-0005's P3 step 3 and P4 step 2 are

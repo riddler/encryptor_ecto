@@ -435,7 +435,10 @@ defmodule Encryptor.Ecto.KeyStore do
   @typedoc """
   What `shred/3` answers instead of a record. Every one of them is answered
   before anything is deleted, except that a transaction the database aborts
-  deletes nothing either.
+  deletes nothing either. The one answer that does not mean "nothing was
+  deleted" is `{:key_unavailable, selector}` for a connection lost after
+  `COMMIT` was sent, where the outcome is unknown; `shred/3` says how to
+  learn it.
   """
   @type shred_error ::
           {:unknown_key, Provider.selector()}
@@ -477,7 +480,8 @@ defmodule Encryptor.Ecto.KeyStore do
       cache `max_age` after the delete commits, and at once for a vault
       configured `cache: false`. `:skip` returns at once, for a host that
       restarts its vaults instead; the record's `:drained_at` still says when
-      waiting would have finished.
+      waiting would have finished. "How far `:drained_at` holds" below says
+      what the bound does not cover.
 
   ## What it answers
 
@@ -491,7 +495,8 @@ defmodule Encryptor.Ecto.KeyStore do
   scope, and `:decrypt_failed` after P4 for a value written under the
   deleted version, because the other versions still resolve.
 
-  Every refusal deletes nothing:
+  Every refusal deletes nothing, with the one exception its
+  `{:key_unavailable, selector}` entry names:
 
     * `{:unknown_key, selector}` - no row for the scope, or a selector no
       scope reference is derived from (`:default`, `""`).
@@ -500,13 +505,52 @@ defmodule Encryptor.Ecto.KeyStore do
     * `{:key_unavailable, selector}` - the store could not be asked, and
       asking again later could work: the same transient conditions the
       provider callbacks answer this for. The delete is one transaction, so a
-      failure part way deletes nothing.
+      failure part way deletes nothing. The one exception is a connection
+      lost after `COMMIT` was sent: the database may have committed the
+      delete, and the call cannot tell, so it answers this and the outcome
+      is unknown rather than known to be nothing. Run the same shred again
+      to learn which: `{:unknown_key, selector}` after P3, or
+      `{:unknown_version, n}` after P4, says the first call's delete
+      committed, and a record says the second call did it.
     * `{:not_a_key_store_vault, vault}` - the vault's provider is not this
       module.
     * `{:missing_option, :version}`, `{:invalid_option, key}` and
       `{:unknown_options, keys}` - the options above.
     * `%Encryptor.Error{}` - the vault is not started, as
       `Encryptor.Vault.config/1` reports it.
+
+  ## A version provisioned while P3 runs
+
+  The scope's rows are locked `FOR UPDATE`, which stops nobody inserting a
+  new version beside them. So P3 checks again after its delete, in the same
+  transaction: a version committed in between - an
+  `Encryptor.Envelope.provision/3` the host ran concurrently - is deleted too
+  and listed in `:versions`, and `remaining: []` is what that second look
+  found. The check reads what has committed when it starts, which is
+  Postgres's default `READ COMMITTED` behaviour; a repo whose transactions
+  run at a stricter isolation level reads a snapshot and does not see the
+  late row.
+
+  A version committed after the check starts is out of the call's reach and
+  survives as the scope's newest key, with the record saying `remaining: []`.
+  The host closes that window, not this call: it stops provisioning for a
+  scope before shredding it, and confirms afterwards that the store holds no
+  row for `:scope_ref`, as enc-ADR-0005's P3 verification asks. P4 deletes
+  the one version it names, so a version provisioned during it is left alone
+  and is not listed in `:remaining`.
+
+  ## How far `:drained_at` holds
+
+  `:drained_at` is `:deleted_at` plus `max_age`, and it bounds every cache
+  entry made before the delete committed. It is not a hard bound on every
+  entry. A decrypt that asked the store before the commit, and finished
+  after it, puts its materials in the cache at that later moment, and they
+  serve until that moment plus `max_age`: past `:drained_at` by as long as
+  that decrypt was in flight. Under P3 this cannot serve a read, because
+  `encryptor` asks the provider before it reads the cache and the provider
+  answers `{:unknown_key, selector}`; under P4 it can, for that long. A host
+  that needs a hard bound restarts its vaults after the shred, which drops
+  every entry at once.
 
   ## Telemetry
 
@@ -595,8 +639,14 @@ defmodule Encryptor.Ecto.KeyStore do
   # versions deleted. enc-ADR-0005's P3 calls a partly completed delete the
   # worst state it has; the transaction makes that state unreachable here.
   #
+  # `FOR UPDATE` locks the rows it read and nothing else: it does not stop
+  # another transaction inserting a new version of the scope. P3 therefore
+  # re-checks after its delete (`recheck/5`), inside the same transaction.
+  #
   # The rescue is `rows/3`'s: only a condition a retry can resolve becomes
-  # `{:key_unavailable, selector}`, and a missing table still raises.
+  # `{:key_unavailable, selector}`, and a missing table still raises. A
+  # connection lost after `COMMIT` was sent is one of those conditions, and
+  # there the outcome is not known: the moduledoc of `shred/3` says so.
   @spec delete_versions(state(), String.t(), :all | pos_integer(), Provider.selector()) ::
           {:ok, {[pos_integer(), ...], [pos_integer()]}} | {:error, shred_error()}
   defp delete_versions(state, ref, which, selector) do
@@ -626,7 +676,7 @@ defmodule Encryptor.Ecto.KeyStore do
               opts
             )
 
-          {doomed, remaining}
+          recheck(state, ref, which, {doomed, remaining}, opts)
 
         {:error, reason} ->
           state.repo.rollback(reason)
@@ -638,6 +688,38 @@ defmodule Encryptor.Ecto.KeyStore do
         do: {:error, {:key_unavailable, selector}},
         else: reraise(exception, __STACKTRACE__)
   end
+
+  # P3's re-check for a remaining row. A version another transaction
+  # inserted and committed after the `FOR UPDATE` read is not in the locked
+  # set, so the delete above leaves it, and a record saying `remaining: []`
+  # beside a live row would be the record lying. Under `READ COMMITTED`,
+  # Postgres's default, every statement reads what has committed before it
+  # starts, so this second delete sees such a row, deletes it as P3's step 2
+  # asks ("every wrapping for the tenant"), and names it among the versions
+  # deleted. A zero-row answer is the check passing. A row committed after
+  # this statement starts is the one no check inside the transaction can
+  # see, and `shred/3`'s documentation says what a host does about it.
+  #
+  # P4 names one version and deletes that one only, so a version provisioned
+  # beside it is left alone and simply not listed in `remaining`.
+  @spec recheck(
+          state(),
+          String.t(),
+          :all | pos_integer(),
+          {[pos_integer(), ...], [pos_integer()]},
+          keyword()
+        ) :: {[pos_integer(), ...], [pos_integer()]}
+  defp recheck(state, ref, :all, {doomed, []}, opts) do
+    {_count, late} =
+      state.repo.delete_all(
+        from(k in state.table, where: k.tenant_ref == ^ref, select: k.version),
+        opts
+      )
+
+    {Enum.sort(doomed ++ late), []}
+  end
+
+  defp recheck(_state, _ref, _version, deleted_and_remaining, _opts), do: deleted_and_remaining
 
   @spec doomed([pos_integer()], :all | pos_integer(), Provider.selector()) ::
           {:ok, [pos_integer(), ...], [pos_integer()]} | {:error, shred_error()}

@@ -39,7 +39,7 @@ defmodule Encryptor.Ecto.SuspensionStore do
   |---|---|
   | `id` | the surrogate primary key `Ecto.Migration.create/2` adds by default. This module never selects it |
   | `vault` | the vault module the set belongs to, as `inspect/1` spells it |
-  | `selector` | the suspended scope's selector, as the host passed it to `Encryptor.Vault.suspend/2` |
+  | `selector` | the suspended scope's selector, as the host passed it to `Encryptor.Vault.suspend/2`. The generated migration declares it `:string`, which is `varchar(255)` on Postgres |
   | `inserted_at` | when the suspension was first written, UTC. Written here and never read |
 
   One unique index over `{vault, selector}` makes `suspend/2` idempotent at
@@ -49,6 +49,17 @@ defmodule Encryptor.Ecto.SuspensionStore do
   modules pointed at one table read and write disjoint rows. Renaming a vault
   module therefore starts it with an empty set; carry its rows across in the
   same deploy.
+
+  **A selector longer than the column is not stored.** At the generated
+  width, `varchar(255)`, a selector over 255 characters makes `suspend/2`'s
+  insert raise the database's own error (on Postgres, a `Postgrex.Error`
+  whose code is `string_data_right_truncation`), which the vault reports as
+  a failed write, as "What it answers" below says of every database failure.
+  Nothing is suspended. (Postgres stores a longer value only when every
+  character past the width is a space, and then truncates it.) A host whose
+  selectors can be longer widens the column in its generated migration
+  before running it, for example to `:text`; the file is the host's, and
+  this module names no width.
 
   The table arrives the way this package's other tables do, as migration
   source the host reviews and runs: `mix

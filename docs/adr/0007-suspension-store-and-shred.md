@@ -384,3 +384,52 @@ for the two records, which agree with `v0.5.0` on ADR-0006 and on
 `Encryptor.Telemetry`.
 
 Provenance: bead ece-jpa.
+
+## Note (2026-09-29): P3 re-checks for a remaining row, and three edges of decisions 1, 3 and 4
+
+This Note decides nothing. It records a fix that keeps decision 4's
+"`[]` after P3" true, and three edges the decisions above did not name.
+Cites are to this package at the commit that adds this Note.
+
+- **P3 re-checks for a remaining row (decisions 3 and 4).** `FOR UPDATE`
+  locks the rows the shred read and does not stop another transaction
+  inserting a new version of the scope, so a version committed between the
+  read and the delete survived P3 while the record said `remaining: []`.
+  P3 now runs a second delete of the scope's rows in the same transaction
+  (`recheck/5` in `Encryptor.Ecto.KeyStore`): a version it finds is
+  deleted, as P3's step 2 asks for every wrapping of the scope, and listed
+  in `versions`, so `remaining: []` is what that second look found, and
+  decisions 3 and 4 read as they did: the versions the record names are
+  the versions deleted, and nothing is left after P3 that the call could
+  see. The re-check reads what has committed when it starts, which is
+  Postgres's default `READ COMMITTED`; a version committed after it starts
+  is out of the call's reach, and the host closes that window by not
+  provisioning for a scope it is shredding. P4 is unchanged: it deletes the one version
+  it names, and a version provisioned during it is left alone and not
+  listed in `remaining`. The test is
+  `test/encryptor/ecto/key_store_shred_recheck_repo_test.exs`.
+- **A lost `COMMIT` (decision 3).** "Every refusal deletes nothing" holds
+  for every refusal decided before the commit. A connection lost after
+  `COMMIT` was sent raises a condition `transient?/1` recognizes, so the
+  call answers `{:key_unavailable, selector}` while the delete may have
+  committed. The outcome is unknown, not nothing; running the same shred
+  again answers `{:unknown_key, selector}` after P3 or
+  `{:unknown_version, n}` after P4 when it had. Documented on `shred/3`;
+  no code changed.
+- **`drained_at` is not a hard bound (decision 4).** It bounds every cache
+  entry made before the delete committed. A decrypt that asked the store
+  before the commit and finished after it caches its materials at that
+  later moment, so under P4 they can serve past `drained_at` by as long as
+  that decrypt was in flight; under P3 the provider's
+  `{:unknown_key, selector}` comes first (Context). Documented on
+  `shred/3` and on `Encryptor.Ecto.KeyStore.Shred`; a host that needs a
+  hard bound restarts its vaults.
+- **The selector column's width (decisions 1 and 2).** The generator
+  writes `selector` as `:string`, `varchar(255)` on Postgres, and a longer
+  selector makes `suspend/2`'s insert raise `string_data_right_truncation`,
+  which the vault reports as a failed write. The generated DDL is
+  unchanged; the width is documented on `Encryptor.Ecto.SuspensionStore`
+  and on the generator, and a host with longer selectors widens the column
+  in its generated file.
+
+Provenance: bead ece-3bg.
