@@ -6,9 +6,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Entries for unreleased work are not written here directly. Each issue drops a
-fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.6.0/changelog.d/README.md); the fragments are assembled
+fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.7.0/changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
+
+## [0.7.0] - 2026-09-30
+
+### **Breaking**
+
+- **Breaking.** This version requires `encryptor` 0.6.0 exactly, whose vaults
+  refuse to start on an option they do not read, where 0.5.0 ignored it: the
+  refusal is `{:invalid_config, layer, {:unknown_options, keys}}`. Rename or
+  remove each listed option in your vaults' configuration; `encryptor`'s own
+  0.6.0 changelog lists the rest of what that version changes.
+- **Breaking.** `Encryptor.Ecto.KeyStore` answers a `"gcp_kms_ciphertext"`
+  row whose `Decrypt` Cloud KMS refuses with HTTP 400 or 404 - a destroyed or
+  disabled key version, a key that is not there, a row moved to another
+  scope - as `{:invalid_key_descriptor, {:kms_refused, status}}`, where it
+  answered `{:key_unavailable, selector}`; the store passes the provider's
+  answer through unchanged. An IAM denial (403), a throttle, a server error
+  and an unreachable service still answer `{:key_unavailable, selector}`.
+  Match the new term wherever you handled such a row as `:key_unavailable`,
+  and stop retrying it.
+- **Breaking.** A migration plan field whose `from:` is one of this package's
+  own types declared with `legacy:` - a reverse plan run while the migration
+  window is open - no longer compiles without `source_authenticated:`, because
+  a row the vault cannot read is read through that legacy module. Declare
+  `source_authenticated:` on each such field with the answer the forward plan
+  gave for the same legacy cipher: `true` for an authenticated cipher such as
+  AES-GCM, `false` (with a `validate:`) otherwise.
+
+### Added
+
+- `Encryptor.Ecto.KeyStore` starts without `:root_vault` when `:gcp_kms` is
+  set, so a table holding only `"gcp_kms_ciphertext"` rows needs no root
+  vault. A store configured with neither is still refused as
+  `{:missing_config, [:provider, :root_vault]}`. An `"engine_message"` row
+  met by a store without a root vault answers
+  `{:invalid_key_descriptor, {:no_root_vault, "engine_message"}}`. A
+  `:gcp_kms` that is not a keyword list, in a store with no root vault, is
+  now refused as `{:invalid_config, :gcp_kms, :not_a_keyword_list}`, where
+  it was refused as `{:missing_config, [:provider, :root_vault]}`.
+
+### Fixed
+
+- `Encryptor.Ecto.KeyStore.shred/3` with `version: :all` re-checks the scope
+  after its delete, so a version provisioned while it ran is deleted too and
+  listed in `versions` rather than surviving beside a record that says
+  `remaining: []`.
 
 ## [0.6.0] - 2026-09-24
 
