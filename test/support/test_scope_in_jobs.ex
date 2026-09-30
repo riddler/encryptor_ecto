@@ -159,3 +159,46 @@ defmodule Encryptor.Ecto.TestScopeInJobs.LoanProjector do
     end)
   end
 end
+
+defmodule Encryptor.Ecto.TestScopeInJobs.LoanViews do
+  @moduledoc "The guide's read-back: the row's own library id first, then the row under it."
+
+  import Ecto.Query, only: [from: 2]
+
+  alias Encryptor.Ecto.TestRepo, as: Repo
+  alias Encryptor.Ecto.TestScopeInJobs.LoanScope
+  alias Encryptor.Ecto.TestScopeInJobs.LoanView
+
+  def fetch!(id) do
+    library_id = Repo.one!(from(v in LoanView, where: v.id == ^id, select: v.library_id))
+
+    LoanScope.with_library(library_id, fn -> Repo.get!(LoanView, id) end)
+  end
+end
+
+defmodule Encryptor.Ecto.TestScopeInJobs.LoanProjectionHandler do
+  @moduledoc "The guide's handler process: events in by message, read-backs by call."
+
+  use GenServer
+
+  alias Encryptor.Ecto.TestScopeInJobs.LoanProjector
+  alias Encryptor.Ecto.TestScopeInJobs.LoanViews
+
+  def start_link(opts), do: GenServer.start_link(__MODULE__, :ok, opts)
+
+  def fetch_view(server, id), do: GenServer.call(server, {:fetch_view, id})
+
+  @impl GenServer
+  def init(:ok), do: {:ok, nil}
+
+  @impl GenServer
+  def handle_info({:event, event}, state) do
+    LoanProjector.project(event)
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_call({:fetch_view, id}, _from, state) do
+    {:reply, LoanViews.fetch!(id), state}
+  end
+end
