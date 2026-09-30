@@ -1082,7 +1082,7 @@ Provenance: bead ece-60gg.
 
 ## Amendment (2026-09-29): a `from:` of this package's own type that declares `legacy:` is not silent
 
-Status: proposed (2026-09-29).
+Status: accepted (2026-09-30).
 
 Decided: ruled by the operator, 2026-09-29.
 
@@ -1154,3 +1154,45 @@ This Note decides nothing: no decision, no amendment's rule and no status
 word above changes.
 
 Provenance: bead ece-qlc.
+
+## Note (2026-09-30): the Amendment of 2026-09-29 on a `from:` that declares `legacy:` is accepted
+
+The Status line of the Amendment above, "a `from:` of this package's own
+type that declares `legacy:` is not silent", now reads `accepted
+(2026-09-30)`. The record's own Status line and its index row, `accepted
+(2026-08-27, with amendments)`, do not change. The Note of 2026-09-29 on the
+release `eval` lines decides nothing and has no status word to flip.
+
+The code half shipped in `encryptor_ecto` 0.7.0, the commit tagged `v0.7.0`
+(`1fcb204`) and published on Hex; its changelog's `[0.7.0]` section carries
+the `**Breaking**` entry for a plan field whose `from:` declares `legacy:`.
+Every claim the Amendment makes was re-verified at that commit before the
+flip:
+
+- What was open. `Encryptor.Ecto.Migrator.Source.vault_backed?/2` answers by
+  the params `Encryptor.Ecto.Binary.init/2` freezes, and `:legacy` is one of
+  the keys `frozen_params?/1` requires (`@our_params`,
+  `lib/encryptor/ecto/migrator/source.ex`), so a declaration with `legacy:`
+  set still answers `true`. The exit guide carries the section "If you must
+  go back: the reverse plan" (`docs/guides/migrate-from-cloak.md`), and
+  `Encryptor.Ecto.Binary`'s moduledoc carries "The migration window:
+  `:legacy`".
+- The decision and where it lives. A declared `true` or `false` is returned
+  as declared (`Encryptor.Ecto.Migration`'s `source_authenticated!/4`); a
+  field that declared nothing reaches `undeclared_source!/3`, which raises a
+  `CompileError` (`raise_at!/2`) when `vault_backed?/2` answers `true` and
+  the frozen params name a `legacy:` module (`legacy_reader/2`). The message
+  names the schema and the field (`field_at/1`), the `from:` type and the
+  `legacy:` module (`undeclared_legacy_message/3`). A vault-backed `from:`
+  whose declaration names no `legacy:` module still compiles silent, to
+  `true` (the last branch of `undeclared_source!/3`).
+- What it does not change. Between `v0.6.0` and `v0.7.0`, `vault_backed?/2`
+  changes in its doc only, and `@field_options` is unchanged
+  (`lib/encryptor/ecto/migration.ex`), so its answer is the same and no
+  field option is added.
+- The tests. `test/encryptor/ecto/migration_test.exs` has "refuses a from:
+  of this package's own type that declares legacy:", "a from: that declares
+  legacy: compiles once the field declares" and "one of this package's own
+  types needs no declaration".
+
+Provenance: bead ece-vvez.

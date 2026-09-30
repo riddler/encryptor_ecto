@@ -19,6 +19,11 @@ ADR-0004's Note of 2026-09-24 (Q1, the folded index) and ADR-0005's
 Amendment A of 2026-09-24 were accepted on 2026-09-24, and ADR-0006 and
 ADR-0007 with them; each record's foot Note says what was verified.
 
+ADR-0004's Amendment of 2026-09-29 (a `from:` that declares `legacy:`) and
+ADR-0005's Amendment B of 2026-09-29 (`:root_vault` optional with `:gcp_kms`)
+were accepted on 2026-09-30, once `encryptor_ecto` 0.7.0 shipped them; each
+record's foot Note says what was verified.
+
 New ADRs: next number, same three-section format (Context, Decision,
 Consequences), plus the typespecs and worked-example sections this family's
 records carry. Pick the number against a freshly fetched remote.
