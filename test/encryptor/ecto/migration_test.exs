@@ -593,6 +593,54 @@ defmodule Encryptor.Ecto.MigrationTest do
       assert spec[:validate] == nil
     end
 
+    # Sabotage: made `source_authenticated!/4`'s `:error` arm ask
+    # `vault_backed?/2` alone - a from: with `legacy:` set compiled silent,
+    # and its unmigrated rows went through the legacy reader unacknowledged.
+    test "refuses a from: of this package's own type that declares legacy:" do
+      message =
+        refusal(fn ->
+          compile_rewrite("""
+              scope :none
+              field :pan,
+                from: Encryptor.Ecto.TestTypes.PanLegacy,
+                to: Encryptor.Ecto.TestTypes.Pan
+          """)
+        end)
+
+      assert message =~ "Card.pan"
+      assert message =~ "declares no `source_authenticated:`"
+      assert message =~ "Encryptor.Ecto.TestTypes.PanLegacy"
+      assert message =~ "`legacy: Encryptor.Ecto.TestLegacy.Binary`"
+      assert message =~ "source_authenticated: true"
+      assert message =~ "source_authenticated: false"
+    end
+
+    # Sabotage: made the `legacy:` refusal fire for a declared `false` too - a
+    # reverse plan that answered the question still did not compile.
+    test "a from: that declares legacy: compiles once the field declares" do
+      for declared <- [true, false] do
+        compiled =
+          try do
+            {:ok,
+             compile_rewrite("""
+                 scope :none
+                 field :pan,
+                   from: Encryptor.Ecto.TestTypes.PanLegacy,
+                   to: Encryptor.Ecto.TestTypes.Pan,
+                   source_authenticated: #{declared}
+             """)}
+          rescue
+            error in CompileError -> {:error, Exception.message(error)}
+          end
+
+        assert {:ok, [{module, _bytecode}]} = compiled
+        %Plan{rewrites: [rewrite]} = module.__plan__()
+        {:pan, spec} = List.keyfind(rewrite.fields, :pan, 0)
+
+        assert spec[:source_authenticated] == declared
+      end
+    end
+
     # Sabotage: made the compiled spec omit `:source_authenticated` when the
     # plan declared nothing - the engine's `Keyword.fetch!/2` then failed on
     # the first pass of a plan that compiled.

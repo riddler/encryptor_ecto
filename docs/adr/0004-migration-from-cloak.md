@@ -1079,3 +1079,47 @@ row's own scope". The rule the Note states is unchanged; read its owner noun
 through ADR-0006.
 
 Provenance: bead ece-60gg.
+
+## Amendment (2026-09-29): a `from:` of this package's own type that declares `legacy:` is not silent
+
+Status: proposed (2026-09-29).
+
+Decided: ruled by the operator, 2026-09-29.
+
+**What was open.** The "Amendment (2026-08-28; accepted 2026-09-13)" above
+lets a plan stay silent about `source_authenticated:` where the `from:` type
+"resolves to one of this package's own vault-backed types", and
+`Encryptor.Ecto.Migrator.Source.vault_backed?/2` is the proof it runs
+(`lib/encryptor/ecto/migrator/source.ex`, `vault_backed?/2`, ece a15d01d). That
+predicate recognises the params `Encryptor.Ecto.Binary.init/2` freezes, and
+`:legacy` is one of them whether or not the declaration named a legacy module
+(`frozen_params?/1`, same file, ece a15d01d). So a declaration with `legacy:`
+set passes as vault-backed. Such a type is what a reverse plan names as
+`from:` while the window is open - the section "If you must go back: the
+reverse plan" in the exit guide - and it reads every row its vault refuses
+through the `legacy:` module (`Encryptor.Ecto.Binary`, "The migration window:
+`:legacy`"). Those rows are the host's legacy format again, the one decision 3
+is about, and the plan compiled without the acknowledgement decision 3a
+exists to extract.
+
+**The decision.** A plan field whose `from:` is one of this package's own
+types with `legacy:` set must declare `source_authenticated:`, `true` or
+`false`, like any other legacy field, and the plan fails at `mix compile` when
+it does not. Silence stays earned exactly where the 2026-08-28 Amendment put
+it: a vault-backed `from:` whose declaration names no `legacy:` module.
+Declaring `false` carries decision 3a's two behaviours unchanged.
+
+**Where it lives.** The check is in `Encryptor.Ecto.Migration`'s
+`source_authenticated!/4`, which runs it only for a field that declared
+nothing (`undeclared_source!/3`); the refusal is a `CompileError` naming the
+schema, the field, the `from:` type and its `legacy:` module. The answer
+`Encryptor.Ecto.Migrator.Source.vault_backed?/2` gives does not change: it
+still proves the vault's half, and the legacy half is asked about beside it.
+
+**What it does not change.** Decision 3a, 3b and 3c, the forward plan's
+requirement, the report's classes and the engine are untouched; no field
+option is added. A host whose reverse plan compiled before sees it stop
+compiling, with a message naming the field and saying what to write - the
+answer its forward plan already gave for the same legacy cipher.
+
+Provenance: bead ece-xmb.

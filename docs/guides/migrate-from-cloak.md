@@ -752,7 +752,8 @@ defmodule MyApp.Encryption.CloakRollback do
 
     field :pan,
       from: MyApp.Encrypted.Binary,
-      to: MyApp.Cloak.Encrypted.Binary
+      to: MyApp.Cloak.Encrypted.Binary,
+      source_authenticated: true
   end
 end
 ```
@@ -763,9 +764,12 @@ Its preconditions, all of which step 8 destroys:
 - the legacy type modules are still in the tree,
 - `cloak_ecto` is still a dependency.
 
-Rehearse it with `mode: :dry_run` exactly as you rehearsed the forward pass. No
-`source_authenticated:` declaration is needed on a field whose `from:` is one of
-this package's own types - that side authenticates, and the package can prove it.
+Rehearse it with `mode: :dry_run` exactly as you rehearsed the forward pass.
+Each field declares `source_authenticated:` with the same answer the forward plan
+gave it. Its `from:` is one of this package's own types, but that type still
+declares `legacy:` until step 8, so a row the pass has not rewritten is read
+through the cloak module - and the plan does not compile without the
+declaration.
 
 ## Watching a pass without a key
 

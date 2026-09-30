@@ -328,8 +328,10 @@ defmodule Encryptor.Ecto.TestRunbook do
     @moduledoc """
     The runbook's reverse plan: the same plan with `from:` and `to:` swapped.
 
-    No `source_authenticated:` anywhere, because every `from:` is one of this
-    package's own types.
+    Every field declares `source_authenticated: true`, as the forward plan's
+    does: every `from:` is one of this package's own types, but each declares
+    `legacy:`, so a row not yet rewritten is read through the legacy cipher
+    (ADR-0004's Amendment of 2026-09-29).
     """
 
     use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
@@ -339,15 +341,18 @@ defmodule Encryptor.Ecto.TestRunbook do
 
       field :client_secret,
         from: Encryptor.Ecto.TestRunbook.Encrypted.Binary,
-        to: Encryptor.Ecto.TestRunbook.Legacy.Binary
+        to: Encryptor.Ecto.TestRunbook.Legacy.Binary,
+        source_authenticated: true
 
       field :access_token,
         from: Encryptor.Ecto.TestRunbook.Encrypted.String,
-        to: Encryptor.Ecto.TestRunbook.Legacy.String
+        to: Encryptor.Ecto.TestRunbook.Legacy.String,
+        source_authenticated: true
 
       field :refresh_token,
         from: Encryptor.Ecto.TestRunbook.Encrypted.String,
-        to: Encryptor.Ecto.TestRunbook.Legacy.String
+        to: Encryptor.Ecto.TestRunbook.Legacy.String,
+        source_authenticated: true
     end
   end
 end
