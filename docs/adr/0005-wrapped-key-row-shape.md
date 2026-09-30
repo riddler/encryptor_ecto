@@ -1111,3 +1111,84 @@ the release 0.6.0 pins:
   fake in `test/support/test_gcp_kms.ex`.
 
 Provenance: bead ece-60gg.
+
+## Amendment B (2026-09-29): `:root_vault` is required only when `:gcp_kms` is absent
+
+Status: proposed. Ruled by the operator, 2026-09-29. No text above this
+Amendment is edited in place, and no status word above flips.
+
+Cites into this package name the function they point at, as it stands in
+the commit this Amendment ships in; the code half rides in the same commit.
+
+### B1. The decision
+
+`Encryptor.Ecto.KeyStore`'s `:root_vault` option is required only when
+`:gcp_kms` is absent. A store configured with `:gcp_kms` starts without a
+root vault, and its state holds `root_vault: nil` (`root_vault/1`, and the
+`t:Encryptor.Ecto.KeyStore.state/0` type).
+
+- A store configured with neither option is refused at start as
+  `{:missing_config, [:provider, :root_vault]}`, the term it was refused in
+  before this Amendment (`root_vault/1`, through `module_option/2`).
+- A root vault that is named is checked as before, with or without
+  `:gcp_kms`: a value that is not a module is `{:invalid_config,
+  :root_vault, :not_a_module}` (`module_option/2`).
+- Only the presence of `:gcp_kms` is read to decide this. A `:gcp_kms`
+  that is present and malformed is refused in its own terms by `gcp_kms/2`,
+  as Amendment A's A1 sets out.
+
+### B2. What an engine-message row answers without a root vault
+
+An `"engine_message"` row met by a store with no root vault answers
+`{:invalid_key_descriptor, {:no_root_vault, "engine_message"}}` (the
+`%{root_vault: nil}` clause of `unwrap_row/4`). This adds a row to decision
+5's table:
+
+| the row | the answer |
+|---|---|
+| `wrapping_shape` is `"engine_message"`, `key_id` is `NULL`, and the store has no root vault | `{:invalid_key_descriptor, {:no_root_vault, "engine_message"}}` |
+
+It is `:invalid_key_descriptor` for the reason decision 5 gives for the
+others: a row was found, and it does not reconstruct a descriptor in this
+store. It is not `{:key_unavailable, selector}`, because asking again does
+not help; the store would need reconfiguring. It carries the shape out, as
+Amendment A's `{:unsupported_wrapping_shape, "gcp_kms_ciphertext"}` does, and
+for the same reason: the value is one of the closed set decision 1 publishes,
+not a failure detail. The term is new inside `{:invalid_key_descriptor,
+term()}`, which is open by construction, so `t:Encryptor.Provider.reason/0`
+is not widened.
+
+The clause matches only a row whose `key_id` is `NULL`. An engine-message
+row carrying a `key_id` still answers `{:invalid_key_descriptor,
+:unexpected_key_id}` in this store. That is the ordering the GCP side already
+has, where `:missing_key_id` answers before the client is consulted.
+
+The key store's "one bad row is not the whole store" rule applies to this
+answer as to any other: in a scope holding both shapes, reads keep the GCP
+versions, and a write answers this refusal only when the newest row is the
+engine message.
+
+### B3. Why optional, and not required with a placeholder
+
+The root vault is read by one clause of `unwrap_row/4` and by nothing else in
+the key store; it unwraps engine messages and has no part in the GCP branch.
+Requiring it of a host whose table holds only GCP rows asks that host to
+configure and start a vault that serves nothing. The alternative, keeping it
+required and letting such a host name any module, would make the option's
+"required" mean nothing while still costing a vault start.
+
+### B4. What does not change
+
+No stored or serialized string changes: not the `wrapping_shape` values, not
+the columns, not `tenant_ref` or its derivation. A store configured with
+`:root_vault`, with or without `:gcp_kms`, answers every row exactly as it
+did before this Amendment. Decision 5's per-row dispatch, and Amendment A,
+are unchanged.
+
+Tests: `test/encryptor/ecto/key_store_test.exs`, the describe block
+"init/1's :root_vault, with :gcp_kms set", beside the existing "refuses a
+missing root vault"; `test/encryptor/ecto/key_store_repo_test.exs`, the
+describe block "a store configured with :gcp_kms and no root vault", over
+the fake in `test/support/test_gcp_kms.ex`.
+
+Provenance: bead ece-woy.

@@ -526,6 +526,83 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     end
   end
 
+  describe "a store configured with :gcp_kms and no root vault" do
+    # ADR-0005 Amendment B: a table holding only GCP rows needs no root vault,
+    # and the store serves it without one. Each test has selectors of its own,
+    # for the reason "a row moved to another scope" gives above.
+    #
+    # Sabotage: made `root_vault/1` require the option whatever `:gcp_kms`
+    # held; init/1 refused and the first assertion went red.
+    test "serves a gcp row on both callbacks" do
+      provisioned = TestGcpKms.provision!("patron_rv_gcp")
+      assert {:ok, state} = KeyStore.init(TestGcpKms.gcp_only_provider_opts())
+
+      assert {:ok, [descriptor]} = KeyStore.decryption_keys(state, "patron_rv_gcp")
+      assert {:ok, ^descriptor} = KeyStore.encryption_key(state, "patron_rv_gcp")
+      assert descriptor.name == provisioned.name
+    end
+
+    # Sabotage: made `root_vault/1` require the option whatever `:gcp_kms`
+    # held; the vault failed to start.
+    test "a vault over it starts, and a value written through it reads back" do
+      assert {:ok, _pid} = start_supervised(TestGcpKms.GcpOnlyScope)
+      TestGcpKms.provision!("patron_rv_vault")
+      plaintext = "the value in patron_rv_vault's column"
+
+      assert {:ok, ciphertext} =
+               TestGcpKms.GcpOnlyScope.encrypt(plaintext,
+                 key: "patron_rv_vault",
+                 encryption_context: @context
+               )
+
+      assert {:ok, ^plaintext} =
+               TestGcpKms.GcpOnlyScope.decrypt(ciphertext,
+                 key: "patron_rv_vault",
+                 encryption_context: @context
+               )
+    end
+
+    # Sabotage: answered `:unwrap_failed` from the no-root-vault clause of
+    # `unwrap_row/4`; both assertions' term went red.
+    test "an engine-message row is no_root_vault on both callbacks" do
+      TestKeyStore.provision!("patron_rv_engine", 1)
+      state = TestGcpKms.gcp_only_state()
+
+      assert {:error, {:invalid_key_descriptor, {:no_root_vault, "engine_message"}}} =
+               KeyStore.decryption_keys(state, "patron_rv_engine")
+
+      assert {:error, {:invalid_key_descriptor, {:no_root_vault, "engine_message"}}} =
+               KeyStore.encryption_key(state, "patron_rv_engine")
+    end
+
+    # The "one bad row" rule holds for this refusal as for any other: reads
+    # keep the GCP version, and a write - whose key is the newest row, here
+    # the engine message - answers that row's refusal.
+    #
+    # Sabotage: answered `:unwrap_failed` from the no-root-vault clause; the
+    # write's refusal went red.
+    test "costs only the engine-message rows of a mixed scope" do
+      gcp = TestGcpKms.provision!("patron_rv_mixed")
+      TestKeyStore.provision!("patron_rv_mixed", 2)
+      state = TestGcpKms.gcp_only_state()
+
+      assert {:ok, [only]} = KeyStore.decryption_keys(state, "patron_rv_mixed")
+      assert only.name == gcp.name
+
+      assert {:error, {:invalid_key_descriptor, {:no_root_vault, "engine_message"}}} =
+               KeyStore.encryption_key(state, "patron_rv_mixed")
+    end
+
+    # Sabotage: let the no-root-vault clause match any `key_id`; the answer
+    # became `:no_root_vault`.
+    test "an engine-message row carrying a key_id is still unexpected_key_id" do
+      TestKeyStore.provision!("patron_rv_key_id", 1, key_id: "k1")
+
+      assert {:error, {:invalid_key_descriptor, :unexpected_key_id}} =
+               KeyStore.decryption_keys(TestGcpKms.gcp_only_state(), "patron_rv_key_id")
+    end
+  end
+
   describe "a table created under 0.3.0, after the additive migration" do
     # The row this reads was written by a data migration *before* the columns
     # existed, which is the only arrangement that can show the backfill is

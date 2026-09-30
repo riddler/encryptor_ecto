@@ -162,6 +162,39 @@ defmodule Encryptor.Ecto.KeyStoreTest do
     end
   end
 
+  # ADR-0005 Amendment B: `:root_vault` is required only when `:gcp_kms` is
+  # absent. "refuses a missing root vault" above is the other half: a store
+  # configured with neither is still refused, in the same term.
+  describe "init/1's :root_vault, with :gcp_kms set" do
+    # Sabotage: made `root_vault/1` require the option whatever `:gcp_kms`
+    # held; init/1 refused as a missing root vault.
+    test "starts without a root vault" do
+      assert {:ok, state} = KeyStore.init(TestGcpKms.gcp_only_provider_opts())
+
+      assert state.root_vault == nil
+      assert state.gcp_kms[:project] == "test-project"
+    end
+
+    # Sabotage: made `root_vault/1` skip whenever `:gcp_kms` was set; a named
+    # non-module started.
+    test "still checks a root vault that is named" do
+      opts = TestKeyStore.provider_opts(gcp_kms: TestGcpKms.opts(), root_vault: "MyApp.RootVault")
+
+      assert {:error, {:invalid_config, :root_vault, :not_a_module}} = KeyStore.init(opts)
+    end
+
+    # Sabotage: made `root_vault/1` skip only for a keyword-list `:gcp_kms`;
+    # the answer became the missing root vault.
+    test "refuses a malformed :gcp_kms in its own term, not as a missing root vault" do
+      opts =
+        [gcp_kms: :yes]
+        |> TestKeyStore.provider_opts()
+        |> Keyword.delete(:root_vault)
+
+      assert {:error, {:invalid_config, :gcp_kms, :not_a_keyword_list}} = KeyStore.init(opts)
+    end
+  end
+
   describe "a permanent misconfiguration" do
     # Sabotage: put the bare `rescue _exception ->` back. Both calls answered
     # `{:key_unavailable, "merchant_7f3"}` - a reason whose entire meaning is
