@@ -1481,3 +1481,31 @@ This Note decides nothing: no decision, no amendment's rule and no status
 word above changes.
 
 Provenance: bead ece-ygr.
+
+## Note (2026-09-29): the release `eval` lines in the worked example start neither the repository nor the vaults
+
+The section "Worked example: cloak to encryptor, live, in a multi-tenant host
+app" above shows three release commands: the two under "Rehearse, then run,
+from a release:" (`Encryptor.Ecto.Migrator.run/2` in `:dry_run` and `:write`
+mode) and the one under "And the acceptance check:"
+(`Encryptor.Ecto.Migrator.verify/2`). Each is a bare
+`bin/my_app eval '...'` over the library call. An `eval` VM loads the
+release's configuration and starts nothing, so as written none of the three
+has the repository running, nor the legacy vault that `from:` decrypts with,
+nor the vault the target type encrypts with. The `mix` tasks do not have this
+gap: they start the host application before the pass
+(`Encryptor.Ecto.Migrator.CLI`'s `boot/0` runs `app.start`, ece 704ed27).
+
+Read each of the three as the same call made inside a release function that
+starts the repository through `Ecto.Migrator.with_repo/2` and starts both
+vaults inside its callback, the shape the exit guide gives in its section
+"Before step 4: the release task" (`docs/guides/migrate-from-cloak.md`), whose
+steps 4, 5 and 6 call the migrator through it. The moduledocs of
+`Mix.Tasks.Encryptor.Ecto.Migrate` and `Mix.Tasks.Encryptor.Ecto.Verify` now
+show that shape and point at that section. The printed output and the
+argument of decision 1 are unchanged: the pass still runs from a release.
+
+This Note decides nothing: no decision, no amendment's rule and no status
+word above changes.
+
+Provenance: bead ece-qlc.

@@ -17,9 +17,18 @@ defmodule Mix.Tasks.Encryptor.Ecto.Migrate do
 
   This task is a thin parser over `Encryptor.Ecto.Migrator.run/2`, and the
   library function is the real interface. A production host runs releases and
-  a release has no Mix, so the same pass runs there as:
+  a release has no Mix, so the same pass runs there through `bin/my_app eval`.
+  An `eval` VM has loaded the configuration and started nothing: not the
+  repository, and not the vaults the pass reads and writes through. The call
+  goes inside a release function that starts them first, built on
+  `Ecto.Migrator.with_repo/2`, as the migrate-from-cloak guide's
+  [release task](migrate-from-cloak.md#before-step-4-the-release-task) shows:
 
-      bin/my_app eval 'Encryptor.Ecto.Migrator.run(MyApp.Encryption.CloakMigration, mode: :dry_run)'
+      bin/my_app eval '
+        MyApp.Release.with_encryption(fn ->
+          Encryptor.Ecto.Migrator.run(MyApp.Encryption.CloakMigration, mode: :dry_run)
+        end)
+      '
 
   Every flag below maps one-to-one onto an option of `run/2`. The task adds no
   capability the library function lacks (ADR-0004 decision 6), which is what
