@@ -456,8 +456,10 @@ defmodule Encryptor.Ecto.RunbookTest do
       assert Enum.all?(report.failures, &(&1.reason == {:raised, ArgumentError}))
     end
 
-    # Sabotage: made `Pass.migratable/1` answer `:migratable_unverified` for
-    # every field - the clean pass counted no migratable row.
+    # Sabotage: made the fixture `Vault.init/1` build its provider over an
+    # empty workspace map instead of the configured one - the vault started
+    # inside the callback held no key for the row's scope, and the pass
+    # answered `:error`.
     test "starting both vaults inside the callback, from configuration, makes it a clean pass" do
       _id = seed_without_vault(@north)
 
