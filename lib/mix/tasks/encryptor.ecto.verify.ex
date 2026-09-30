@@ -8,9 +8,17 @@ defmodule Mix.Tasks.Encryptor.Ecto.Verify do
 
   `PLAN` is the plan module, positional and required, exactly as for
   `mix encryptor.ecto.migrate`. This task is a thin parser over
-  `Encryptor.Ecto.Migrator.verify/2`; from a release, where there is no Mix:
+  `Encryptor.Ecto.Migrator.verify/2`. A release has no Mix, and its
+  `bin/my_app eval` VM starts neither the repository nor the vaults, so the
+  call goes inside the `Ecto.Migrator.with_repo/2` release function the
+  migrate-from-cloak guide's
+  [release task](migrate-from-cloak.md#before-step-4-the-release-task) builds:
 
-      bin/my_app eval 'Encryptor.Ecto.Migrator.verify(MyApp.Encryption.CloakMigration, sample: :all)'
+      bin/my_app eval '
+        MyApp.Release.with_encryption(fn ->
+          Encryptor.Ecto.Migrator.verify(MyApp.Encryption.CloakMigration, sample: :all)
+        end)
+      '
 
   Three jobs, one verb. It is the acceptance test at the end of a rotation
   (ADR-0004 decision 8, step 6), it is what a host runs on a schedule to

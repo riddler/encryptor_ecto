@@ -1123,3 +1123,34 @@ compiling, with a message naming the field and saying what to write - the
 answer its forward plan already gave for the same legacy cipher.
 
 Provenance: bead ece-xmb.
+
+## Note (2026-09-29): the release `eval` lines in the worked example start neither the repository nor the vaults
+
+The section "Worked example: a card-processing host leaves cloak_ecto" above
+shows three release commands: the one under "Step 4, the rehearsal, from a
+release:" (`Encryptor.Ecto.Migrator.run/2` with `mode: :dry_run`), the one
+under "Step 5, the pass, against live traffic, with the application serving:"
+(`run/2` with `mode: :write`), and the one under "Step 6, the acceptance
+test, and the signal that step 8 is due:" (`Encryptor.Ecto.Migrator.verify/2`).
+Each is a bare `bin/my_app eval '...'` over the library call. An `eval` VM
+loads the release's configuration and starts nothing, so as written none of
+the three has the repository running, nor the legacy vault that `from:`
+decrypts with, nor the vault the target type encrypts with. The `mix` tasks
+do not have this gap: they start the host application before the pass
+(`Encryptor.Ecto.Migrator.CLI`'s `boot/0` runs `app.start`, ece 704ed27).
+
+Read each of the three as the same call made inside a release function that
+starts the repository through `Ecto.Migrator.with_repo/2` and starts both
+vaults inside its callback, the shape the exit guide gives in its section
+"Before step 4: the release task" (`docs/guides/migrate-from-cloak.md`), whose
+steps 4, 5 and 6 call the migrator through it. That is the guide decision 10
+names as leading with the release `eval` form, and the moduledocs of
+`Mix.Tasks.Encryptor.Ecto.Migrate` and `Mix.Tasks.Encryptor.Ecto.Verify` now
+show the same shape and point at that section. Decision 6, that the tasks add
+no capability the library functions lack, is unchanged: the release function
+starts processes and passes the library call no option of its own.
+
+This Note decides nothing: no decision, no amendment's rule and no status
+word above changes.
+
+Provenance: bead ece-qlc.
