@@ -433,3 +433,26 @@ Cites are to this package at the commit that adds this Note.
   in its generated file.
 
 Provenance: bead ece-3bg.
+
+## Note (2026-09-29): the Context's "by hand" sentence describes the guide before `shred/3`
+
+The Context's second paragraph closes "Today a host writes it by hand, as
+the Google Cloud KMS guide's shred step does." That was true of the commit
+that added this record: the guide's Step 6 then said this package ships no
+verb for the shred, and taught a hand-written `delete_all` for the row
+delete. It is not true on main. The guide's "Step 6. Shred a scope"
+(`docs/guides/gcp-kms-key-store.md`) deletes the row with
+`Encryptor.Ecto.KeyStore.shred/3`, on the scoped vault that reads it, and
+tells a host not to replace the call with a hand-written `delete_all`,
+which "takes no lock, waits for no drain and leaves no record". The guide
+changed in commit `4e9deb2`, an ancestor of the commit tagged `v0.6.0`
+(`cf4fd54`), so it shipped in `encryptor_ecto` 0.6.0 with `shred/3`
+itself.
+
+Read the sentence as the state decision 3 replaced. The Consequences
+bullet "A shred is now one call instead of hand-written SQL" is the
+reading that holds on main. The sentence is not edited.
+
+This Note decides nothing. Cites were read at `4722b05`.
+
+Provenance: bead ece-tdw0.

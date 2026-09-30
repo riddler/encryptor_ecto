@@ -346,3 +346,37 @@ Every claim was re-verified immediately before the flip against main at
   the rename.
 
 Provenance: bead ece-60gg.
+
+## Note (2026-09-29): the key-store generators carry four owner-noun sentences, not one
+
+The acceptance Note's decision 8 bullet quotes one sentence of the
+key-store generator's moduledoc, "one row per tenant per key version", and
+reads it as text about W1 and W2. The two key-store generators carry three
+more sentences that use the owner noun on its own. All four are listed
+here, anchored at `4722b05`:
+
+| Where | The sentence | What it explains |
+|---|---|---|
+| `Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration`, moduledoc, first paragraph (`lib/mix/tasks/encryptor.ecto.gen.key_store_migration.ex:9`) | "The table holds one row per tenant per key version" | the rows W1 keys; the sentence the acceptance Note quoted |
+| the same moduledoc, "The shape it writes" (`:67-69`) | "`Encryptor.Envelope.provision/3` called twice concurrently for one tenant can produce two rows claiming the same version" | the race W2's unique index closes |
+| the same task's `source/2`, a comment in the migration it writes (`:132-134`) | "called twice concurrently for one tenant it can produce two rows claiming one version" | the same race, in the host's generated file |
+| `Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigration`, moduledoc, last paragraph (`lib/mix/tasks/encryptor.ecto.gen.key_store_shape_migration.ex:71-72`) | "a table with one row per tenant per version" | the rows W1 keys, as the reason the two shape columns carry no index |
+
+Both generators are unchanged since `ad08848` (`git diff ad08848 4722b05`
+over the two files is empty), as decision 3's W1 row says they stay, and
+the third sentence is also in every migration an adopter has already
+generated. Read each of the three, as the acceptance Note read the first,
+as text about W1 and W2 under decision 8.
+
+One more use of the noun has entered `lib/` since the acceptance. The
+comment above `Encryptor.Ecto.KeyStore`'s private `recheck/5`
+(`lib/encryptor/ecto/key_store.ex:717`, added in `aa78d82`, the fix
+ADR-0007's second Note of 2026-09-29 records) quotes P3's step 2 as asking
+for "every wrapping for the tenant". That is `encryptor`'s ADR-0005 wording,
+verbatim (`docs/adr/0005-rotation-and-crypto-shred.md` in that repository,
+read on its main at `75906cf`), and it keeps that record's word as a quote
+does.
+
+This Note decides nothing, and no generator is edited.
+
+Provenance: bead ece-tdw0.
