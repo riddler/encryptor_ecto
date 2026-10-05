@@ -70,6 +70,16 @@
   doc_links: [
     enabled: :auto
   ],
+  # The README stage holds README.md to the shape of an introduction and a
+  # map: what the package is, why, how to install it, one basic-usage block,
+  # the documentation links grouped by the reader's question, and the line
+  # ceiling `.claude/diataxis.md` sets. At :error so a README that drifts
+  # back into a manual fails the gate rather than warning past it. The
+  # Diataxis stage stays off.
+  readme: [
+    enabled: :auto,
+    severity: :error
+  ],
   profiles: [
     loop: [
       stages: [:format, :compile, :credo, :test],
