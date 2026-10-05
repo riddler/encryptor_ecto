@@ -1,4 +1,4 @@
-# Two vaults: a customer scope and an agreement scope
+# How to keep a customer scope and an agreement scope in two vaults
 
 This guide is for a SaaS host that holds two kinds of data with two
 different lifetimes. Its own platform data - a customer's account, the

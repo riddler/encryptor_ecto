@@ -38,13 +38,13 @@ Task-shaped, for someone who already understands the target state.
   shred - destroying the key version, deleting the row, the restore window,
   and the answers the application sees at each step, including the one
   ADR-0005 Amendment A5 proposes.
-- [Two vaults: a customer scope and an agreement scope](guides/two-vaults-customer-and-agreement.md) -
+- [How to keep a customer scope and an agreement scope in two vaults](guides/two-vaults-customer-and-agreement.md) -
   a customer vault for platform data and credentials beside an agreement
   vault for data shared under a data agreement: why two vaults rather than
   a composite selector, the two key tables, the process resolver and a
   resolver fed from the row, the shred of one agreement, and what each
   vault's shred reaches.
-- [Resolving the scope in jobs and projectors](guides/scope-in-jobs-and-projectors.md) -
+- [How to resolve the scope in jobs and projectors](guides/scope-in-jobs-and-projectors.md) -
   why the scope stops at the process that set it, capturing it in the caller
   and re-establishing it with `wrap/2` in a `Task` and in a background job's
   `perform/1` (the Oban worker as one line of delegation), and a projector
