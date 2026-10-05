@@ -6,9 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Entries for unreleased work are not written here directly. Each issue drops a
-fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.7.0/changelog.d/README.md); the fragments are assembled
+fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.7.1/changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
+
+## [0.7.1] - 2026-10-05
+
+A documentation-only release: no module, function, option or stored format
+changes, and nothing in a host's code or configuration needs to move.
+
+### Added
+
+- An explanation page, "Why the Ecto types are a second package", on where
+  the line between the vault and this package falls, the alternatives to two
+  packages and what the split costs. It ships in the package files and in
+  the hexdocs extras.
+
+### Changed
+
+- The hexdocs sidebar groups its pages by kind: "How-to guides" for the pages
+  under `docs/guides/` and "Explanation" for the pages under
+  `docs/explanation/`, where one "Guides" group held them all.
+- Two how-to pages take "How to" titles: "How to keep a customer scope and an
+  agreement scope in two vaults" and "How to resolve the scope in jobs and
+  projectors". Their file names do not change.
+- The README is an introduction: what the package is, why it exists,
+  installation, one basic-usage example and a documentation map grouped by
+  the reader's question. The quickstart, the blind-index and migration
+  walkthroughs and the records table it carried move behind links to the
+  guides, the module docs and the decision records.
+- The repository carries a docs manifest, `.claude/diataxis.md`, naming the
+  audience and where each kind of page lives. It is not in the package.
 
 ## [0.7.0] - 2026-09-30
 
