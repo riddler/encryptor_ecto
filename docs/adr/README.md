@@ -9,6 +9,7 @@
 | [0005](0005-wrapped-key-row-shape.md) | A wrapped-key row declares its wrapping shape, in a column of its own | accepted (2026-09-13, with amendments) |
 | [0006](0006-scope-names-the-keys-owner.md) | Scope names the key's owner here too, and the key store's column keeps its name | accepted (2026-09-24) |
 | [0007](0007-suspension-store-and-shred.md) | A Repo-backed suspension store, and a shred on the key store that returns what it destroyed | accepted (2026-09-24) |
+| [0008](0008-publish-from-the-release-workflow-on-a-tag-push.md) | A version tag pushed on the default branch publishes the package from the release workflow, and nobody publishes by hand | proposed |
 
 Every amendment section in these four records - the 2026-08-27 and
 2026-08-28 sets, and ADR-0003's Amendment C of 2026-09-12 - was accepted by
