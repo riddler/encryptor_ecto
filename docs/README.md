@@ -18,6 +18,11 @@ Read at leisure, away from a terminal.
   of adoption, crypto-shredding and the field that opts out, why encrypted
   columns are not queryable, what a keyed blind index restores and what it does
   not, and why the mixed window is a per-row downgrade while it is open.
+- [Why the Ecto types are a second package](explanation/why-a-second-package.md) -
+  where the line between the vault and this package falls and the test that
+  draws it, the alternatives to two packages (one package, an optional
+  dependency, no Ecto layer), and what the split costs: the exact pin and the
+  public contract between the two.
 
 ## How-to guides
 

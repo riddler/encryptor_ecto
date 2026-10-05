@@ -107,6 +107,7 @@ end
   - [The key store](https://hexdocs.pm/encryptor_ecto/Encryptor.Ecto.KeyStore.html): configuring it, its table and its failure vocabulary.
   - [The changelog](https://github.com/riddler/encryptor_ecto/blob/main/CHANGELOG.md): what changed in each version, with every breaking change marked.
 - Understand
+  - [Why the Ecto types are a second package](docs/explanation/why-a-second-package.md): where the line between the vault and this package falls, the alternatives to two packages, and what the split costs.
   - [What changes when you move off cloak_ecto](docs/explanation/moving-off-cloak.md): per-scope keys, the encryption context, fail-closed scope, crypto-shredding, and what a blind index restores.
   - [What the package ships, and what it leaves to the vault](https://hexdocs.pm/encryptor_ecto/Encryptor.Ecto.html): the types, scope resolution, blind indexes, the migrator and the key store in one page.
   - [The decision records](https://github.com/riddler/encryptor_ecto/tree/main/docs/adr): why the types, the migrator, the blind index and the key store are shaped the way they are.
