@@ -398,12 +398,12 @@ path. The index is not an extra and links at its GitHub path:
   `"gcp_kms_ciphertext"` row, and the shred: destroying the key version,
   deleting the row, the restore window, and what the application sees in
   between.
-- [Two vaults: a customer scope and an agreement scope](docs/guides/two-vaults-customer-and-agreement.md) -
+- [How to keep a customer scope and an agreement scope in two vaults](docs/guides/two-vaults-customer-and-agreement.md) -
   a customer vault for platform data and credentials beside an agreement
   vault for data shared under a data agreement: the two key tables, the
   process resolver and a resolver fed from the row, and the shred of one
   agreement, with what each vault's shred reaches.
-- [Resolving the scope in jobs and projectors](docs/guides/scope-in-jobs-and-projectors.md) -
+- [How to resolve the scope in jobs and projectors](docs/guides/scope-in-jobs-and-projectors.md) -
   why the scope stops at the process, carrying it into a `Task` with
   `Encryptor.Ecto.Scope.wrap/2`, into a background job through its
   arguments, and into an event projector through a resolver the projector

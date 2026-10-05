@@ -1,4 +1,4 @@
-# Resolving the scope in jobs and projectors
+# How to resolve the scope in jobs and projectors
 
 This guide is for a host whose encrypted writes and reads do not all happen
 in the request that knows the scope. A request fans work out to a `Task`, a

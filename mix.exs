@@ -61,7 +61,8 @@ defmodule Encryptor.Ecto.MixProject do
         "docs/guides/scope-in-jobs-and-projectors.md"
       ],
       groups_for_extras: [
-        Guides: ~r{docs/}
+        "How-to guides": ~r{docs/guides/},
+        Explanation: ~r{docs/explanation/}
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
     ]
