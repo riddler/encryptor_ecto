@@ -7,7 +7,7 @@
 | [0003](0003-blind-index.md) | keyed blind indexes, per-tenant by default, equality only | accepted (2026-08-27, with amendments) |
 | [0004](0004-migration-from-cloak.md) | Migration from a prior encryption scheme, with cloak_ecto as the named case | accepted (2026-08-27, with amendments) |
 | [0005](0005-wrapped-key-row-shape.md) | A wrapped-key row declares its wrapping shape, in a column of its own | accepted (2026-09-13, with amendments) |
-| [0006](0006-scope-names-the-keys-owner.md) | Scope names the key's owner here too, and the key store's column keeps its name | accepted (2026-09-24) |
+| [0006](0006-scope-names-the-keys-owner.md) | Scope names the key's owner here too, and the key store's column keeps its name | accepted (2026-09-24), Amendment A proposed |
 | [0007](0007-suspension-store-and-shred.md) | A Repo-backed suspension store, and a shred on the key store that returns what it destroyed | accepted (2026-09-24) |
 | [0008](0008-publish-from-the-release-workflow-on-a-tag-push.md) | A version tag pushed on the default branch publishes the package from the release workflow, and nobody publishes by hand | proposed |
 
@@ -28,8 +28,8 @@ record's foot Note says what was verified.
 ADR-0006's Amendment A of 2026-10-06 (the key store's column and its unique
 index spell `scope_ref`, following enc-ADR-0009 Amendment A's wire format v2)
 is proposed. It replaces decision 3's table, so the index row's "the key
-store's column keeps its name" describes releases through 0.7.x; the row is
-left as written.
+store's column keeps its name" describes releases through 0.7.x; the row's
+title is left as written.
 
 New ADRs: next number, same three-section format (Context, Decision,
 Consequences), plus the typespecs and worked-example sections this family's
