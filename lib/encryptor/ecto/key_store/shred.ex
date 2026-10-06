@@ -13,7 +13,7 @@ defmodule Encryptor.Ecto.KeyStore.Shred do
   |---|---|
   | `:vault` | the vault whose key store was shredded |
   | `:procedure` | `:scope` for enc-ADR-0005's P3 (every version) or `:version` for its P4 (one version) |
-  | `:scope_ref` | `Encryptor.Envelope.scope_ref/2` of the selector: the value in the table's `tenant_ref` column. Never the selector itself |
+  | `:scope_ref` | `Encryptor.Envelope.scope_ref/2` of the selector: the value in the table's `scope_ref` column. Never the selector itself |
   | `:versions` | the versions whose rows were deleted, ascending. Under P3 this includes a version provisioned while the shred ran, when its re-check found one |
   | `:remaining` | the versions still live for the scope after the delete, ascending. `[]` after P3, which is what P3's re-check found; after P4, the versions the shred read under its lock, less the one it deleted |
   | `:table`, `:prefix` | where the rows were deleted from, as the key store is configured |

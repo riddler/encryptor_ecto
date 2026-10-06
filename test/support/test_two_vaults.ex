@@ -62,7 +62,7 @@ defmodule Encryptor.Ecto.TestTwoVaults.Keys do
       {1, _rows} =
         Repo.insert_all(table, [
           [
-            tenant_ref: wrapped.scope_ref,
+            scope_ref: wrapped.scope_ref,
             version: wrapped.version,
             namespace: wrapped.namespace,
             name: wrapped.name,

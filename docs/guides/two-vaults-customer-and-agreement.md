@@ -57,7 +57,7 @@ mix encryptor.ecto.gen.key_store_migration --table agreement_keys
 ```
 
 Two tables rather than one, because the key store finds a scope's rows by
-`tenant_ref` alone - the keyed reference `Encryptor.Envelope.scope_ref/2`
+`scope_ref` alone - the keyed reference `Encryptor.Envelope.scope_ref/2`
 derives from the selector - and both vaults derive it under the same
 reference subkey. In one table a customer and an agreement that happened to
 share an identifier would share key rows, and a shred of one would destroy
@@ -107,7 +107,7 @@ defmodule Library.Keys do
       {1, _rows} =
         Repo.insert_all(table, [
           [
-            tenant_ref: wrapped.scope_ref,
+            scope_ref: wrapped.scope_ref,
             version: wrapped.version,
             namespace: wrapped.namespace,
             name: wrapped.name,
@@ -130,9 +130,8 @@ end
 `provision/2` is yours to call: the key store mints nothing, so a new library
 or a newly signed agreement gets its first key version when your onboarding
 code says so. The wrapping comes back keyed `scope_ref`, and the insert
-writes it into the `tenant_ref` column: the column keeps the name it had
-before the scope rename, because it exists in every adopter's database
-(ADR-0006 decision 3). Each vault's keys carry their own namespace
+writes it into the column of the same name (ADR-0006 Amendment A). Each
+vault's keys carry their own namespace
 (`"library-customer"`, `"library-agreement"`), which is the "two namespaces"
 half of Step 1. `shred_agreement/2` is Step 6.
 
@@ -406,7 +405,7 @@ waits for no drain and leaves no record.
    (this package's ADR-0007).
 4. **Delete the licensed rows.** `Library.Loans.forget/1`. After step 3 they
    are unreadable bytes, but every message header still carries the
-   agreement's permanent pseudonym, the `tenant_ref`. Where the fact of the
+   agreement's permanent pseudonym, the `scope_ref`. Where the fact of the
    agreement is itself personal data, this step is as mandatory as the
    shred.
 

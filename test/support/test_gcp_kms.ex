@@ -9,7 +9,7 @@ defmodule Encryptor.Ecto.TestGcpKms do
   one AES-256-GCM key per `CryptoKey` id and binding every ciphertext to the
   additional authenticated data the provider sends. So a row's wrapping here
   is produced by the provider's real `provision/2`, and unwrapping it runs the
-  provider's real binding check: a row whose `tenant_ref`, `version` or
+  provider's real binding check: a row whose `scope_ref`, `version` or
   `namespace` was edited fails to decrypt exactly as it would against the
   service.
 

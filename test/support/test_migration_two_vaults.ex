@@ -30,7 +30,7 @@ defmodule Encryptor.Ecto.TestMigrationTwoVaults do
     end
 
     create table(:agreement_keys) do
-      add(:tenant_ref, :string, null: false)
+      add(:scope_ref, :string, null: false)
       add(:version, :integer, null: false)
       add(:namespace, :string, null: false)
       add(:name, :string, null: false)
@@ -42,7 +42,7 @@ defmodule Encryptor.Ecto.TestMigrationTwoVaults do
       add(:updated_at, :utc_datetime)
     end
 
-    create(unique_index(:agreement_keys, [:tenant_ref, :version]))
+    create(unique_index(:agreement_keys, [:scope_ref, :version]))
     create(unique_index(:agreement_keys, [:namespace, :name]))
   end
 end
