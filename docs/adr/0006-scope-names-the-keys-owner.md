@@ -383,7 +383,7 @@ Provenance: bead ece-tdw0.
 
 ## Amendment A (2026-10-06): the key store's column and index spell `scope_ref` under the vault's wire format v2
 
-Status: proposed (2026-10-06). This Amendment replaces decision 3's table
+Status: accepted (2026-10-06, encryptor_ecto 0.8.0). This Amendment replaces decision 3's table
 (A1), rewrites the create generator in place with no rename generator (A2),
 says what a table generated before 0.8.0 holds (A3), and restates how
 decision 8 reads once the table is replaced (A4). Decisions 1, 2 and 4 to 7
@@ -562,3 +562,96 @@ store finds it with `where: k.scope_ref == ^ref`.
 None.
 
 Provenance: bead ece-3jaw.
+
+## Note (2026-10-06): Amendment A is accepted
+
+Amendment A's Status line now reads `accepted (2026-10-06, encryptor_ecto
+0.8.0)`. The record's own Status line, `accepted (2026-09-24)`, does not
+change. In `docs/adr/README.md`, the 0006 row's status cell and the paragraph
+beneath the index that named this Amendment as proposed now say accepted; the
+row's title is left as written.
+
+The code that implements the Amendment shipped in `encryptor_ecto` 0.8.0, the
+commit tagged `v0.8.0` (`99ea9de`), published on Hex by the release workflow's
+run on that tag push
+(https://github.com/riddler/encryptor_ecto/actions/runs/37496552099). The
+later commit `6c8d4a0` is docs-only (`docs/guides/migrate-from-cloak.md`, the
+install pin moved to `~> 0.8.0`) and touches no claim of this Amendment. The
+release pins `{:encryptor, "== 0.7.0"}`
+(`mix.exs`, `deps/0`), and `mix.lock` resolves `encryptor` 0.7.0, the commit
+tagged `v0.7.0` in that repository (`cb379b5`). Every claim was re-verified
+at `99ea9de` immediately before the flip, and each claim about `encryptor`
+at its `v0.7.0`:
+
+- A1, W1. `Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration.source/2` writes
+  `add(:scope_ref, :string, null: false)`, and `Encryptor.Ecto.KeyStore`'s
+  private `rows/3`, `delete_versions/4` and `recheck/5` each filter on
+  `k.scope_ref == ^ref`.
+- A1, W2. The same `source/2` writes
+  `create(unique_index(:#{table}, [:scope_ref, :version]))` with no `name:`;
+  `Encryptor.Ecto.KeyStore.default_table/0` returns `"encryptor_wrapped_keys"`
+  and `mix.lock` resolves `ecto_sql` 3.14.0, so the index name the Amendment
+  gives holds. `test/mix/tasks/encryptor_ecto_gen_key_store_migration_test.exs`
+  asserts the column and the index lines.
+- A1, W3. `Encryptor.Ecto.Migrator.Pass`'s private `against_declaration/2`
+  pops `Encryptor.Context.scope_ref_key/0` and compares it for presence; in
+  `encryptor` 0.7.0 that function returns `@scope_ref`, `"scope_ref"`
+  (`lib/encryptor/context.ex`).
+- A1, W4. The private `scope_ref/2` calls `Encryptor.Envelope.scope_ref/2`;
+  in `encryptor` 0.7.0 `Encryptor.Kdf.label("scope-ref")` is
+  `"encryptor/v1/scope-ref"`, and `Encryptor.Kdf`'s label table lists
+  `"encryptor/v1/tenant-ref"` as retired and reserved.
+- A1, W5. `Encryptor.Ecto.KeyStore`'s moduledoc configuration example expands
+  `Encryptor.Envelope.root_subkey(root_key(), "scope-ref")`, and its option
+  table's `:reference_subkey` row names `"scope-ref"`.
+- A1, W6. In `encryptor` 0.7.0, `Encryptor.Envelope`'s `@default_namespace`
+  is `"encryptor-scope"` and `key_name/2` answers
+  `"s/" <> scope_ref <> "/v" <> Integer.to_string(version)`;
+  `Encryptor.Provider.GcpKms` spells the same default namespace.
+- A1's "From 0.8.0" values for W3 to W6 are enc-ADR-0009 Amendment A's v2
+  column, rows 1, 2, 5, 6 and 7, byte for byte, at `v0.7.0`, and that A1 says
+  "Rows 6 and 7 are one choice".
+- A1, decision 3's closing paragraph. `Encryptor.Ecto.BlindIndex.Derivation.info/1`
+  joins `"encryptor_ecto/blind_index/v1"` with the table, the column, the index
+  name and the version, and `Encryptor.Ecto.Migrator.Checkpoint.record/5`
+  writes the plan, schema, field, prefix, last id, counts and timestamps:
+  neither carries an owner noun.
+- A2. The create generator writes the `scope_ref` column and its index in
+  place, and no task in `lib/mix/tasks/` renames a column.
+  `Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigration.source/2` adds
+  `wrapping_shape` and `key_id` and names no lookup column, and that task's
+  moduledoc says every table it applies to predates 0.8.0.
+- A3. enc-ADR-0009 Amendment A, A3, at `v0.7.0`, says a wrapped key or a
+  ciphertext written by 0.6.x or earlier does not open under 0.7.0 and names
+  the two courses; enc-ADR-0005 decision 1's "Format or context change" row
+  reads "none in this package".
+- A4. Every `tenant` left in `lib/` at `99ea9de` is one of A4's two kinds: the
+  quotation "every wrapping for the tenant" in the comment above `recheck/5`;
+  the `scope_ref` row of `Encryptor.Ecto.KeyStore`'s column table, on a table
+  generated before 0.8.0; and the shape generator's moduledoc, whose
+  `tenant_ref` sentences and "one row per tenant per version" describe the
+  tables generated before 0.8.0 that task applies to.
+- Consequences. The 0.8.0 changelog's `### **Breaking**` section says a
+  wrapped-key table generated before 0.8.0 is not read by this version.
+  `Encryptor.Ecto.KeyStore.row/0` has the key `:scope_ref`, and `rows/3`
+  selects it as `scope_ref: k.scope_ref`.
+- The contract as typespecs. No `@spec`, `@type` or public `def` line in
+  `lib/` differs between `af75b0d` and `99ea9de`.
+- The worked example. `source/2` writes the migration shown, with the
+  namespace, name, bits, wrapped, wrapping_shape and key_id columns and the
+  timestamps between `version` and the two unique indexes.
+
+Three sentences speak from before the shipped code. None is edited; each is
+read with this Note:
+
+- Why now's "This package pins `encryptor` exactly (`mix.exs`, `deps/0`:
+  `{:encryptor, "== 0.6.1"}`)" was true at `af75b0d`, where the Amendment's
+  cites were read. Commit `77350e4` moved the pin to `== 0.7.0`, the release
+  the same sentence says takes W3 to W6 with it.
+- The worked example's "a proposal, not landed code" is landed code since
+  commit `a9e0785`, and ships in 0.8.0.
+- The third Consequences bullet, that the index's status cell and the
+  paragraph beneath it "name this Amendment as proposed", was true until this
+  flip; both now say accepted.
+
+Provenance: bead ece-2nq4.
