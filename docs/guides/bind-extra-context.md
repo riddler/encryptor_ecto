@@ -1,7 +1,7 @@
 # How to bind extra identifiers into an encrypted field's context
 
 Every encrypted field already binds `"table"` and `"column"`, and every
-scoped one binds a `"tenant_ref"` the vault derives from the scope
+scoped one binds a `"scope_ref"` the vault derives from the scope
 selector. That is what makes a row's ciphertext non-substitutable: bytes
 written for `cards.pan` under one scope fail authentication when they are
 loaded as `cards.notes`, or under a different scope, whatever else an
@@ -71,7 +71,7 @@ override at the field (`Encryptor.Ecto.Binary.init/2`).
 Pairs compose as: whatever your vault's `:static_encryption_context`
 configures, plus your `:context`, plus the declared `"table"` and `"column"`,
 which win over a `:context` pair of the same name. The scope is not yours to
-write: it passes to the vault as `key:` and the vault injects `"tenant_ref"`
+write: it passes to the vault as `key:` and the vault injects `"scope_ref"`
 itself.
 
 If the pair you want is a classification of *everything* your vault encrypts
@@ -93,7 +93,7 @@ reaches a write at all. The table below is about the declaration:
 | What you declared | What you get |
 |---|---|
 | A key starting `aws-crypto-` or `encryptor-` | `Encryptor.Ecto.EncryptError`, reason `{:reserved_context_key, key}` |
-| `"tenant_ref"`, or `"tenant_id"` or `"scope_id"` on a `:scoped`-profile vault | the same, on the same key |
+| `"scope_ref"` or `"tenant_ref"` on any vault, or `"tenant_id"` or `"scope_id"` on a `:scoped`-profile vault | the same, on the same key |
 | A key your vault's static context already sets, at a *different* value | `Encryptor.Ecto.EncryptError`, reason `{:encryption_context_conflict, key}` |
 | A key your vault's static context already sets, at the *same* value | Nothing. Redundant, not broken |
 | An empty or non-UTF-8 key or value | `Encryptor.Ecto.EncryptError`, reason `{:invalid_context_value, key}` |

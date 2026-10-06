@@ -158,9 +158,9 @@ defmodule Encryptor.Ecto.ErrorTest do
   describe "MissingContextError" do
     # sabotage: drop the {"missing keys", ...} pair from extra_detail/1 -> red
     test "names the context keys the vault reported missing" do
-      message = Exception.message(struct!(MissingContextError, missing_keys: ["tenant_ref"]))
+      message = Exception.message(struct!(MissingContextError, missing_keys: ["scope_ref"]))
 
-      assert message =~ ~s(missing keys: ["tenant_ref"])
+      assert message =~ ~s(missing keys: ["scope_ref"])
     end
 
     # sabotage: change headline/0 to DecryptError's wording -> red
@@ -238,7 +238,7 @@ defmodule Encryptor.Ecto.ErrorTest do
   end
 
   defp extras(DecryptError), do: [engine: {:encryption_context_mismatch, @key_material}]
-  defp extras(MissingContextError), do: [missing_keys: ["tenant_ref"]]
+  defp extras(MissingContextError), do: [missing_keys: ["scope_ref"]]
   defp extras(SerializationError), do: [serializer: Jason, direction: :encode]
   defp extras(_module), do: []
 end

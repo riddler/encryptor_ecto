@@ -52,7 +52,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
                KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
 
       ref = ref(v3)
-      assert [v3.name, v2.name, v1.name] == ["t/#{ref}/v3", "t/#{ref}/v2", "t/#{ref}/v1"]
+      assert [v3.name, v2.name, v1.name] == ["s/#{ref}/v3", "s/#{ref}/v2", "s/#{ref}/v1"]
     end
 
     # Sabotage: resolved every selector to one partition's rows. Each of the
@@ -78,7 +78,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       TestKeyStore.provision!("merchant_7f3", 2)
 
       assert {:ok, current} = KeyStore.encryption_key(TestKeyStore.state(), "merchant_7f3")
-      assert current.name == "t/#{ref(current)}/v2"
+      assert current.name == "s/#{ref(current)}/v2"
       assert current.bits == 256
     end
   end
@@ -139,7 +139,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       TestKeyStore.insert!(%{
         wrapped
         | scope_ref: foreign_ref,
-          name: "t/#{foreign_ref}/v1"
+          name: "s/#{foreign_ref}/v1"
       })
 
       assert {:error, {:invalid_key_descriptor, :unwrap_failed}} =
@@ -158,7 +158,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       corrupt!("merchant_7f3", 1)
 
       assert {:ok, current} = KeyStore.encryption_key(TestKeyStore.state(), "merchant_7f3")
-      assert current.name == "t/#{ref(current)}/v2"
+      assert current.name == "s/#{ref(current)}/v2"
     end
 
     # The decided read semantics: skipped, not fatal. A version that will not
@@ -174,7 +174,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       assert {:ok, [v3, v2]} = KeyStore.decryption_keys(TestKeyStore.state(), "merchant_7f3")
 
       ref = ref(v3)
-      assert [v3.name, v2.name] == ["t/#{ref}/v3", "t/#{ref}/v2"]
+      assert [v3.name, v2.name] == ["s/#{ref}/v3", "s/#{ref}/v2"]
     end
 
     # The newest row is the one a write would go under, so a write has to
@@ -191,7 +191,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
                KeyStore.encryption_key(state, "merchant_7f3")
 
       assert {:ok, [only]} = KeyStore.decryption_keys(state, "merchant_7f3")
-      assert only.name == "t/#{ref(only)}/v1"
+      assert only.name == "s/#{ref(only)}/v1"
     end
 
     # The other half of the decision, end to end and through the vault: a
@@ -358,7 +358,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       assert gcp_descriptor.name == gcp.name
 
       assert {:ok, [v2, v1]} = KeyStore.decryption_keys(state, "merchant_b22")
-      assert v2.name == "t/#{ref(v2)}/v2"
+      assert v2.name == "s/#{ref(v2)}/v2"
       assert v1.name == mixed_gcp.name
     end
 
@@ -472,7 +472,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       {1, _rows} =
         TestRepo.update_all(
           from(k in TestGcpKms.table(), where: k.scope_ref == ^theirs),
-          set: [scope_ref: mine, name: "t/#{mine}/v1"]
+          set: [scope_ref: mine, name: "s/#{mine}/v1"]
         )
 
       state = TestGcpKms.state()
@@ -502,7 +502,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       TestGcpKms.outage(true)
 
       assert {:ok, [only]} = KeyStore.decryption_keys(state, "merchant_7f3")
-      assert only.name == "t/#{ref(only)}/v2"
+      assert only.name == "s/#{ref(only)}/v2"
       assert {:ok, ^only} = KeyStore.encryption_key(state, "merchant_7f3")
 
       assert {:error, {:key_unavailable, "merchant_a19"}} =
@@ -671,8 +671,8 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # context comparison runs before the engine is handed a keyring
     # (`Encryptor.Vault.Decrypt.call/4` composes the context and calls
     # `agree/4` ahead of `engine_decrypt/4`), and on a `:scoped` vault
-    # `tenant_ref` is derived from `:key` by the vault itself, so the read is
-    # refused as `{:encryption_context_mismatch, "tenant_ref"}` with the
+    # `scope_ref` is derived from `:key` by the vault itself, so the read is
+    # refused as `{:encryption_context_mismatch, "scope_ref"}` with the
     # keyring never consulted. Both are authentication failures and both are
     # `:decrypt_failed` to a caller; which guard fires first is the vault's
     # business and not this provider's. The stale detail belongs to the
@@ -714,7 +714,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
               %Error{
                 reason: :decrypt_failed,
                 operation: :decrypt,
-                engine: {:encryption_context_mismatch, "tenant_ref"}
+                engine: {:encryption_context_mismatch, "scope_ref"}
               }} =
                TestKeyStore.Scope.decrypt(ciphertext,
                  key: "merchant_a19",
@@ -786,7 +786,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
     {:ok, ref} = scope_ref(selector)
 
-    TestKeyStore.insert!(%{wrapped | scope_ref: ref, name: "t/#{ref}/v#{version}"})
+    TestKeyStore.insert!(%{wrapped | scope_ref: ref, name: "s/#{ref}/v#{version}"})
   end
 
   # Ruins a row that is already there, which `corrupt!/2` cannot do: a value
@@ -807,7 +807,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
   end
 
   defp ref(descriptor) do
-    ["t", ref, _version] = String.split(descriptor.name, "/")
+    ["s", ref, _version] = String.split(descriptor.name, "/")
 
     ref
   end

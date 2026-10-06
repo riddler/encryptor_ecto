@@ -725,7 +725,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert raw(:cards, id, :pan) == written
     end
 
-    # The `"tenant_ref"` pair is compared for presence and not for value,
+    # The `"scope_ref"` pair is compared for presence and not for value,
     # and a global field's messages carry none. Sabotage: inverted
     # `target_header/2`'s `scope_ref?` (`params.scope == :none`) - this
     # field's own rows claimed a reference the message does not carry and were

@@ -121,7 +121,7 @@ comes back, with `wrapping_shape` added.
 
 What you get back:
 
-- `key_id` is the `CryptoKey` id: by default `t-` and a base32 digest of
+- `key_id` is the `CryptoKey` id: by default `s-` and a base32 digest of
   the namespace and the selector, never the selector itself. It goes in the `key_id` column. The full
   resource name, for a runbook, is
   `Encryptor.Provider.GcpKms.crypto_key_name/2` of the same state and
@@ -162,7 +162,7 @@ shred, and `shred/3` leaves that precondition to you.
 
 ```sh
 gcloud kms keys versions destroy 1 \
-  --location us-east1 --keyring encryptor-scope-keys --key t-<digest>
+  --location us-east1 --keyring encryptor-scope-keys --key s-<digest>
 ```
 
 `gcloud kms keys versions list` on the same key shows every version to
@@ -232,7 +232,7 @@ delay, not as an undo you plan around.
 
 The middle row is a refusal, not an outage. Cloud KMS answers a `Decrypt`
 under a destroyed version with HTTP 400, and `Encryptor.Provider.GcpKms`, in
-`encryptor` 0.6.1 (the version this package pins), reports a 400 or a 404 as
+`encryptor` 0.7.0 (the version this package pins), reports a 400 or a 404 as
 `{:invalid_key_descriptor, {:kms_refused, status}}`: the permanent family,
 not the `{:key_unavailable, selector}` a caller retries. The key store
 returns the provider's answer unrelabelled, as ADR-0005 Amendment A5 sets
@@ -257,7 +257,7 @@ denial reads as retryable, and an outage costs a wait per row.
 
 ### Which refusals are permanent
 
-`Encryptor.Provider.GcpKms`, in `encryptor` 0.6.1 (the version this package
+`Encryptor.Provider.GcpKms`, in `encryptor` 0.7.0 (the version this package
 pins), answers a failed `Decrypt` by its HTTP status (its moduledoc's
 "What a failed `Decrypt` answers"), and the key store returns that answer
 unrelabelled (ADR-0005 Amendment A5):

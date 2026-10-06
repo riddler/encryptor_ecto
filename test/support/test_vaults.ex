@@ -64,8 +64,8 @@ defmodule Encryptor.Ecto.TestVaults do
   @spec merchant_descriptor(String.t()) :: Aes.t()
   def merchant_descriptor(selector) do
     %Aes{
-      namespace: "encryptor-tenant",
-      name: "t/" <> Reference.derive(@subkey, selector) <> "/v1",
+      namespace: "encryptor-scope",
+      name: "s/" <> Reference.derive(@subkey, selector) <> "/v1",
       material: merchant_key(selector),
       bits: 256
     }
@@ -89,8 +89,8 @@ defmodule Encryptor.Ecto.TestVaults do
   @spec rekeyed_descriptor(String.t()) :: Aes.t()
   def rekeyed_descriptor(selector) do
     %Aes{
-      namespace: "encryptor-tenant",
-      name: "t/" <> Reference.derive(@subkey, selector) <> "/v2",
+      namespace: "encryptor-scope",
+      name: "s/" <> Reference.derive(@subkey, selector) <> "/v2",
       material: :binary.copy(<<0x66>>, 32),
       bits: 256
     }

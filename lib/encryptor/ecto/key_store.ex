@@ -19,7 +19,7 @@ defmodule Encryptor.Ecto.KeyStore do
           # `root_subkey/2` takes the 32 root-key *bytes*, not a vault module.
           # Expand them once and hand the same value to both keys, so the
           # provider looks for a row under the reference the vault writes.
-          subkey = Encryptor.Envelope.root_subkey(root_key(), "tenant-ref")
+          subkey = Encryptor.Envelope.root_subkey(root_key(), "scope-ref")
 
           {:ok,
            Keyword.merge(config,
@@ -45,7 +45,7 @@ defmodule Encryptor.Ecto.KeyStore do
   |---|---|---|
   | `:repo` | required | The `Ecto.Repo` the wrapped-key table lives in |
   | `:root_vault` | required unless `:gcp_kms` is set | The vault the `"engine_message"` wrappings were produced by. `Static` provider, `cache: false` |
-  | `:reference_subkey` | required | 32 bytes: the pinned reference root expanded under `"tenant-ref"` |
+  | `:reference_subkey` | required | 32 bytes: the pinned reference root expanded under `"scope-ref"` |
   | `:table` | `"encryptor_wrapped_keys"` | The table to read |
   | `:prefix` | `nil` | The schema prefix the table lives in; the repo's default when absent |
   | `:gcp_kms` | `nil` | `Encryptor.Provider.GcpKms`'s options, for a table holding `"gcp_kms_ciphertext"` rows. Absent, such a row is refused |

@@ -88,7 +88,7 @@ defmodule Library.Keys do
   end
 
   def wrapping_subkey, do: Envelope.root_subkey(root_key(), "root-wrap")
-  def reference_subkey, do: Envelope.root_subkey(root_key(), "tenant-ref")
+  def reference_subkey, do: Envelope.root_subkey(root_key(), "scope-ref")
   def agreement_table, do: @agreement_table
 
   def provision(:customer, customer_id),
