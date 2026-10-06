@@ -50,7 +50,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   whatever `:context` added, which `Encryptor.Ecto.Binary.declared_context/1`
   composes once rather than twice - and the algorithm suite the message names
   must equal the one the target's vault is configured to write. The
-  `"tenant_ref"` pair the vault derives is compared for presence and not for
+  `"scope_ref"` pair the vault derives is compared for presence and not for
   value: which scope a row belongs to is not what the probe asks.
 
   Comparing the *whole* context rather than merely parsing the header is what
@@ -227,7 +227,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   @typedoc """
   What a message written by this field's target says about itself, keylessly.
 
-  `:context` is every pair such a message carries except `"tenant_ref"`, and
+  `:context` is every pair such a message carries except `"scope_ref"`, and
   `:scope_ref?` is whether it carries that one - the value is the vault's
   derivation of a scope selector and is never compared. `:suite` is the
   algorithm suite that target's vault is configured to write. Resolved once,
@@ -666,7 +666,7 @@ defmodule Encryptor.Ecto.Migrator.Pass do
       |> declared_pairs()
       |> Map.pop(Context.scope_ref_key())
 
-    # The `"tenant_ref"` presence comparison is a fast path rather than a guard:
+    # The `"scope_ref"` presence comparison is a fast path rather than a guard:
     # ADR-0001 decision 5e forbids a global field on a `:scoped`-profile vault,
     # so a scope-bearing and a global declaration cannot coexist over one
     # vault, and a header that disagreed could only change the answer for a row

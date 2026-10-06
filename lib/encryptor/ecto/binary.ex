@@ -42,8 +42,8 @@ defmodule Encryptor.Ecto.Binary do
   `"table"` and `"column"`, derived once at declaration time from the schema's
   source and the field's name, plus whatever `:context` adds (decision 4). The
   scope is **not** a context pair: it passes to the vault as `key:`, and the
-  vault derives and injects `"tenant_ref"` itself (acceptance amendment 1; the
-  pair keeps the vault's v1 spelling through the scope rename). A
+  vault derives and injects `"scope_ref"` itself (acceptance amendment 1; the
+  pair is the vault's v2 spelling, `Encryptor.Context.scope_ref_key/0`). A
   declared `"table"` or `"column"` wins over a `:context` pair of the same
   name - the derived values are the anti-substitution property and a static
   pair cannot be allowed to shadow them.
@@ -641,7 +641,7 @@ defmodule Encryptor.Ecto.Binary do
   # -- the vault call -------------------------------------------------------
 
   # The scope passes as `key:` and never as a context pair: the vault derives
-  # `"tenant_ref"` from the selector itself, so the routing argument and the
+  # `"scope_ref"` from the selector itself, so the routing argument and the
   # context pair are incapable of disagreeing (acceptance amendment 1). A
   # `:none` field omits `:key` entirely, which is what a `:single`-profile
   # vault expects.
@@ -678,7 +678,7 @@ defmodule Encryptor.Ecto.Binary do
   serializer is the one that needs only the names.
 
   The scope is not here. It passes to the vault as `key:` and the vault
-  derives `"tenant_ref"` from the selector itself, so a declaration's context
+  derives `"scope_ref"` from the selector itself, so a declaration's context
   never carries it (acceptance amendment 1).
 
       iex> Encryptor.Ecto.Binary.declared_context(%{context: %{"purpose" => "pii"},

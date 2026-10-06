@@ -41,7 +41,7 @@ defmodule Encryptor.Ecto.TestKeyStore do
   message would explain.
   """
   @spec reference_subkey() :: binary()
-  def reference_subkey, do: Envelope.root_subkey(@root, "tenant-ref")
+  def reference_subkey, do: Envelope.root_subkey(@root, "scope-ref")
 
   @doc "The provider options a host would write, with any of them overridden."
   @spec provider_opts(keyword()) :: keyword()

@@ -41,7 +41,7 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
     provisioned = TestGcpKms.provision!(@selector)
     state = TestGcpKms.state()
 
-    assert provisioned.key_id =~ ~r/^t-[a-z2-7]+$/
+    assert provisioned.key_id =~ ~r/^s-[a-z2-7]+$/
 
     assert {:ok, ciphertext} =
              TestGcpKms.Scope.encrypt("a value", key: @selector, encryption_context: @context)

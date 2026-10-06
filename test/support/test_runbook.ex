@@ -161,8 +161,8 @@ defmodule Encryptor.Ecto.TestRunbook do
           {:ok, material} ->
             {:ok,
              %Aes{
-               namespace: "encryptor-tenant",
-               name: "t/" <> Reference.derive(subkey, selector) <> "/v1",
+               namespace: "encryptor-scope",
+               name: "s/" <> Reference.derive(subkey, selector) <> "/v1",
                material: material,
                bits: 256
              }}
