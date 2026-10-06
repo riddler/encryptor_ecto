@@ -1509,3 +1509,32 @@ This Note decides nothing: no decision, no amendment's rule and no status
 word above changes.
 
 Provenance: bead ece-qlc.
+
+## Note (2026-10-06): decision 3's "the tenant column" is the column a rewrite's `scope_from` names, not the key store's lookup column
+
+Decision 3 above writes "For each row it reads the primary key, the tenant
+column, and the raw ciphertext columns". The tenant column there is a column
+of the host's own table: the one the rewrite names in its plan, which
+decision 2 checks at `mix compile` ("`tenant_from` names a real column").
+ADR-0006 decision 2, row 10, renamed that macro `scope_from/1`, and the
+rename shipped in encryptor_ecto 0.6.0, so the sentence reads as the scope
+column: the column a rewrite's `scope_from` names. Its name is the host's
+choice (`:account_id` in decision 2's example). At `1ee9dbb` the pass takes
+it from the rewrite's `{:column, column}` scope (`Encryptor.Ecto.Migrator`'s
+private `scope_column!/2`) and selects it beside the primary key and the
+ciphertext columns (`Encryptor.Ecto.Migrator.Keyset.batch_query/7`, through
+its private `select_row/5`). The other `tenant_from` and `tenant :none`
+spellings in this record, in decision 2's plan and in the worked example,
+read the same way, through rows 10 and 11 of that table.
+
+It is not the key store's lookup column. That column is `tenant_ref`
+through 0.7.x and `scope_ref` from 0.8.0, by ADR-0006 Amendment A (A1, row
+W1), and the migrator does not read it: at `1ee9dbb` nothing under
+`lib/encryptor/ecto/migrator/` or in `lib/encryptor/ecto/migrator.ex`
+queries the key store. Amendment A therefore changes nothing decision 3
+says, and a rewrite's `scope_from` column keeps the name the host gave it.
+
+This Note decides nothing: no decision, no amendment's rule and no status
+word above changes.
+
+Provenance: bead ece-6k1o.
