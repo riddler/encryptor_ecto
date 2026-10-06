@@ -153,23 +153,19 @@ jobs:
       # (_build/dev/dialyxir_erlang-*_elixir-*_deps-dev.plt), so this cache is
       # the PLT cache too.
       #
-      # The key is derived from mix.lock, and mix.lock is the whole pin here
-      # even though one dependency is not a Hex package. `encryptor` has a
-      # 0.1.0 on Hex, but that release is a name reservation carrying none of
-      # the vault API this package calls, so the vault enters as a git
-      # dependency pinned to a SHA on its main branch (see mix.exs) and will
-      # keep doing so until the vault's first real release. mix.lock records
-      # that SHA the same way it records a Hex checksum - re-pinning the vault
-      # moves mix.lock, which moves this key.
-      # deps/ is cached, so the vault's git clone is restored from the cache
-      # rather than refetched on a hit; on a restore-keys fallback the
-      # restored clone can be at the previously locked SHA, and the deps.get
-      # below is what moves it to the one mix.lock names. Nothing here
-      # authenticates to GitHub: riddler/encryptor is public and the lock
-      # names it over https, so the default GITHUB_TOKEN and the read-only
-      # `contents` permission above are all this job needs. No environment
-      # variable steers dependency resolution - a path override for the vault
-      # is a local-only thing and is never committed.
+      # The key is derived from mix.lock, and mix.lock is the whole pin here.
+      # Every dependency is a Hex package, `encryptor` included: mix.exs pins
+      # the vault to one exact Hex version, and mix.lock records that version
+      # and its checksum - re-pinning the vault moves mix.lock, which moves
+      # this key.
+      # deps/ is cached, so the fetched packages are restored from the cache
+      # rather than refetched on a hit; on a restore-keys fallback a restored
+      # package can be at the previously locked version, and the deps.get
+      # below is what moves it to the one mix.lock names. Fetching the
+      # dependencies needs no credential: every package comes from the public
+      # Hex repository. No environment variable steers dependency resolution -
+      # a path override for the vault is a local-only thing and is never
+      # committed.
       #
       # Known tradeoff, the same one the satellites accept: a warm _build
       # means the compile stage is incremental, so warnings_as_errors only
