@@ -121,7 +121,8 @@ serializer for `Encryptor.Ecto.Map`, replaceable with any module exporting
 exactly, `encryptor == 0.6.0`: the vault may change what stored bytes mean
 between its pre-1.0 releases, so the pin widens only when its guarantees do. A
 blind index declared `slow: true` also needs `argon2_elixir` in the host's own
-dependencies.
+dependencies. CI runs the full gate on Erlang/OTP 27 and the test suite on
+Erlang/OTP 26, both with Elixir 1.18.
 
 Until 1.0, the public surface may change between minor releases: a release may
 rename modules, callbacks, table columns, telemetry events or error vocabulary
