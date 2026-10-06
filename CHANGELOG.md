@@ -6,9 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Entries for unreleased work are not written here directly. Each issue drops a
-fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.7.1/changelog.d/README.md); the fragments are assembled
+fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.7.2/changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
+
+## [0.7.2] - 2026-10-06
+
+A dependency release: the vault pin moves to `encryptor` 0.6.1, a
+documentation release of the vault. No module, function, option or stored
+format changes here, and nothing in a host's code or configuration needs to
+move.
+
+### Changed
+
+- Requires encryptor 0.6.1 (a documentation release; no change to stored
+  bytes or the API).
 
 ## [0.7.1] - 2026-10-05
 
