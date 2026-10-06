@@ -110,7 +110,7 @@ context). What changes when a host moves is discussed in
 ## What the split costs
 
 Two packages are two versions to keep in step. This package pins the vault
-exactly, `encryptor == 0.6.0`, rather than to a range: before 1.0 the vault
+exactly, `encryptor == 0.6.1`, rather than to a range: before 1.0 the vault
 may change what stored bytes mean between releases, and a range would let a
 host's dependency update change the meaning of rows already written. The pin
 widens only when the vault's guarantees do, which means a vault release
