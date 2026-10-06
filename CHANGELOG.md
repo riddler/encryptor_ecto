@@ -6,9 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Entries for unreleased work are not written here directly. Each issue drops a
-fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.7.2/changelog.d/README.md); the fragments are assembled
+fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.8.0/changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
+
+## [0.8.0] - 2026-10-06
+
+A breaking release: this version requires `encryptor` 0.7.0, the vault's
+wire format v2, and the key store's lookup column is `scope_ref`. Nothing
+written under `encryptor` 0.6.x or earlier opens under it; the Breaking
+entries say what a host with such rows or such a table does.
+
+### **Breaking**
+
+- A field or a wrapped key written under encryptor 0.6.x or earlier does not
+  open under this version, which requires encryptor 0.7.0 (encryptor's
+  ADR-0009 Amendment A, A3): a host holding such rows stays on
+  encryptor_ecto 0.7.x, since neither package ships a re-encrypt. A host also
+  expands its `:reference_subkey` under `"scope-ref"` from now on;
+  `Encryptor.Envelope.root_subkey/2` in encryptor 0.7.0 still accepts
+  `"tenant-ref"`, so a subkey left on the old purpose raises no error, and
+  the call that derives it has to be changed by hand.
+- The key store's lookup column is `scope_ref`, with its unique index over
+  `(scope_ref, version)`: `mix encryptor.ecto.gen.key_store_migration` writes
+  that column and every key-store query reads it. A wrapped-key table
+  generated before 0.8.0 (column `tenant_ref`) is not read by this version,
+  and no migration renames the column: such a table also holds v1 rows
+  (ADR-0006 Amendment A, A3), so a host that has one stays on 0.7.x or
+  re-encrypts every row, which neither package ships. A host that has not
+  created the table yet runs the generator as before.
+
+### Changed
+
+- Requires encryptor 0.7.0, the vault's wire format v2: the pin moves from
+  `encryptor == 0.6.1` to `encryptor == 0.7.0`, and the reference subkey a
+  host passes as `:reference_subkey` is expanded under the root purpose
+  `"scope-ref"`, which encryptor 0.7.0 names in place of `"tenant-ref"`.
 
 ## [0.7.2] - 2026-10-06
 

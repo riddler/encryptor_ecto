@@ -34,7 +34,7 @@ layer falls is in the
 ```elixir
 def deps do
   [
-    {:encryptor_ecto, "~> 0.7.0"}
+    {:encryptor_ecto, "~> 0.8.0"}
   ]
 end
 ```

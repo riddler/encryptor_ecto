@@ -1,7 +1,7 @@
 defmodule Encryptor.Ecto.MixProject do
   use Mix.Project
 
-  @version "0.7.2"
+  @version "0.8.0"
   @source_url "https://github.com/riddler/encryptor_ecto"
 
   def project do
