@@ -523,8 +523,8 @@ edited; each is read with this Amendment:
 - From 0.8.0 the key store's in-memory row and its column spell the value
   one way: `Encryptor.Ecto.KeyStore.row/0`'s `:scope_ref` key is selected
   from the `scope_ref` column.
-- The index row in `docs/adr/README.md` keeps its title and its status; the
-  paragraph beneath the index names this Amendment as proposed.
+- The index row in `docs/adr/README.md` keeps its title; its status cell,
+  and a paragraph beneath the index, name this Amendment as proposed.
 
 ### The contract as typespecs
 
