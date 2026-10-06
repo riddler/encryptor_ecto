@@ -25,6 +25,12 @@ ADR-0005's Amendment B of 2026-09-29 (`:root_vault` optional with `:gcp_kms`)
 were accepted on 2026-09-30, once `encryptor_ecto` 0.7.0 shipped them; each
 record's foot Note says what was verified.
 
+ADR-0006's Amendment A of 2026-10-06 (the key store's column and its unique
+index spell `scope_ref`, following enc-ADR-0009 Amendment A's wire format v2)
+is proposed. It replaces decision 3's table, so the index row's "the key
+store's column keeps its name" describes releases through 0.7.x; the row is
+left as written.
+
 New ADRs: next number, same three-section format (Context, Decision,
 Consequences), plus the typespecs and worked-example sections this family's
 records carry. Pick the number against a freshly fetched remote.

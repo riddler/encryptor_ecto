@@ -380,3 +380,185 @@ does.
 This Note decides nothing, and no generator is edited.
 
 Provenance: bead ece-tdw0.
+
+## Amendment A (2026-10-06): the key store's column and index spell `scope_ref` under the vault's wire format v2
+
+Status: proposed (2026-10-06). This Amendment replaces decision 3's table
+(A1), rewrites the create generator in place with no rename generator (A2),
+says what a table generated before 0.8.0 holds (A3), and restates how
+decision 8 reads once the table is replaced (A4). Decisions 1, 2 and 4 to 7
+are unchanged, and no line above this Amendment is edited. Cites into this
+package were read at `af75b0d`. The `encryptor` record cited is
+enc-ADR-0009 Amendment A, read on that repository's main at `3ce8954`.
+
+### Why now
+
+Decision 3 kept W1 and W2 because the column "exists in every adopter's
+database". No host has run the migration
+`mix encryptor.ecto.gen.key_store_migration` writes, so no table it creates
+holds a row anywhere a host reads keys from: the column existed in every
+adopter's database only in principle. enc-ADR-0009 Amendment A rests on the
+same fact from the vault's side ("No host has run encryptor_ecto's key-store
+migration, so no wrapped-key table holds a row", its "Why now").
+
+W3 to W6 were never this package's to keep. Decision 3 kept them because
+enc-ADR-0009 decision 4 pinned them, and enc-ADR-0009 Amendment A replaces
+that decision with a v2 spelling set that every `encryptor` build writes
+from 0.7.0 on; the v2 wire format was ruled by the operator, 2026-10-06.
+This package pins `encryptor` exactly (`mix.exs`, `deps/0`:
+`{:encryptor, "== 0.6.1"}`), so the release that moves the pin to 0.7.0
+takes W3 to W6 with it; this Amendment makes the record say so.
+
+With W3 to W6 moving, keeping W1 would leave a column named for the owner
+noun the vault no longer writes, in a table no host has created. Decision
+3's cost of renaming, "DDL on a live table in each of them", does not arise
+while there is no live table.
+
+### A1. Decision 3's table is replaced
+
+Decision 3's rule stands with new values: each persisted and serialized
+spelling below is a constant, byte for byte, behind the Scope-named surface
+that reaches it. The "From 0.8.0" column is what this package writes, reads
+or documents from encryptor_ecto 0.8.0 on.
+
+| # | Through 0.7.x (decision 3) | From 0.8.0 | What it is | Where this package meets it (at `af75b0d`) | Follows |
+|---|---|---|---|---|---|
+| W1 | column `tenant_ref` | column `scope_ref` | the key store's lookup column | written by the migration `Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration.source/2` generates; queried by `Encryptor.Ecto.KeyStore`'s private `rows/3`, `delete_versions/4` and `recheck/5` | this Amendment (A2) |
+| W2 | the unique index over `(tenant_ref, version)`, named `<table>_tenant_ref_version_index` | the unique index over `(scope_ref, version)`, named `<table>_scope_ref_version_index` | the race guard on provisioning | `unique_index(:<table>, [:tenant_ref, :version])` in the same generated migration | W1; Ecto derives the name (below) |
+| W3 | context key `"tenant_ref"` | context key `"scope_ref"` | the pair the vault injects into every ciphertext's authenticated context | read, for presence only, by `Encryptor.Ecto.Migrator.Pass`'s private `against_declaration/2`, through `Encryptor.Context.scope_ref_key/0` | enc-ADR-0009 Amendment A, A1 row 1 |
+| W4 | the reference derived under the subkey expanded under `"tenant-ref"`, whose label is `"encryptor/v1/tenant-ref"` | the reference derived under the subkey expanded under `"scope-ref"`, whose label is `"encryptor/v1/scope-ref"` | the value stored in W1 | computed by `Encryptor.Ecto.KeyStore`'s private `scope_ref/2` through `Encryptor.Envelope.scope_ref/2` | enc-ADR-0009 Amendment A, A1 rows 6 and 7 |
+| W5 | root purpose `"tenant-ref"` | root purpose `"scope-ref"` | the purpose a host expands its reference subkey under | the configuration example in `Encryptor.Ecto.KeyStore`'s moduledoc, and its option table's `:reference_subkey` row | enc-ADR-0009 Amendment A, A1 row 6 |
+| W6 | the values `"encryptor-tenant"` and `"t/<ref>/v<n>"` in the key store's `namespace` and `name` columns | `"encryptor-scope"` and `"s/<ref>/v<n>"` | a wrapped key's namespace and name | stored by the host's provisioning, read by `rows/3` and compared byte for byte by the vault | enc-ADR-0009 Amendment A, A1 rows 5 and 2 |
+
+W1 and W2 are this package's own and follow from A2. W3 to W6 are
+`encryptor`'s wire constants; this package neither chooses nor rewrites
+them, and the "From 0.8.0" values are enc-ADR-0009 Amendment A's v2 column,
+byte for byte.
+
+**The index name.** Ecto names an index it is given no `name:` for by
+joining the table, the columns and `index` with underscores (`Ecto.Migration`'s
+private `default_index_name/1`, in `ecto_sql` 3.14.0, the version
+`mix.lock` resolves). The generated migration passes no `name:`, so with the
+default table, `encryptor_wrapped_keys` (`Encryptor.Ecto.KeyStore.default_table/0`),
+the index is `encryptor_wrapped_keys_scope_ref_version_index`.
+
+**Every W4 value changes, not only its column.** The new purpose names a new
+label, so a new reference subkey, so a new reference for every selector
+(enc-ADR-0009 Amendment A, A1, "Rows 6 and 7 are one choice").
+
+Decision 3's closing paragraph stands: the blind index's derivation input
+(`Encryptor.Ecto.BlindIndex.Derivation.info/1`), the migrator's checkpoint
+row (`Encryptor.Ecto.Migrator.Checkpoint.record/5`) and the ciphertext
+bytes carry no owner noun, and nothing in this Amendment touches them.
+
+### A2. The create generator is rewritten in place, and no rename generator ships
+
+From 0.8.0, `mix encryptor.ecto.gen.key_store_migration` writes the
+`scope_ref` column and the unique index over `(scope_ref, version)` in
+place of the `tenant_ref` column and its index
+(`Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration.source/2`). No generator
+that renames an existing `tenant_ref` column ships. Ruled by the operator,
+2026-10-06. Two reasons: no host ran the old generator, so a rename
+generator has no table to run against; and a host that had run it would
+hold rows the 0.8.0 key store cannot unwrap whatever the column is called
+(A3), so a rename would move the column and leave the rows unreadable.
+
+`mix encryptor.ecto.gen.key_store_shape_migration` stays. It brings a table
+generated before ADR-0005's two columns up to that record's row shape, and
+the migration it writes adds `wrapping_shape` and `key_id` and names no
+lookup column (`Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigration.source/2`).
+Every table it applies to was generated before 0.8.0, so A3 describes it.
+
+### A3. A table generated before 0.8.0
+
+A table the generator wrote before 0.8.0 has a `tenant_ref` column, and the
+0.8.0 key store's queries name `scope_ref`. Its rows are v1 rows: each
+reference was derived under the retired `"encryptor/v1/tenant-ref"` label,
+each namespace and name is spelled `"encryptor-tenant"` and
+`"t/<ref>/v<n>"`, and each wrapping's binding spells the vault's v1
+wrapping context, so `encryptor` 0.7.0 does not unwrap them (enc-ADR-0009
+Amendment A, A3). Renaming the column would not change that.
+
+A host holding such a table has the two courses enc-ADR-0009 Amendment A,
+A3 names: stay on encryptor_ecto 0.7.x (and `encryptor` 0.6.x), or run a
+re-encrypt of every row, which neither package ships (enc-ADR-0005
+decision 1, the format-or-context-change row: "none in this package"). If
+such a host appears, a v1 read path is its own record.
+
+### A4. Decision 8 now reads
+
+Decision 8's rule stands: a reader who finds `tenant` next to `scope` in
+`lib/` finds the reason beside it. Its first sentence no longer has
+spellings to point at, because from 0.8.0 none of W1 to W6 spells the owner
+noun `tenant`. A `tenant` left in `lib/` from 0.8.0 is either a quotation of
+another record's wording, kept as a quote (as the Note of 2026-09-29 reads
+the comment above `Encryptor.Ecto.KeyStore`'s private `recheck/5`), or text
+about a table generated before 0.8.0 (A3).
+
+### What reads as history from 0.8.0
+
+These passages above describe encryptor_ecto 0.6.0 through 0.7.x. None is
+edited; each is read with this Amendment:
+
+- the record's title, "and the key store's column keeps its name";
+- the Context's third paragraph, on the `tenant_ref` column "created in
+  every adopter's database" and the `"tenant_ref"` context key "which
+  enc-ADR-0009 decision 4 pins";
+- decision 2's row 30, "the column it is selected from keeps its name
+  (decision 3)";
+- the call-site table's `against_declaration/2` row, "which returns the
+  same `"tenant_ref"`";
+- the Consequences' second and third bullets: every row written before the
+  rename reads after it because the column, its index and the reference are
+  unchanged, and the in-memory row and its column spell one value two ways;
+- the worked example's "because its context still carries `"tenant_ref"`";
+- the acceptance Note's decision 3 bullet, and the Note of 2026-09-29's
+  reading of the generators' sentences as text about W1 and W2.
+
+### Consequences
+
+- The respelling is a **breaking** change. It ships in a minor release,
+  0.8.0, whose changelog carries a **Breaking** entry saying that a table
+  generated before 0.8.0 is not read by it.
+- From 0.8.0 the key store's in-memory row and its column spell the value
+  one way: `Encryptor.Ecto.KeyStore.row/0`'s `:scope_ref` key is selected
+  from the `scope_ref` column.
+- The index row in `docs/adr/README.md` keeps its title and its status; the
+  paragraph beneath the index names this Amendment as proposed.
+
+### The contract as typespecs
+
+No signature changes. `Encryptor.Ecto.KeyStore.row/0` keeps its
+`:scope_ref` key; only the column it is selected from is renamed.
+
+### Worked example: the migration the 0.8.0 generator writes
+
+As the generator is to write it, for the default table; a proposal, not
+landed code:
+
+```elixir
+def change do
+  create table(:encryptor_wrapped_keys) do
+    add(:scope_ref, :string, null: false)
+    add(:version, :integer, null: false)
+    # namespace, name, bits, wrapped, wrapping_shape, key_id and the
+    # timestamps are unchanged
+  end
+
+  create(unique_index(:encryptor_wrapped_keys, [:scope_ref, :version]))
+  # Ecto names it encryptor_wrapped_keys_scope_ref_version_index
+  create(unique_index(:encryptor_wrapped_keys, [:namespace, :name]))
+end
+```
+
+A host that provisions `"workspace-7"` on 0.8.0 stores one row whose
+`scope_ref` is `Encryptor.Envelope.scope_ref/2` of that selector under a
+reference subkey expanded under `"scope-ref"`, whose `namespace` is
+`"encryptor-scope"` and whose `name` starts `"s/"` (W4 to W6). The key
+store finds it with `where: k.scope_ref == ^ref`.
+
+### Open questions
+
+None.
+
+Provenance: bead ece-3jaw.
