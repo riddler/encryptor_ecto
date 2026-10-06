@@ -118,7 +118,7 @@ The package needs Elixir 1.18 or later (`elixir: "~> 1.18"` in `mix.exs`). Its
 runtime dependencies are `ecto ~> 3.13`, `jason ~> 1.4` (the default
 serializer for `Encryptor.Ecto.Map`, replaceable with any module exporting
 `encode!/1` and `decode!/1`), `telemetry ~> 1.0`, and the vault pinned
-exactly, `encryptor == 0.6.0`: the vault may change what stored bytes mean
+exactly, `encryptor == 0.6.1`: the vault may change what stored bytes mean
 between its pre-1.0 releases, so the pin widens only when its guarantees do. A
 blind index declared `slow: true` also needs `argon2_elixir` in the host's own
 dependencies. CI runs the full gate on Erlang/OTP 27 and the test suite on
