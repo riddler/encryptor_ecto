@@ -38,8 +38,8 @@ defmodule Encryptor.Ecto.KeyStoreShredRecheckRepoTest do
       IF EXISTS (SELECT 1 FROM gone)
          AND NOT EXISTS (SELECT 1 FROM gone WHERE version = #{@late_version}) THEN
         INSERT INTO encryptor_wrapped_keys
-          (tenant_ref, version, namespace, name, bits, wrapped, wrapping_shape, key_id)
-        SELECT tenant_ref, #{@late_version}, namespace, name || '-late', bits, wrapped,
+          (scope_ref, version, namespace, name, bits, wrapped, wrapping_shape, key_id)
+        SELECT scope_ref, #{@late_version}, namespace, name || '-late', bits, wrapped,
                wrapping_shape, key_id
           FROM gone ORDER BY version DESC LIMIT 1;
       END IF;
@@ -93,7 +93,7 @@ defmodule Encryptor.Ecto.KeyStoreShredRecheckRepoTest do
 
     TestRepo.all(
       from(k in KeyStore.default_table(),
-        where: k.tenant_ref == ^ref,
+        where: k.scope_ref == ^ref,
         order_by: [asc: k.version],
         select: k.version
       )

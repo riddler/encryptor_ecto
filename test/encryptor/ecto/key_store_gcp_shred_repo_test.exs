@@ -91,11 +91,12 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
   end
 
   # The guide's Step 4 insert, as written there: `GcpKms.provision/2` answers
-  # `:scope_ref`, and the kept column is `tenant_ref` (ADR-0006 decision 3).
+  # `:scope_ref`, which is the column's own name (ADR-0006 Amendment A), so
+  # the provider's map goes in as it comes back.
   #
-  # Sabotage: dropped the `Map.pop/2` and inserted the provider's map as it
-  # comes back, which is what the guide said before this fix; the insert
-  # raised `Postgrex.Error` on the missing `scope_ref` column.
+  # Sabotage: popped `:scope_ref` and wrote it as `tenant_ref`, which is what
+  # the guide said before 0.8.0; the insert raised `Postgrex.Error` on the
+  # missing `tenant_ref` column.
   test "the guide's provisioning insert writes a row the key store reads" do
     selector = "merchant_guided"
 
@@ -106,12 +107,10 @@ defmodule Encryptor.Ecto.KeyStoreGcpShredRepoTest do
       )
 
     {:ok, row} = GcpKms.provision(gcp, selector)
-    {ref, row} = Map.pop(row, :scope_ref)
 
     {1, _rows} =
       TestRepo.insert_all(TestGcpKms.table(), [
         row
-        |> Map.put(:tenant_ref, ref)
         |> Map.put(:wrapping_shape, "gcp_kms_ciphertext")
         |> Map.to_list()
       ])

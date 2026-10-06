@@ -104,7 +104,7 @@ defmodule Encryptor.Ecto.TestKeyStore do
         table,
         [
           [
-            tenant_ref: wrapped.scope_ref,
+            scope_ref: wrapped.scope_ref,
             version: wrapped.version,
             namespace: wrapped.namespace,
             name: wrapped.name,

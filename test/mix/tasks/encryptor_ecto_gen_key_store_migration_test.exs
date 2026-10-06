@@ -38,6 +38,10 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigrationTest do
   # `RawAes.unwrap_key/3` matches on the name - so the messages written under
   # the first row became undecryptable the moment the second was inserted,
   # silently, with nothing at runtime able to notice.
+  #
+  # Sabotage: wrote `tenant_ref` back as the lookup column, then as the first
+  # unique index's column (ADR-0006 Amendment A, W1 and W2); each went red on
+  # its own `scope_ref` assertion below.
   test "writes the table the provider actually reads", %{path: path} do
     assert {0, output} = generate(["--migrations-path", path])
 
@@ -47,7 +51,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigrationTest do
 
     assert output =~ file
     assert source =~ "create table(:#{table})"
-    assert source =~ "add(:tenant_ref, :string, null: false)"
+    assert source =~ "add(:scope_ref, :string, null: false)"
     assert source =~ "add(:version, :integer, null: false)"
     assert source =~ "add(:namespace, :string, null: false)"
     assert source =~ "add(:name, :string, null: false)"
@@ -55,7 +59,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigrationTest do
     assert source =~ "add(:wrapped, :binary, null: false)"
     assert source =~ "add(:wrapping_shape, :string, null: false)"
     assert source =~ "add(:key_id, :string)"
-    assert source =~ "create(unique_index(:#{table}, [:tenant_ref, :version]))"
+    assert source =~ "create(unique_index(:#{table}, [:scope_ref, :version]))"
     assert source =~ "create(unique_index(:#{table}, [:namespace, :name]))"
   end
 

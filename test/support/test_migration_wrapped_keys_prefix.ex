@@ -34,7 +34,7 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeysPrefix do
     )
 
     create table(:encryptor_wrapped_keys, prefix: @prefix) do
-      add(:tenant_ref, :string, null: false)
+      add(:scope_ref, :string, null: false)
       add(:version, :integer, null: false)
       add(:namespace, :string, null: false)
       add(:name, :string, null: false)
@@ -46,7 +46,7 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeysPrefix do
       add(:updated_at, :utc_datetime)
     end
 
-    create(unique_index(:encryptor_wrapped_keys, [:tenant_ref, :version], prefix: @prefix))
+    create(unique_index(:encryptor_wrapped_keys, [:scope_ref, :version], prefix: @prefix))
     create(unique_index(:encryptor_wrapped_keys, [:namespace, :name], prefix: @prefix))
   end
 end

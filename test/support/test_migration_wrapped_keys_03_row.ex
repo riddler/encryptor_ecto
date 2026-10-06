@@ -7,8 +7,8 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeys03Row do
   table *before* the additive migration ran, and a row a test inserts afterwards
   cannot show it. Written the way the host writes it -
   `Encryptor.Envelope.provision/3` under the root vault, then an `INSERT` - so
-  the wrapping is a real engine message and the resolution test that reads it
-  back is resolving something.
+  the wrapping is a real engine message and the table holds a real
+  pre-0.8.0 row.
 
   It runs between `Encryptor.Ecto.TestMigrationWrappedKeys03` and
   `Encryptor.Ecto.TestMigrationWrappedKeysShape`, which is where a real row

@@ -68,7 +68,7 @@ defmodule Encryptor.Ecto.KeyStore do
 
   ### `:reference_subkey` is required, and it is not an extra
 
-  A row is found by `tenant_ref`, never by the selector: the selector is the
+  A row is found by `scope_ref`, never by the selector: the selector is the
   host's scope identifier and putting it in a column would publish it beside
   every ciphertext, which is the whole reason `Encryptor.Envelope.scope_ref/2`
   is a keyed derivation rather than a hash. So resolving a selector to a row
@@ -126,7 +126,7 @@ defmodule Encryptor.Ecto.KeyStore do
   ## What it does, and the three things it will not do
 
   `c:Encryptor.Provider.decryption_keys/2` reads every row for the selector's
-  `tenant_ref`, newest version first, and unwraps each under the root vault.
+  `scope_ref`, newest version first, and unwraps each under the root vault.
   `c:Encryptor.Provider.encryption_key/2` reads the same rows in the same
   single query and unwraps the newest one, which is the provider contract's
   "the encryption key is the current one" stated as one query rather than two.
@@ -190,7 +190,7 @@ defmodule Encryptor.Ecto.KeyStore do
   | Column | |
   |---|---|
   | `id` | the surrogate primary key `Ecto.Migration.create/2` adds by default. This module never selects it |
-  | `tenant_ref` | `Encryptor.Envelope.scope_ref/2` of the host's selector. The lookup key. The column keeps the name it had before the scope rename, because it exists in every adopter's database; `rows/3` selects it as `:scope_ref` (ADR-0006 decision 3) |
+  | `scope_ref` | `Encryptor.Envelope.scope_ref/2` of the host's selector. The lookup key, which `rows/3` selects as `:scope_ref`. A table generated before 0.8.0 names this column `tenant_ref` and holds rows this version does not read (ADR-0006 Amendment A) |
   | `version` | the key version. Ordering is the store's job, per ADR-0002 decision 4 |
   | `namespace`, `name` | what the encrypted data key matches on, byte for byte |
   | `bits` | `256` on this path |
@@ -216,7 +216,7 @@ defmodule Encryptor.Ecto.KeyStore do
 
   Two unique indexes carry properties nothing at runtime can:
 
-    * `{tenant_ref, version}` closes the race ADR-0003 leaves to this package -
+    * `{scope_ref, version}` closes the race ADR-0003 leaves to this package -
       "calling `provision/3` twice concurrently for one scope can produce two
       rows claiming the same version; the transaction that closes that race is
       `encryptor_ecto`'s". A second row claiming a live version is a candidate
@@ -240,7 +240,7 @@ defmodule Encryptor.Ecto.KeyStore do
   not answers - a store configured wrong - raise instead, and "The failure
   that is not in the vocabulary" below is that case.
 
-    * `{:unknown_key, selector}` - no row for this selector's `tenant_ref`. A
+    * `{:unknown_key, selector}` - no row for this selector's `scope_ref`. A
       settled negative answer, and the same answer for a selector a scoped
       store cannot have a reference for at all (`:default`, `""`).
     * `{:key_unavailable, selector}` - the store could not be asked, *and
@@ -287,7 +287,7 @@ defmodule Encryptor.Ecto.KeyStore do
 
   A GCP row in a store configured *with* `:gcp_kms` answers whatever
   `Encryptor.Provider.GcpKms` answers for that row, unrelabelled. A `Decrypt`
-  that Cloud KMS refuses with HTTP 400 or 404 - the row's `tenant_ref`,
+  that Cloud KMS refuses with HTTP 400 or 404 - the row's `scope_ref`,
   `version` or `namespace` no longer matching the data its wrapping was bound
   to, a key version destroyed or disabled, a key that is not there - is
   `{:invalid_key_descriptor, {:kms_refused, status}}`, which a retry does not
@@ -678,7 +678,7 @@ defmodule Encryptor.Ecto.KeyStore do
       live =
         state.repo.all(
           from(k in state.table,
-            where: k.tenant_ref == ^ref,
+            where: k.scope_ref == ^ref,
             order_by: [asc: k.version],
             lock: "FOR UPDATE",
             select: k.version
@@ -693,7 +693,7 @@ defmodule Encryptor.Ecto.KeyStore do
           {^count, _rows} =
             state.repo.delete_all(
               from(k in state.table,
-                where: k.tenant_ref == ^ref and k.version in type(^doomed, {:array, :integer})
+                where: k.scope_ref == ^ref and k.version in type(^doomed, {:array, :integer})
               ),
               opts
             )
@@ -734,7 +734,7 @@ defmodule Encryptor.Ecto.KeyStore do
   defp recheck(state, ref, :all, {doomed, []}, opts) do
     {_count, late} =
       state.repo.delete_all(
-        from(k in state.table, where: k.tenant_ref == ^ref, select: k.version),
+        from(k in state.table, where: k.scope_ref == ^ref, select: k.version),
         opts
       )
 
@@ -819,10 +819,10 @@ defmodule Encryptor.Ecto.KeyStore do
   defp rows(state, ref, selector) do
     query =
       from(k in state.table,
-        where: k.tenant_ref == ^ref,
+        where: k.scope_ref == ^ref,
         order_by: [desc: k.version],
         select: %{
-          scope_ref: k.tenant_ref,
+          scope_ref: k.scope_ref,
           version: k.version,
           namespace: k.namespace,
           name: k.name,

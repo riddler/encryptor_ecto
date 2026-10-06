@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
 
       mix encryptor.ecto.gen.key_store_migration [--table NAME] [--migrations-path PATH]
 
-  The table holds one row per tenant per key version: the six fields
+  The table holds one row per scope per key version: the six fields
   `Encryptor.Envelope.WrappedKey` fixes, which is the whole of the vault's
   storage contract (`encryptor` ADR-0003 decision 9), plus the two this
   package's ADR-0005 adds - `wrapping_shape` and `key_id`. The vault owns the
@@ -62,11 +62,11 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
 
   ## The shape it writes
 
-  One row per `{tenant_ref, version}`, with two unique indexes.
+  One row per `{scope_ref, version}`, with two unique indexes.
 
-  `{tenant_ref, version}` closes the race `encryptor` ADR-0003 leaves to this
+  `{scope_ref, version}` closes the race `encryptor` ADR-0003 leaves to this
   package: `Encryptor.Envelope.provision/3` called twice concurrently for one
-  tenant can produce two rows claiming the same version, and a candidate list
+  scope can produce two rows claiming the same version, and a candidate list
   with two entries for one version is a key nobody can vouch for.
 
   `{namespace, name}` is the name contract made mechanical. `RawAes.unwrap_key/3`
@@ -129,9 +129,9 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
       # somebody else's unwrap failure. `key_id` is `NULL` for an engine
       # message and required for a GCP ciphertext.
       #
-      # The unique index on `{tenant_ref, version}` closes the race
+      # The unique index on `{scope_ref, version}` closes the race
       # `Encryptor.Envelope.provision/3` leaves open: called twice concurrently
-      # for one tenant it can produce two rows claiming one version, and a
+      # for one scope it can produce two rows claiming one version, and a
       # candidate list with two entries for one version is a key nobody can
       # vouch for. The unique index on `{namespace, name}` is the name contract
       # made mechanical - a name is bound to its bytes forever, and two rows
@@ -142,7 +142,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
 
       def change do
         create table(:#{table}) do
-          add(:tenant_ref, :string, null: false)
+          add(:scope_ref, :string, null: false)
           add(:version, :integer, null: false)
           add(:namespace, :string, null: false)
           add(:name, :string, null: false)
@@ -154,7 +154,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration do
           add(:updated_at, :utc_datetime)
         end
 
-        create(unique_index(:#{table}, [:tenant_ref, :version]))
+        create(unique_index(:#{table}, [:scope_ref, :version]))
         create(unique_index(:#{table}, [:namespace, :name]))
       end
     end

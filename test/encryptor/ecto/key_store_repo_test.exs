@@ -450,7 +450,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
       assert written_under == provisioned.name
     end
 
-    # A GCP wrapping is bound to its row's `tenant_ref`, `version` and
+    # A GCP wrapping is bound to its row's `scope_ref`, `version` and
     # `namespace` through the additional authenticated data, so a row filed
     # under another scope fails closed at `Decrypt`, which Cloud KMS refuses
     # with a `400`. The provider's public answer for that refusal is
@@ -471,8 +471,8 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
 
       {1, _rows} =
         TestRepo.update_all(
-          from(k in TestGcpKms.table(), where: k.tenant_ref == ^theirs),
-          set: [tenant_ref: mine, name: "t/#{mine}/v1"]
+          from(k in TestGcpKms.table(), where: k.scope_ref == ^theirs),
+          set: [scope_ref: mine, name: "t/#{mine}/v1"]
         )
 
       state = TestGcpKms.state()
@@ -605,7 +605,25 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
   end
 
   describe "a table created under 0.3.0, after the additive migration" do
-    # The row this reads was written by a data migration *before* the columns
+    # ADR-0006 Amendment A, A3: a table generated before 0.8.0 keeps its
+    # `tenant_ref` column and holds v1 rows, and this version reads neither.
+    # The query names `scope_ref`, Postgres refuses it, and the refusal is
+    # raised rather than translated: a missing column never stops missing, so
+    # it is not `{:key_unavailable, selector}` (the moduledoc's "The failure
+    # that is not in the vocabulary").
+    #
+    # Sabotage: queried `tenant_ref` in `rows/3` again. The pre-0.8.0 row
+    # resolved, and `assert_raise` went red.
+    test "a table generated before 0.8.0 is not read: the missing column raises" do
+      state = TestKeyStore.state(table: @legacy_table)
+
+      for read <- [&KeyStore.decryption_keys/2, &KeyStore.encryption_key/2] do
+        error = assert_raise Postgrex.Error, fn -> read.(state, @legacy_selector) end
+        assert %Postgrex.Error{postgres: %{code: :undefined_column}} = error
+      end
+    end
+
+    # The row this holds was written by a data migration *before* the columns
     # existed, which is the only arrangement that can show the backfill is
     # right. ADR-0005 decision 3: every row any adopter holds today was written
     # for a read path with no branch in it, so `"engine_message"` is not a guess
@@ -614,15 +632,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # Sabotage: backfilled `NULL` instead. The column is `null: false`, so the
     # migration itself failed on the way up - in the host's deploy, against a
     # populated table, which is the worst place to find out.
-    test "a row written before the columns existed still resolves" do
-      state = TestKeyStore.state(table: @legacy_table)
-
-      assert {:ok, [descriptor]} = KeyStore.decryption_keys(state, @legacy_selector)
-      assert descriptor.bits == 256
-      assert {:ok, ^descriptor} = KeyStore.encryption_key(state, @legacy_selector)
-    end
-
-    test "and it was backfilled as an engine message with no key id" do
+    test "its pre-0.8.0 row was backfilled as an engine message with no key id" do
       assert [%{wrapping_shape: "engine_message", key_id: nil}] =
                TestRepo.all(
                  from(k in @legacy_table,
@@ -788,7 +798,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     {1, _rows} =
       TestRepo.update_all(
         from(k in KeyStore.default_table(),
-          where: k.tenant_ref == ^ref and k.version == ^version
+          where: k.scope_ref == ^ref and k.version == ^version
         ),
         set: [wrapped: :binary.copy(<<0>>, 64)]
       )

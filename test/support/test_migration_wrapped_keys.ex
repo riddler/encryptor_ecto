@@ -16,9 +16,11 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeys do
   test that reads the generator's output and asserts each line of it.
 
   This is the *fresh* table a new adopter gets. The one an adopter created
-  under 0.3.0, and the additive migration that brings it here, are
-  `Encryptor.Ecto.TestMigrationWrappedKeys03` and
-  `Encryptor.Ecto.TestMigrationWrappedKeysShape`.
+  under 0.3.0, and the additive migration that adds ADR-0005's two columns to
+  it, are `Encryptor.Ecto.TestMigrationWrappedKeys03` and
+  `Encryptor.Ecto.TestMigrationWrappedKeysShape`. That table keeps its
+  `tenant_ref` column, so the key store from 0.8.0 on does not read it
+  (ADR-0006 Amendment A, A3).
   """
 
   use Ecto.Migration
@@ -26,7 +28,7 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeys do
   @doc "Creates the wrapped-key table."
   def change do
     create table(:encryptor_wrapped_keys) do
-      add(:tenant_ref, :string, null: false)
+      add(:scope_ref, :string, null: false)
       add(:version, :integer, null: false)
       add(:namespace, :string, null: false)
       add(:name, :string, null: false)
@@ -38,7 +40,7 @@ defmodule Encryptor.Ecto.TestMigrationWrappedKeys do
       add(:updated_at, :utc_datetime)
     end
 
-    create(unique_index(:encryptor_wrapped_keys, [:tenant_ref, :version]))
+    create(unique_index(:encryptor_wrapped_keys, [:scope_ref, :version]))
     create(unique_index(:encryptor_wrapped_keys, [:namespace, :name]))
   end
 end

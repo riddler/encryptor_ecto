@@ -19,7 +19,7 @@ created before the `wrapping_shape` and `key_id` columns existed needs
 `mix encryptor.ecto.gen.key_store_shape_migration` first. What a scope is
 here: the unit your scoped vault partitions keys by, which in this release
 is the scope selector you pass as `key:`, stored on each row as its
-keyed reference `tenant_ref`. Every scope gets its own `CryptoKey`.
+keyed reference `scope_ref`. Every scope gets its own `CryptoKey`.
 
 ## Step 1. Create the key ring, and grant the service account
 
@@ -101,11 +101,8 @@ def provision_gcp_key(scope_id) do
     )
 
   with {:ok, row} <- Encryptor.Provider.GcpKms.provision(gcp, scope_id) do
-    {ref, row} = Map.pop(row, :scope_ref)
-
     MyApp.Repo.insert_all("encryptor_wrapped_keys", [
       row
-      |> Map.put(:tenant_ref, ref)
       |> Map.put(:wrapping_shape, "gcp_kms_ciphertext")
       |> Map.to_list()
     ])
@@ -115,13 +112,12 @@ end
 
 `gcp_kms_opts()` is the same keyword list as the key store's `:gcp_kms`,
 and `subkey()` the same reference subkey; with a different subkey the row
-would be filed under a `tenant_ref` the vault never asks for. The `store:`
+would be filed under a `scope_ref` the vault never asks for. The `store:`
 function is required by `init/1` and unused by `provision/2`.
 
-The provider answers the reference as `:scope_ref`, but the table's column
-is still `tenant_ref`: it kept its name through the scope rename because it
-exists in every adopter's database (ADR-0006 decision 3). Hence the
-`Map.pop/2` before the insert.
+The provider answers the reference as `:scope_ref`, which is the table's
+column of the same name (ADR-0006 Amendment A), so the row goes in as it
+comes back, with `wrapping_shape` added.
 
 What you get back:
 
@@ -133,12 +129,12 @@ What you get back:
 - `version` is `1`. `provision/2` mints version 1 and nothing else, and
   creates the `CryptoKey` with no rotation schedule, so it has one
   `CryptoKeyVersion`.
-- The wrapping is bound to the row's `tenant_ref`, `version` and `namespace`
+- The wrapping is bound to the row's `scope_ref`, `version` and `namespace`
   as additional authenticated data, so a row edited or moved to another
   scope does not decrypt.
 
 `provision/2` is not safe to call concurrently for one selector (its
-`## Provisioning`). The table's unique index on `{tenant_ref, version}`
+`## Provisioning`). The table's unique index on `{scope_ref, version}`
 refuses the second insert, and the losing call's wrapping is never stored.
 Make provisioning part of your scope's onboarding transaction.
 
@@ -179,7 +175,7 @@ destroy; a key provisioned as above has one.
   Encryptor.Ecto.KeyStore.shred(MyApp.ScopedVault, scope_id, version: :all)
 ```
 
-`version: :all` deletes every row for the scope's `tenant_ref` in one
+`version: :all` deletes every row for the scope's `scope_ref` in one
 transaction that locks them first, so the versions the record names are
 the versions deleted. The rows are deleted from the repo, table and prefix
 the vault's key store was started with, and from no other. By default the
@@ -190,7 +186,7 @@ not get in the way: the shred reads the scope's version numbers and never
 unwraps a row, so it makes no Cloud KMS call.
 
 The `Encryptor.Ecto.KeyStore.Shred` it returns is the change record: the
-`versions` deleted, the `scope_ref` (the `tenant_ref` value, never your
+`versions` deleted, the `scope_ref` (the column's value, never your
 selector), `deleted_at` and `drained_at`. Keep it beside the decision. A
 refusal deletes nothing: `{:unknown_key, selector}` for a scope with no
 row, `{:key_unavailable, selector}` when the database could not be asked
@@ -204,7 +200,7 @@ Do not replace the call with a hand-written `delete_all`: that takes no
 lock, waits for no drain and leaves no record.
 
 The row delete is not optional. Destroying the key is not full erasure: the
-scope's `tenant_ref` is a permanent pseudonym that sits in every message
+scope's `scope_ref` is a permanent pseudonym that sits in every message
 header and every retained backup, so the row deletion stays as mandatory as
 it is for an engine-message row (`Encryptor.Provider.GcpKms`, "The shred,
 and why it is not a function here").
@@ -269,7 +265,7 @@ unrelabelled (ADR-0005 Amendment A5):
 - **HTTP 400 or 404** is `{:invalid_key_descriptor, {:kms_refused,
   status}}`, which no retry changes: a destroyed key version (the shred's
   middle row above), a version an operator disabled, a key that is not
-  there, or a row whose `tenant_ref`, `version` or `namespace` no longer
+  there, or a row whose `scope_ref`, `version` or `namespace` no longer
   matches the additional authenticated data its wrapping was bound to. Two
   of these an operator can reverse: a disabled version, by enabling it
   again, and a destroyed one inside the restore window above, by restoring

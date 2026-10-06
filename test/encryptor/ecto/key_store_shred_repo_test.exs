@@ -129,7 +129,7 @@ defmodule Encryptor.Ecto.KeyStoreShredRepoTest do
                TestKeyStore.Scope.encrypt("x", key: selector, encryption_context: @context)
     end
 
-    # Sabotage: dropped the `tenant_ref` condition from the delete. It
+    # Sabotage: dropped the `scope_ref` condition from the delete. It
     # matched both scopes' rows, the `{^count, _}` match raised on `{2, nil}`,
     # and the transaction rolled back rather than take the neighbour.
     test "leaves every other scope's rows alone" do
@@ -437,7 +437,7 @@ defmodule Encryptor.Ecto.KeyStoreShredRepoTest do
 
     TestRepo.all(
       from(k in KeyStore.default_table(),
-        where: k.tenant_ref == ^ref,
+        where: k.scope_ref == ^ref,
         order_by: [asc: k.version],
         select: k.version
       )

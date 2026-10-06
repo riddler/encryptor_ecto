@@ -254,7 +254,7 @@ defmodule Encryptor.Ecto.TwoVaultsGuideTest do
   end
 
   defp key_versions(table, ref) do
-    TestRepo.all(from(k in table, where: k.tenant_ref == ^ref, select: k.version))
+    TestRepo.all(from(k in table, where: k.scope_ref == ^ref, select: k.version))
   end
 
   defp guide_modules do

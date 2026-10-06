@@ -18,6 +18,10 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigration do
   rescue that used to report this as a retryable
   `{:key_unavailable, selector}` is gone).
 
+  Every table this task applies to predates 0.8.0, so it holds v1 rows under
+  a `tenant_ref` column, which the 0.8.0 key store does not read (ADR-0006
+  Amendment A, A3).
+
   ## Why this is a second task
 
   `mix encryptor.ecto.gen.key_store_migration` writes `CREATE TABLE` and
