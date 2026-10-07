@@ -153,7 +153,7 @@ No entries yet.
 |---|---|---|---|
 | F1 | High | the LLM pass | PENDING the maintainer's disposition |
 | F2 | High | the LLM pass | PENDING the maintainer's disposition |
-| F3 | Medium | the LLM pass | FIX IN PROGRESS, PR 148 |
+| F3 | Medium | the LLM pass | FIXED, PR 148 |
 | F4 | Medium | the LLM pass | FIXED, PR 147 |
 | F5 | Low | the LLM pass | DEFERRED to ece-q6tp |
 | F6 | Low | the LLM pass | DEFERRED to ece-q6tp |
@@ -240,10 +240,22 @@ each one is FIXED or the maintainer accepts it.
   failure carries the primary key, the schema, the field, and a reason reduced
   to atoms and module names". The `Encryptor.Ecto.Migrator.Report` moduledoc
   says failure reasons are "reduced to module names and atoms".
-- **Disposition:** FIX IN PROGRESS in
-  [PR 148](https://github.com/riddler/encryptor_ecto/pull/148), open and not
-  merged: every error reason from a host module is to be reduced to its shape
-  before it reaches the report, the `:progress` callback or the CLI.
+- **Disposition:** FIXED in
+  [PR 148](https://github.com/riddler/encryptor_ecto/pull/148). Every error
+  reason a host module returns is reduced to its shape before it reaches the
+  report, the `:progress` callback or the CLI, and the CLI renders a failure's
+  reason by shape whoever recorded it. Four tests pin it:
+  - in "a reason a host module returns"
+    ([`test/encryptor/ecto/migrator_run_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/migrator_run_test.exs)),
+    "from a reader, reaches the report and the progress callback as its
+    shape", "from a writer, keeps its atoms and drops every other term" and
+    "from a reader in a verification, is reduced the same way". Their
+    sabotage note: making `fail/4` record the reason as the host returned it
+    turns each one red.
+  - "a failure line renders a reason by shape, whoever recorded it"
+    ([`test/encryptor/ecto/migrator/cli_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/migrator/cli_test.exs)).
+    Its sabotage note: rendering the reason with `inspect/1` rather than
+    `Encryptor.Ecto.Error.redact/1` turns it red.
 
 ### F4. A resume reused a checkpoint written under different filters
 
