@@ -238,7 +238,8 @@ defmodule Encryptor.Ecto.Binary do
 
   While `legacy:` is set, a row that has not been rewritten yet is read under
   the legacy scheme's rules: for a `cloak_ecto` host, with no encryption
-  context binding it to its row and no per-scope key separation (decision 5).
+  context binding it to its column and scope, and no per-scope key
+  separation (decision 5).
 
   The window is not only the rows the rewrite has yet to reach. The fallback
   answers any bytes the vault refuses, and legacy-format bytes carry no
