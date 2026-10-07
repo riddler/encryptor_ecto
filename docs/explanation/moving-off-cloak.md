@@ -59,6 +59,10 @@ scope at encrypt time is a durably wrong row, and nothing about the AAD helps
 there. The context is a backstop, not a substitute for resolving the scope
 correctly.
 
+It is also a check on the column and the scope, not on the row. Nothing in the
+context names a row, so two rows of `accounts.tax_id` under one scope can have
+their bytes swapped and each loads as the other's value.
+
 Two consequences fall out of freezing the context at declaration. A physical
 rename of a table or column no longer invalidates every stored row, because the
 declared values can be pinned while the physical ones move. And two fields can

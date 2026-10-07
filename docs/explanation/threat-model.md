@@ -113,13 +113,17 @@ and "raise once legacy: is dropped, while the migrated row still loads"
 A reader who can also write gains little the vault does not already refuse. A
 value moved to another column, or to another scope's row, fails to decrypt
 rather than decrypting in the wrong place, because the column and the scope
-reference are both in the context the message is bound to.
+reference are both in the context the message is bound to. Nothing in the
+context names the row, though: two rows of one column under one scope can
+have their bytes swapped, and each then loads as the other's value.
 
 Pinned by: "binds the column, so one column's bytes do not load as another's"
 and "fails authentication rather than reading across the boundary"
 ([`test/encryptor/ecto/binary_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/binary_test.exs));
 the repository-backed scope test in
 [`test/encryptor/ecto/types_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/types_repo_test.exs);
+"both load, each as the other's value" for the swap
+([`test/encryptor/ecto/binary_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/binary_repo_test.exs));
 "a ciphertext moved across partitions fails authentication"
 ([`test/encryptor/ecto/key_store_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/key_store_repo_test.exs));
 "a different table or column derives different bytes" and "a different scope

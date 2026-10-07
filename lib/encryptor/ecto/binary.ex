@@ -48,6 +48,12 @@ defmodule Encryptor.Ecto.Binary do
   name - the derived values are the anti-substitution property and a static
   pair cannot be allowed to shadow them.
 
+  What that binds is the column and the scope, not the row: nothing in the
+  context names a row, so two rows of one column under one scope can have
+  their stored bytes swapped and both load, each as the other's value.
+  `:context` does not change that, because its pairs are static for the
+  field.
+
   Schema prefixes are deliberately absent: a prefix is a deployment-time
   placement decision, and binding it would make a ciphertext un-restorable
   into a differently-prefixed database.
