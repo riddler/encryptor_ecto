@@ -69,17 +69,24 @@ by one.
 
 **Suspension rows** yield the selector of every suspended scope, as the host
 wrote it. This is the one table this package writes that stores a raw scope
-identifier: the suspension store has to answer selectors, and a keyed
+identifier for every scope it concerns (a checkpoint row stores only those a
+migration pass was filtered by, below): the suspension store has to answer selectors, and a keyed
 reference cannot be turned back into one (`Encryptor.Ecto.SuspensionStore`'s
 "The table"). A dump therefore tells its reader which scopes an operator has
 suspended.
 
 **Checkpoint rows** yield the plan, schema and field of each migration pass,
 the primary key it last committed, and its classification counts: how many
-rows were migrated, skipped, or could not be read. That is a description of
-the migration, not of any value
+rows were migrated, skipped, or could not be read. Beside the counts, each row
+also records the run that wrote it and whether that pass reached the end of its
+rows: the raw scope identifiers it was given in `only_scopes:` or
+`except_scopes:`, and the wrapping key name a rotation's `writing_key:` named
+(a name, never key material), so a dump tells its reader which scopes were
+migrated or rotated separately and under which key name. That is a
+description of the migration, not of any value
 ([`Encryptor.Ecto.Migrator.Checkpoint`](https://hexdocs.pm/encryptor_ecto/Encryptor.Ecto.Migrator.Checkpoint.html),
-"Its shape").
+"Its shape" and "The key carries the run, and a resume continues only its
+own").
 
 **A plaintext column being adopted** yields its plaintext. A host moving a
 column that was never encrypted onto this package backfills a new binary
