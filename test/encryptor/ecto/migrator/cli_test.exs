@@ -267,6 +267,26 @@ defmodule Encryptor.Ecto.Migrator.CLITest do
       assert rendered =~ "failures: #{Report.failure_limit() + 3}"
       assert rendered =~ "... 3 further failures not listed"
     end
+
+    # Sabotage: dropped `complete_lines/1` from `render/1` - a resume of a
+    # finished pass printed zero counts and nothing else, which reads exactly
+    # like a pass over an empty table.
+    test "a field whose resume found its pass complete says so" do
+      report =
+        Report.new(:write)
+        |> Report.put_cursor(TestSchemas.Card, :pan, nil, :complete)
+        |> Report.put_cursor(TestSchemas.Card, :notes, "tenant_b", :complete)
+        |> Report.put_cursor(TestSchemas.Card, :pan, "tenant_b", 42)
+
+      lines = report |> CLI.render() |> String.split("\n")
+
+      assert Enum.filter(lines, &(&1 =~ "already complete")) == [
+               "already complete, nothing resumed: Encryptor.Ecto.TestSchemas.Card.notes " <>
+                 "in prefix tenant_b (run without --resume to scan it again)",
+               "already complete, nothing resumed: Encryptor.Ecto.TestSchemas.Card.pan " <>
+                 "(run without --resume to scan it again)"
+             ]
+    end
   end
 
   defp migrate(flags), do: CLI.parse_migrate(["MyApp.Plan", "--mode", "write" | flags])

@@ -145,7 +145,7 @@ defmodule Encryptor.Ecto.Migrator.CLI do
       ["mode: #{report.mode}"] ++
         count_lines(report) ++
         ["concurrent: #{report.concurrent}", "failures: #{report.failure_count}"] ++
-        failure_lines(report),
+        failure_lines(report) ++ complete_lines(report),
       "\n"
     )
   end
@@ -451,6 +451,20 @@ defmodule Encryptor.Ecto.Migrator.CLI do
 
     lines ++ elided(report)
   end
+
+  # A resumed field whose pass had already finished visited no row, and its
+  # zero counts would otherwise read exactly like an empty table.
+  @spec complete_lines(Report.t()) :: [String.t()]
+  defp complete_lines(%Report{} = report) do
+    for {{schema, field, prefix}, :complete} <- Enum.sort(report.cursors) do
+      "already complete, nothing resumed: #{inspect(schema)}.#{field}#{prefix_suffix(prefix)}" <>
+        " (run without --resume to scan it again)"
+    end
+  end
+
+  @spec prefix_suffix(String.t() | nil) :: String.t()
+  defp prefix_suffix(nil), do: ""
+  defp prefix_suffix(prefix), do: " in prefix #{prefix}"
 
   @spec elided(Report.t()) :: [String.t()]
   defp elided(%Report{failures: shown, failure_count: total}) when total > length(shown) do

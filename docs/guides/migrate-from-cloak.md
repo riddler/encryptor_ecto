@@ -399,6 +399,8 @@ predicted less whatever ordinary traffic migrated in the meantime.
 | The pass halted partway, with failures listed | The default is `on_error: :halt`, and it stopped at the first row it could not handle. Read the counts as an upper bound rather than a ledger: the batch it halted in is rolled back and its cursor is not recorded, so the report can overstate what was persisted by up to one batch. Resolve those rows, then resume - resuming starts from the last committed checkpoint, so the rolled-back batch is simply done again |
 | A `validate:` rejection | The host's own check refused a loaded value. On an unauthenticated legacy cipher these are the rows the whole acknowledgement exists for: an AEAD source would have called them `:undecryptable` on its own. Treat each as a data question, not a migration question |
 | The pass died - deploy, restart, connection loss | Re-run it. Every row is probed before it is rewritten, so a re-run is safe by construction; the checkpoint only makes it fast. Add `resume: true` / `--resume` to start after the recorded cursor |
+| Exit 2 saying the checkpoint was recorded by a run with other options | A resume continues only the run that recorded the checkpoint, and this one has different `only_scopes:`, `except_scopes:` or `writing_key:` - the message names which. Resume with the options it names, or drop `--resume` to start this run from the beginning |
+| An "already complete" line and every count at zero | That field's pass had already reached the end of its rows, so the resume had nothing to continue. Drop `--resume` to scan it again |
 | You need to watch it from outside | Use the census SQL below. It needs no key and no application |
 
 Resuming reads the cursor recorded after each batch, inside that batch's own

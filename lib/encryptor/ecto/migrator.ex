@@ -73,7 +73,7 @@ defmodule Encryptor.Ecto.Migrator do
   |---|---|---|
   | `:mode` | **required** | `:dry_run` or `:write` |
   | `:batch_size` | `500` | Rows per transaction |
-  | `:resume` | `false` | Start after the recorded cursor |
+  | `:resume` | `false` | Start after the cursor this run recorded |
   | `:prefix` | `nil` | The schema prefix to visit; the repo's default when absent |
   | `:checkpoint` | `:table` | `:none` runs with no checkpoint at all |
   | `:checkpoint_table` | `"encryptor_ecto_migration_checkpoints"` | |
@@ -92,6 +92,16 @@ defmodule Encryptor.Ecto.Migrator do
 
   `checkpoint: :none` with `resume: true` is an `ArgumentError`: resuming from
   a checkpoint that was never written is a request with no meaning.
+
+  A resume continues only the run that recorded the checkpoint. The checkpoint
+  carries the run's `only_scopes:`, `except_scopes:` (each in any order) and
+  `writing_key:`, and a resume under different ones is an `ArgumentError`
+  naming the difference, raised before any row is visited: the recorded
+  cursor says how far *that* run got through the rows *it* visits, and
+  starting after it would skip rows this run has never seen. A pass that
+  reached the end of its rows is marked complete, and a resume of it is a
+  no-op whose report carries `:complete` as that field's cursor. Either way,
+  `resume: false` starts from the beginning, which probe-first makes safe.
 
   ## A rotation is a pass with `writing_key:` set
 
@@ -142,9 +152,9 @@ defmodule Encryptor.Ecto.Migrator do
 
   A run that **cannot start** raises: an unknown option, a missing mode, a
   schema whose primary key cannot be paged over, a scope filter against a
-  rewrite that has no scope column, a missing checkpoint table. None of those
-  is about rows, and none of them is improved by being handed back as an empty
-  report.
+  rewrite that has no scope column, a missing checkpoint table, a resume of a
+  checkpoint another run recorded. None of those is about rows, and none of
+  them is improved by being handed back as an empty report.
 
   A run that started reports. `{:error, report}` means the pass found rows an
   operator has to decide about; the report says which, and carries everything
@@ -345,12 +355,16 @@ defmodule Encryptor.Ecto.Migrator do
     if Report.verified?(report), do: {:ok, report}, else: {:error, report}
   end
 
+  # Every pass's resume point is read before the first pass runs, so a
+  # checkpoint recorded by a different run is refused before any row of any
+  # field is visited - a run that cannot start raises, and this one cannot.
   @spec report([Pass.t()], options()) :: Report.t()
   defp report(passes, options) do
-    {report, _status} =
-      Enum.reduce_while(passes, {Report.new(options.mode), :ok}, fn pass, {report, _status} ->
-        cursor = Pass.resume_cursor(pass, options.resume)
+    resumes = Enum.map(passes, &{&1, Pass.resume_cursor(&1, options.resume)})
 
+    {report, _status} =
+      Enum.reduce_while(resumes, {Report.new(options.mode), :ok}, fn {pass, cursor},
+                                                                     {report, _status} ->
         case Pass.run(pass, report, cursor) do
           {report, :ok} -> {:cont, {report, :ok}}
           {report, :halt} -> {:halt, {report, :halt}}
