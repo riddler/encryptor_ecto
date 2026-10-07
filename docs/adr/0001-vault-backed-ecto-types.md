@@ -864,3 +864,30 @@ is narrowed is only the typographic claim the rendering implies. No decision,
 amendment or status word above changes.
 
 Provenance: bead ece-42x (folding ece-2bc).
+
+## Note (2026-10-07): the context binds a column and a scope, not a row
+
+The Context section says the encryption-context convention standardizes the
+context as identifying keys "so that a ciphertext lifted out of one row and
+dropped into another *fails authentication* rather than decrypting into the
+wrong place" (`:139-140` at `encryptor_ecto` `e1852a4`). Read as a claim
+about any two rows, that sentence is too broad, and a review found it so.
+This Note says so by addition; the sentence and every decision above stay as
+written.
+
+What a message is bound to is the context the type composes and the scope
+the vault derives: `"table"` and `"column"` as declared, plus the field's
+static `:context` pairs (`Encryptor.Ecto.Binary.declared_context/1`), with
+the scope passed as `key:` and its `"scope_ref"` pair injected by the vault
+(`vault_opts/2` in `lib/encryptor/ecto/binary.ex`; acceptance amendment 1).
+Nothing in that set names a row. So a ciphertext moved to another column, or
+to a row under another scope, fails authentication, as decision 4 and
+decision 5 intend; a ciphertext moved between two rows of one column under
+one scope loads, as that row's value. The test "both load, each as the other's
+value" in `test/encryptor/ecto/binary_repo_test.exs` pins that swap.
+
+This Note decides nothing new. Decision 4 says what the context holds, and a
+per-row pair is not in it; the Consequences' "Every encrypted write is
+anti-substitution-protected by construction" is read with the same scope:
+protected across columns and scopes. No decision, amendment or status word
+above changes.

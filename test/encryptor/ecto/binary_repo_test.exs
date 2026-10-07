@@ -27,6 +27,14 @@ defmodule Encryptor.Ecto.BinaryRepoTest do
     TestRepo.insert!(struct(Card, Keyword.merge([merchant_id: merchant_id, pan: @pan], attrs)))
   end
 
+  # A read that reports a refusal as a value, so a test can assert that a row
+  # loads rather than letting the refusal escape as an error.
+  defp read_card(id) do
+    {:ok, TestRepo.get!(Card, id)}
+  rescue
+    error in DecryptError -> {:error, error.reason}
+  end
+
   describe "a schema field naming the type" do
     setup_scope "merchant_7f3"
 
@@ -79,6 +87,37 @@ defmodule Encryptor.Ecto.BinaryRepoTest do
       Scope.wrap("merchant_a19", fn ->
         assert_raise DecryptError, fn -> TestRepo.get!(Card, card.id) end
       end)
+    end
+  end
+
+  # The binding is per column and scope, not per row: the context names the
+  # table, the column and the scope, and nothing in it names the row. So
+  # bytes a writer with database access swaps between two rows of one column
+  # under one scope load without complaint. This pins that as the documented
+  # behaviour; a change that bound the row would turn it red and would have
+  # to say so in the docs that describe the binding.
+  describe "two rows of one column and scope with their bytes swapped" do
+    setup_scope "merchant_7f3"
+
+    @other_pan "5500000000000004"
+
+    # sabotage: declared_context/1 gaining a pair that differs on every call
+    # (a stand-in for a per-row binding), red - each read is then refused.
+    test "both load, each as the other's value" do
+      first = insert_card("merchant_7f3")
+      second = insert_card("merchant_7f3", pan: @other_pan)
+
+      %{rows: [[first_bytes]]} =
+        SQL.query!(TestRepo, "SELECT pan FROM cards WHERE id = $1", [first.id])
+
+      %{rows: [[second_bytes]]} =
+        SQL.query!(TestRepo, "SELECT pan FROM cards WHERE id = $1", [second.id])
+
+      SQL.query!(TestRepo, "UPDATE cards SET pan = $1 WHERE id = $2", [second_bytes, first.id])
+      SQL.query!(TestRepo, "UPDATE cards SET pan = $1 WHERE id = $2", [first_bytes, second.id])
+
+      assert {:ok, %Card{pan: @other_pan}} = read_card(first.id)
+      assert {:ok, %Card{pan: @pan}} = read_card(second.id)
     end
   end
 

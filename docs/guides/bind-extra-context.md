@@ -2,10 +2,17 @@
 
 Every encrypted field already binds `"table"` and `"column"`, and every
 scoped one binds a `"scope_ref"` the vault derives from the scope
-selector. That is what makes a row's ciphertext non-substitutable: bytes
-written for `cards.pan` under one scope fail authentication when they are
-loaded as `cards.notes`, or under a different scope, whatever else an
-attacker with database access can rearrange.
+selector. That is what makes a ciphertext non-substitutable across columns
+and scopes: bytes written for `cards.pan` under one scope fail
+authentication when they are loaded as `cards.notes`, or under a different
+scope, whatever else an attacker with database access can rearrange.
+
+The binding stops at the column and the scope. Nothing in the context names
+the row, so two rows of `cards.pan` under one scope can have their bytes
+swapped and both load, each as the other's value. This guide does not
+change that: the pairs it adds are the same for every row of the column,
+and Step 1 below puts a per-row value such as a primary key in the
+do-not-bind column.
 
 This guide is for the case where that is not enough - where a column's rows
 are split across a boundary the schema does not express, and you want bytes

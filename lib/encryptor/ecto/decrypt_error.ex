@@ -6,9 +6,16 @@ defmodule Encryptor.Ecto.DecryptError do
 
   A decrypt failure is an *integrity event*. Because the encryption context is
   bound into the message as additional authenticated data, a ciphertext lifted
-  out of one row and dropped into another fails authentication rather than
-  decrypting into the wrong place - so this exception is what that
-  anti-substitution property looks like when it fires.
+  out of one column and dropped into another, or out of one scope's row and
+  into another scope's, fails authentication rather than decrypting into the
+  wrong place - so this exception is what that anti-substitution property
+  looks like when it fires.
+
+  The binding is per column and scope, not per row. The context names the
+  table, the column, the scope and any static pairs the field declares, and
+  nothing in it names the row, so bytes swapped between two rows of one
+  column under one scope both load, each as the other's value, and this
+  exception is not raised.
 
   ## `:engine` is not a contract
 
