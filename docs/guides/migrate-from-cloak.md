@@ -162,8 +162,11 @@ and redeploy.
 
 **While this window is open, an unmigrated row is read under the legacy scheme's
 rules.** For a cloak host that means no encryption context and no per-scope key
-separation for those rows. The guarantee is per-row until the pass finishes,
-which is why the window is meant to be short.
+separation for those rows. It is wider than the unmigrated rows, too: the
+fallback answers any bytes the new load refuses, so legacy-format bytes that a
+writer with database access puts into a row the pass already rewrote load as
+well. Finishing the pass does not close that; dropping `legacy:` in step 8
+does, which is why the window is meant to be short.
 
 ## Before step 4: the release task
 
@@ -734,6 +737,12 @@ defmodule MyApp.Encrypted.Binary do
   use Encryptor.Ecto.Binary, vault: MyApp.Vault
 end
 ```
+
+This commit is what closes the window, not the pass before it. Until it
+deploys, a row the pass rewrote still loads legacy-format bytes if a writer
+with database access puts them there, and a `legacy_load` count for a column
+that step 6 already verified clean is such a row being read: find it before
+this commit, because after it the row raises.
 
 **Expected:** the suite is green, the deploy is ordinary, and the `legacy_load`
 counter stays at zero because there is no longer an event to emit.

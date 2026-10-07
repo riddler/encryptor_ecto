@@ -98,9 +98,17 @@ when the column is dropped, not when the backfill finishes.
 **A cloak-format row inside the mixed window** yields what the old scheme
 leaves exposed. While a field declares `legacy:`, a row the migrator has not
 rewritten is still in the old format, under the old key and with no
-encryption context. [What changes when you move off
-cloak_ecto](moving-off-cloak.md#the-mixed-window-is-a-per-row-downgrade-while-it-is-open)
-explains why that is a per-row downgrade and what closes it.
+encryption context. The same field also loads legacy-format bytes that a
+writer puts into a row the migrator already rewrote, because the fallback
+answers any bytes the vault refuses and those bytes carry no context; that
+holds until `legacy:` is dropped, not until the pass finishes. [What changes
+when you move off
+cloak_ecto](moving-off-cloak.md#the-mixed-window-is-a-downgrade-until-legacy-is-dropped)
+explains the downgrade and why dropping `legacy:` is what closes it.
+
+Pinned by: "load while legacy: is declared, and are counted as a legacy read"
+and "raise once legacy: is dropped, while the migrated row still loads"
+([`test/encryptor/ecto/legacy_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/legacy_test.exs)).
 
 A reader who can also write gains little the vault does not already refuse. A
 value moved to another column, or to another scope's row, fails to decrypt

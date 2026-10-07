@@ -8,6 +8,7 @@ defmodule Encryptor.Ecto.LegacyTest do
   alias Encryptor.Ecto.DecryptError
   alias Encryptor.Ecto.MissingContextError
   alias Encryptor.Ecto.MissingScopeError
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.SerializationError
   alias Encryptor.Ecto.TestLegacy
   alias Encryptor.Ecto.TestSchemas.Card
@@ -284,6 +285,63 @@ defmodule Encryptor.Ecto.LegacyTest do
       assert metadata |> Map.keys() |> Enum.sort() == [:column, :table]
       refute inspect(metadata) =~ @pan
       refute inspect(metadata) =~ "merchant_7f3"
+    end
+  end
+
+  # The window is not only the rows the rewrite has yet to reach. The fallback
+  # answers any bytes the vault refuses and legacy bytes carry no context, so
+  # a writer with database access can put legacy-format bytes into a row that
+  # was already migrated - here another scope's value, whose new-format bytes
+  # the same row refuses - and they load for as long as `legacy:` is declared.
+  # Dropping `legacy:` is what closes it. PanLegacy and Pan are the same field
+  # (the Merchant vault, "cards"/"pan") before and after that step.
+  describe "legacy-format bytes put into a migrated row" do
+    setup :capture_legacy_load
+    setup_scope "merchant_7f3"
+
+    # Another scope's value: the one planted in this scope's row.
+    @other_pan "5500000000000004"
+
+    # sabotage: emit_legacy_load/1's body replaced by :ok, red - the planted
+    # row then loads without the event that is a host's only sign of it.
+    test "load while legacy: is declared, and are counted as a legacy read" do
+      params = params(TestTypes.PanLegacy)
+
+      assert {:ok, migrated} = TestTypes.PanLegacy.dump(@pan, nil, params)
+      assert {:ok, @pan} = TestTypes.PanLegacy.load(migrated, nil, params)
+
+      other_scope_bytes =
+        Scope.wrap("merchant_a19", fn ->
+          {:ok, bytes} = TestTypes.PanLegacy.dump(@other_pan, nil, params)
+          bytes
+        end)
+
+      assert_raise DecryptError, fn ->
+        TestTypes.PanLegacy.load(other_scope_bytes, nil, params)
+      end
+
+      assert {:ok, @other_pan} = TestTypes.PanLegacy.load(legacy_bytes(@other_pan), nil, params)
+
+      assert_received {:telemetry, [:encryptor_ecto, :legacy_load], %{count: 1}, metadata}
+      assert metadata == %{table: "cards", column: "pan"}
+    end
+
+    # sabotage: legacy_arm_or_raise!/4's %{legacy: nil} clause falling
+    # through to TestLegacy.Binary instead of raising, red.
+    test "raise once legacy: is dropped, while the migrated row still loads" do
+      params = params(TestTypes.Pan)
+
+      assert {:ok, migrated} = TestTypes.PanLegacy.dump(@pan, nil, params(TestTypes.PanLegacy))
+      assert {:ok, @pan} = TestTypes.Pan.load(migrated, nil, params)
+
+      error =
+        assert_raise DecryptError, fn ->
+          TestTypes.Pan.load(legacy_bytes(@other_pan), nil, params)
+        end
+
+      assert error.reason == :decrypt_failed
+
+      refute_received {:telemetry, [:encryptor_ecto, :legacy_load], _measurements, _metadata}
     end
   end
 
