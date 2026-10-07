@@ -588,6 +588,50 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     end
   end
 
+  describe "a reason a host module returns" do
+    # Sabotage: made `fail/4` record the reason as the host returned it - the
+    # reader's plaintext reached `report.failures` and every report the
+    # progress callback was handed.
+    test "from a reader, reaches the report and the progress callback as its shape" do
+      _id = insert_card(pan: legacy(@pan))
+      parent = self()
+
+      assert {:error, report} =
+               Migrator.run(TestEnginePlans.DisclosingSource,
+                 mode: :write,
+                 progress: fn report -> send(parent, {:progress, report}) end
+               )
+
+      assert [%{field: :pan, reason: {:bad_checksum, :redacted}}] = report.failures
+      assert_received {:progress, progressed}
+      assert progressed.failures == report.failures
+      refute inspect(report, limit: :infinity) =~ @pan
+      refute inspect(progressed, limit: :infinity) =~ @pan
+    end
+
+    # Sabotage: made `fail/4` record the reason as the host returned it - the
+    # writer's reason carried the plaintext and its length into the report.
+    test "from a writer, keeps its atoms and drops every other term" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert {:error, report} = Migrator.run(TestEnginePlans.DisclosingTarget, mode: :write)
+
+      assert [%{reason: {:rejected, [value: :redacted, length: :redacted]}}] = report.failures
+      refute inspect(report, limit: :infinity) =~ @pan
+    end
+
+    # Sabotage: made `fail/4` record the reason as the host returned it - a
+    # verification, which stops at the reader, carried the plaintext too.
+    test "from a reader in a verification, is reduced the same way" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert {:error, report} = Migrator.verify(TestEnginePlans.DisclosingSource)
+
+      assert [%{reason: {:bad_checksum, :redacted}}] = report.failures
+      refute inspect(report, limit: :infinity) =~ @pan
+    end
+  end
+
   describe "prefixes" do
     # Sabotage: dropped `query_opts/1`'s `prefix:` - the run read and wrote the
     # default prefix's rows while reporting the other prefix's name, and the

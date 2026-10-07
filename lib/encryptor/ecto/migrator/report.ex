@@ -45,9 +45,12 @@ defmodule Encryptor.Ecto.Migrator.Report do
 
   A failure records the schema, the field, the primary key and the reason -
   never the plaintext, never the ciphertext bytes, never key material
-  (ADR-0002 decision 11, ADR-0001 decision 6). The reasons the engine records
-  are the ones `Encryptor.Ecto.Migrator.Source` composes, which are already
-  reduced to module names and atoms for the same reason.
+  (ADR-0002 decision 11, ADR-0001 decision 6). Every reason the engine records
+  is reduced to module names and atoms for the same reason: a reason a host's
+  `from:` reader or `to:` writer returned keeps its atoms, and every other term
+  in it becomes `:redacted` (`Encryptor.Ecto.Migrator.Pass`, "Nothing here
+  holds a value longer than a row"). A host matching on a payload its own
+  reader put in a reason finds `:redacted` there instead.
 
   The failure list is bounded at 100 entries while `failure_count` keeps
   counting: a pass over a table whose key was destroyed produces one failure

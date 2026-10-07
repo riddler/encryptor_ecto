@@ -68,6 +68,21 @@ defmodule Mix.Tasks.Encryptor.Ecto.MigrateTest do
     end
   end
 
+  describe "a failure line" do
+    # Sabotage: made `fail/4` record the reason as the host returned it - the
+    # reader's plaintext was printed on the failure line, into the operator's
+    # terminal and the job's log.
+    test "prints a host reader's reason as its shape, never its value" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert {1, output} =
+               migrate(["Encryptor.Ecto.TestEnginePlans.DisclosingSource", "--mode", "write"])
+
+      assert output =~ "reason={:bad_checksum, :redacted}"
+      refute output =~ @pan
+    end
+  end
+
   describe "exit 2" do
     # Sabotage: let the ArgumentError out of `run_pass/1` - `mix` reported the
     # crash and exited 1, which is the code that means "the pass ran and found

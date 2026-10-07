@@ -84,6 +84,26 @@ defmodule Encryptor.Ecto.TestEngineTypes do
     def load(_value), do: :error
   end
 
+  defmodule DisclosingTarget do
+    @moduledoc """
+    A target whose dump failure carries the value it was handed, so the
+    write side of the reason reduction has a subject.
+    """
+
+    @doc false
+    def type, do: :binary
+
+    @doc false
+    def cast(value), do: {:ok, value}
+
+    @doc false
+    def dump(value) when is_binary(value),
+      do: {:error, {:rejected, [value: value, length: byte_size(value)]}}
+
+    @doc false
+    def load(_value), do: :error
+  end
+
   defmodule RacingPan do
     @moduledoc """
     `Encryptor.Ecto.TestTypes.Pan`, with a window held open inside `dump/3`.

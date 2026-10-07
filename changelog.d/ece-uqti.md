@@ -1,0 +1,3 @@
+### Fixed
+
+- A failure reason that a plan's `from:` reader or `to:` writer returns as `{:error, reason}` is now reduced to its atoms before `Encryptor.Ecto.Migrator.run/2` and `verify/2` record it: tags and module names are kept, and every other term in it (a binary, a number, a map) becomes `:redacted`, so a reader that put the value it failed to read into its error no longer puts it into the report's `failures`, the reports the `:progress` callback receives, or the failure lines `mix encryptor.ecto.migrate` and `mix encryptor.ecto.verify` print. A host that matched on a payload its own reader returned finds `:redacted` in that position instead; match on the tag. The failure line now renders a reason through `Encryptor.Ecto.Error.redact/1`.

@@ -25,6 +25,7 @@ defmodule Encryptor.Ecto.Migrator.CLI do
   # itself exits 0 whatever a task returns, so the code goes through
   # `System.at_exit/1`.
 
+  alias Encryptor.Ecto.Error
   alias Encryptor.Ecto.Migrator
   alias Encryptor.Ecto.Migrator.Report
 
@@ -439,6 +440,10 @@ defmodule Encryptor.Ecto.Migrator.CLI do
     end)
   end
 
+  # The reason is rendered by `Encryptor.Ecto.Error.redact/1` rather than
+  # `inspect/1`. The engine reduces every reason it records to atoms before
+  # a report reaches this line; a binary in a report some other caller
+  # recorded still prints as its byte count, never as itself.
   @spec failure_lines(Report.t()) :: [String.t()]
   defp failure_lines(%Report{failures: []}), do: []
 
@@ -446,7 +451,7 @@ defmodule Encryptor.Ecto.Migrator.CLI do
     lines =
       Enum.map(report.failures, fn failure ->
         "  #{inspect(failure.schema)}.#{failure.field} id=#{inspect(failure.id)} " <>
-          "reason=#{inspect(failure.reason)}"
+          "reason=#{Error.redact(failure.reason)}"
       end)
 
     lines ++ elided(report)

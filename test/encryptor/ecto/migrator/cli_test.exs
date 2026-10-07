@@ -247,6 +247,24 @@ defmodule Encryptor.Ecto.Migrator.CLITest do
       refute rendered =~ "4111111111111111"
     end
 
+    # Sabotage: rendered the reason with `inspect/1` rather than
+    # `Encryptor.Ecto.Error.redact/1` - a report built by hand, whose reason
+    # nothing upstream reduced, printed its binary on the failure line.
+    test "a failure line renders a reason by shape, whoever recorded it" do
+      report =
+        Report.record_failure(Report.new(:write), %{
+          schema: TestSchemas.Card,
+          field: :pan,
+          id: 17,
+          reason: {:bad_checksum, "4111111111111111"}
+        })
+
+      rendered = CLI.render(report)
+
+      assert rendered =~ "reason={:bad_checksum, <<redacted 16 bytes>>}"
+      refute rendered =~ "4111111111111111"
+    end
+
     # Sabotage: printed `length(failures)` instead of the bounded report's
     # `failure_count` and dropped the elision line - a pass that failed on
     # 5000 rows reported 100, which is the number the report deliberately

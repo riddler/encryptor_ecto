@@ -71,6 +71,12 @@ defmodule Encryptor.Ecto.Migrator.Source do
       reading a report learns which module failed but not what it said - and
       it is the same trade `Encryptor.Ecto.Error` already makes by redacting
       on shape rather than on provenance.
+
+  A reason a source returns in `{:error, reason}` is passed on as it came:
+  it is the host's term, and the host's own code may match on it. The pass
+  that records it reduces it to its atoms first (`Encryptor.Ecto.Migrator.Pass`,
+  "Nothing here holds a value longer than a row"), so a reader that puts what
+  it read into its reason does not put it into a report.
   """
 
   alias Encryptor.Ecto.Migrator.Source.EctoType
