@@ -162,8 +162,8 @@ No entries yet.
 | F9 | Low/Info | the LLM pass | DEFERRED to ece-q6tp |
 | F10 | Low/Info | the LLM pass | DEFERRED to ece-q6tp |
 | F11 | Low/Info | the LLM pass | DEFERRED to ece-hr4e |
-| F12 | Low/Info | the threat model | PENDING the maintainer's disposition |
-| F13 | Low/Info | the threat model | PENDING the maintainer's disposition |
+| F12 | Low/Info | the threat model | ACCEPTED by the maintainer |
+| F13 | Low/Info | the threat model | DEFERRED to ece-ylgh |
 
 Under the rule above, no finding here keeps a release prep from merging: the
 two High findings, F1 and F2, are FIXED.
@@ -431,7 +431,11 @@ two High findings, F1 and F2, are FIXED.
 - **Severity:** Low/Info. The page tells a host with guessable selectors and
   Cloud KMS scope keys to treat the scope list as visible to a dump.
 - **Claim:** none broken; the page discloses it.
-- **Disposition:** PENDING the maintainer's disposition.
+- **Disposition:** ACCEPTED, by design. The maintainer's reason: the
+  unkeyed `CryptoKey` id is deliberate, because a Cloud KMS key cannot be
+  renamed or deleted and a keyed id would rename every scope's key on a root
+  rotation; the threat model already tells a host with guessable selectors to
+  treat the scope list as visible to a dump.
 
 ### F13. A suspension row outlives a shred
 
@@ -443,4 +447,6 @@ two High findings, F1 and F2, are FIXED.
 - **Found by:** the threat model, which states it.
 - **Severity:** Low/Info.
 - **Claim:** none broken; the page discloses it.
-- **Disposition:** PENDING the maintainer's disposition.
+- **Disposition:** DEFERRED to ece-ylgh, which either makes the shred also
+  remove the scope's suspension row or names deleting it as a host step in
+  the docs.
