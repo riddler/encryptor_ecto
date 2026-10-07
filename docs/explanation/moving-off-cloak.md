@@ -204,7 +204,7 @@ decrypt. The separation between index keys and encryption keys is real and
 structural, but it is a key-hierarchy separation, not a capability that can be
 handed out on its own today.
 
-## The mixed window is a per-row downgrade while it is open
+## The mixed window is a downgrade until `legacy:` is dropped
 
 The migration needs no downtime, and the affordance that makes that true is the
 type's `legacy:` option: load through the old type when the primary load fails,
@@ -216,15 +216,27 @@ State the cost plainly, because ADR-0004 decision 5 does. **While `legacy:` is
 set, a row that has not yet been rewritten is read under the legacy scheme's
 rules.** For a cloak host that means those rows have no encryption context, so
 the anti-substitution property does not hold for them; and they are under one
-key, so per-scope separation does not hold for them either. The window does not
-weaken any *migrated* row. It means the guarantee is per-row until the pass
-finishes - and because there is no legacy dump arm, no new legacy-format row can
-appear behind it, so the pass finishing is what restores the property. Dropping
-`legacy:` afterwards is hygiene rather than the thing that fixes it, which is
-why the runbook can leave it to a later step. ADR-0004's Consequences call
-this the most dangerous state in the whole design, and it is worth reading that
-sentence as written: a host in the window is running two key models over one
-column, with the weaker one still authoritative for most rows.
+key, so per-scope separation does not hold for them either.
+
+The window is wider than the rows the pass has yet to reach, and it does not
+close when the pass finishes. The fallback answers any bytes the vault refuses,
+and legacy-format bytes carry no context. So while `legacy:` is set, a writer
+with access to the database can put legacy-format bytes into a row that was
+already migrated - another scope's value, where that scope's new-format bytes
+would be refused - and they load. There is no legacy dump arm, so the
+application never writes such bytes itself; what keeps a writer from planting
+them is the absence of a reader that accepts them. **Dropping `legacy:` is what
+closes the window**: from then on the same bytes raise
+`Encryptor.Ecto.DecryptError`, which is why the runbook makes it a numbered
+step rather than hygiene to get round to. Until then, a planted row is counted
+like any other legacy read when something loads it: a
+`[:encryptor_ecto, :legacy_load]` event for a column whose pass has already
+verified clean is a row that holds legacy-format bytes again.
+
+ADR-0004's Consequences call this the most dangerous state in the whole design,
+and it is worth reading that sentence as written: a host in the window is running
+two key models over one column, with the weaker one still authoritative for most
+rows.
 
 Two things follow that are easy to miss. The window is **per field**: a host with
 twelve encrypted columns can finish eleven and still have one legacy reader open,

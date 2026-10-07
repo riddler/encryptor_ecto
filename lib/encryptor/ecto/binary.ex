@@ -238,9 +238,16 @@ defmodule Encryptor.Ecto.Binary do
 
   While `legacy:` is set, a row that has not been rewritten yet is read under
   the legacy scheme's rules: for a `cloak_ecto` host, with no encryption
-  context binding it to its row and no per-scope key separation. No
-  *migrated* row is weakened; the guarantee is per-row until the rewrite
-  finishes (decision 5). Dropping `legacy:` is the last step of the runbook,
+  context binding it to its row and no per-scope key separation (decision 5).
+
+  The window is not only the rows the rewrite has yet to reach. The fallback
+  answers any bytes the vault refuses, and legacy-format bytes carry no
+  context, so while `legacy:` is set a writer with access to the database can
+  put legacy-format bytes into a row that was already migrated - another
+  scope's value, say, where that scope's primary bytes would raise
+  `Encryptor.Ecto.DecryptError` - and they load. Finishing the rewrite does
+  not close that; dropping `legacy:` does, and from then on the same bytes
+  raise. That is why dropping `legacy:` is the last step of the runbook, and
   not a thing to remember.
 
   Every load that falls through to the legacy path emits
@@ -263,6 +270,14 @@ defmodule Encryptor.Ecto.Binary do
   that preceded a successful legacy read is counted - a load that failed
   through *both* paths raises, which is louder than a counter and is not a
   legacy row in the sense the window is about.
+
+  Legacy-format bytes written into a migrated row are counted the same way
+  when that row is read, because to this type they are a legacy row. So once
+  `Encryptor.Ecto.Migrator.verify/2` has come back clean over `sample: :all`
+  for a column, a `legacy_load` event for that column is a row that holds
+  legacy-format bytes again - written in after the pass - and worth looking
+  at before `legacy:` is dropped. The event fires on a read, not on the
+  write, so it reveals such a row when something loads it.
   """
 
   alias Encryptor.Ecto.DecryptError

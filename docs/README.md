@@ -17,7 +17,7 @@ Read at leisure, away from a terminal.
   forbids, fail-closed scope and the boundary audit that is the real cost
   of adoption, crypto-shredding and the field that opts out, why encrypted
   columns are not queryable, what a keyed blind index restores and what it does
-  not, and why the mixed window is a per-row downgrade while it is open.
+  not, and why the mixed window is a downgrade until `legacy:` is dropped.
 - [Why the Ecto types are a second package](explanation/why-a-second-package.md) -
   where the line between the vault and this package falls and the test that
   draws it, the alternatives to two packages (one package, an optional
