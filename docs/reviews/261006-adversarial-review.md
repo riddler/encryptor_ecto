@@ -151,8 +151,8 @@ No entries yet.
 
 | Id | Severity | Found by | Disposition |
 |---|---|---|---|
-| F1 | High | the LLM pass | PENDING the maintainer's disposition |
-| F2 | High | the LLM pass | PENDING the maintainer's disposition |
+| F1 | High | the LLM pass | FIXED, PR 150 |
+| F2 | High | the LLM pass | FIXED, PR 151 |
 | F3 | Medium | the LLM pass | FIXED, PR 148 |
 | F4 | Medium | the LLM pass | FIXED, PR 147 |
 | F5 | Low | the LLM pass | DEFERRED to ece-q6tp |
@@ -165,8 +165,8 @@ No entries yet.
 | F12 | Low/Info | the threat model | PENDING the maintainer's disposition |
 | F13 | Low/Info | the threat model | PENDING the maintainer's disposition |
 
-Under the rule above, F1 and F2 keep every release prep from merging until
-each one is FIXED or the maintainer accepts it.
+Under the rule above, no finding here keeps a release prep from merging: the
+two High findings, F1 and F2, are FIXED.
 
 ### F1. While `legacy:` is set, a migrated row can be overwritten with legacy bytes that load
 
@@ -191,10 +191,28 @@ each one is FIXED or the maintainer accepts it.
   the thing that fixes it". The `Encryptor.Ecto.Binary` moduledoc says the
   same (`lib/encryptor/ecto/binary.ex:241-243`, "No *migrated* row is
   weakened").
-- **Disposition:** PENDING the maintainer's disposition. The pass suggested
-  fixing the documentation: dropping `legacy:` is what closes the window, the
-  runbook says so, and the `[:encryptor_ecto, :legacy_load]` telemetry event
-  can reveal such an overwrite.
+- **Disposition:** FIXED in
+  [PR 150](https://github.com/riddler/encryptor_ecto/pull/150), by
+  documentation, as the maintainer disposed it on 2026-10-07: fix the
+  documentation, with a test pinning the documented behaviour. The
+  `Encryptor.Ecto.Binary` moduledoc, the explanation's section now titled "The
+  mixed window is a downgrade until `legacy:` is dropped", the runbook and the
+  threat model say that dropping `legacy:` is what closes the window, and that
+  a `[:encryptor_ecto, :legacy_load]` event for a column a full verification
+  already found clean reveals such a load. Two tests in "legacy-format bytes
+  put into a migrated row"
+  ([`test/encryptor/ecto/legacy_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/legacy_test.exs))
+  pin it:
+  - "load while legacy: is declared, and are counted as a legacy read". Its
+    sabotage note: replacing the body of `emit_legacy_load/1` with `:ok` turns
+    it red.
+  - "raise once legacy: is dropped, while the migrated row still loads". Its
+    sabotage note: letting the `%{legacy: nil}` clause of
+    `legacy_arm_or_raise!/4` fall through to a legacy reader turns it red.
+
+  The same sentence stands in decision 5 of
+  [ADR-0004](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0004-migration-from-cloak.md);
+  a Note on it is DEFERRED to ece-wncp.
 
 ### F2. Two rows in the same column and scope can swap ciphertexts
 
@@ -215,10 +233,23 @@ each one is FIXED or the maintainer accepts it.
   context "is what makes a row's ciphertext non-substitutable", "whatever else
   an attacker with database access can rearrange", while the same guide
   advises against per-row values in a declared context.
-- **Disposition:** PENDING the maintainer's disposition. The pass suggested
-  fixing the moduledoc and the guide to say "column or scope", and stating
-  that rows within one column and scope can be swapped. A change to the
-  decision record's wording is the maintainer's to make.
+- **Disposition:** FIXED in
+  [PR 151](https://github.com/riddler/encryptor_ecto/pull/151), by
+  documentation, as the maintainer disposed it on 2026-10-07: fix the
+  documentation, with a test pinning the documented behaviour. The
+  `Encryptor.Ecto.DecryptError` moduledoc, the guide, the `Encryptor.Ecto.Binary`
+  moduledoc, the explanation and the threat model say that the context binds a
+  column and a scope, not a row, and that bytes swapped between two rows of one
+  column and scope both load. ADR-0001 carries a dated foot Note (2026-10-07)
+  that narrows its Context sentence the same way and leaves the sentence as
+  written. One test in "two rows of one column and scope with their bytes
+  swapped"
+  ([`test/encryptor/ecto/binary_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/binary_repo_test.exs))
+  pins it: "both load, each as the other's value". Its sabotage note: making
+  `declared_context/1` add a pair that differs on every call turns it red. That
+  mutation also turns the existing round-trip test red, so it shows the test
+  asserts loads rather than refusals; no mutation can bind a row the field's
+  parameters do not know.
 
 ### F3. A host reader's or writer's error reason reaches the report and the CLI unreduced
 
