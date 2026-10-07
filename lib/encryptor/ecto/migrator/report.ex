@@ -176,6 +176,10 @@ defmodule Encryptor.Ecto.Migrator.Report do
 
   @doc """
   Records how far one field's pass got, in the prefix it was visiting.
+
+  The cursor is the primary key of the last row of the last committed batch,
+  or `:complete` for a field whose resume found its pass had already reached
+  the end of its rows, so that this run visited none of them.
   """
   @spec put_cursor(t(), module(), atom(), String.t() | nil, term()) :: t()
   def put_cursor(%__MODULE__{} = report, schema, field, prefix, cursor) do

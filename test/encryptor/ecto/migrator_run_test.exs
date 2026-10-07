@@ -287,6 +287,161 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     end
   end
 
+  describe "a resume continues only the run that recorded the checkpoint" do
+    # The reported sequence: a write over scope A, then a resume of scope B.
+    # Scope B's row sits below scope A's cursor, so a resume that started
+    # after that cursor visited nothing, reported all-zero counts and exited
+    # zero with the row still in the old format.
+    #
+    # Sabotage: made `Checkpoint.fetch/4` skip the run comparison - the
+    # resume of scope B returned `{:ok, report}` with every count at zero and
+    # the row untouched, which is the defect.
+    test "a resume under other scope filters is refused before a row is visited" do
+      theirs = insert_card(pan: legacy(@pan), merchant_id: @other_merchant)
+      _mine = insert_card(pan: legacy(@pan), merchant_id: @merchant)
+
+      assert {:ok, _first} =
+               Migrator.run(TestEnginePlans.Cards, mode: :write, only_scopes: [@merchant])
+
+      before = checkpoints()
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Migrator.run(TestEnginePlans.Cards,
+            mode: :write,
+            resume: true,
+            only_scopes: [@other_merchant]
+          )
+        end
+
+      assert error.message =~ "Encryptor.Ecto.TestSchemas.Card.pan"
+
+      assert error.message =~
+               ~s(only_scopes: recorded ["#{@merchant}"], this run ["#{@other_merchant}"])
+
+      refute error.message =~ "except_scopes:"
+      refute error.message =~ "writing_key:"
+      assert raw(:cards, theirs, :pan) == legacy(@pan)
+      assert checkpoints() == before
+
+      assert {:ok, report} =
+               Migrator.run(TestEnginePlans.Cards,
+                 mode: :write,
+                 only_scopes: [@other_merchant]
+               )
+
+      assert report.counts.migratable == 1
+      assert raw(:cards, theirs, :pan) != legacy(@pan)
+    end
+
+    # Sabotage: dropped `writing_key` from `Checkpoint.run/3` - a rotation
+    # resumed under a different key name than the one its checkpoint was
+    # recorded under, and was not refused.
+    test "a resume under another writing key is refused" do
+      _id = insert_card(pan: outgoing(@pan))
+
+      assert {:ok, _first} =
+               Migrator.run(TestEnginePlans.Rotation,
+                 mode: :write,
+                 only_scopes: [@merchant],
+                 writing_key: outgoing_key()
+               )
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Migrator.run(TestEnginePlans.Rotation,
+            mode: :write,
+            resume: true,
+            only_scopes: [@merchant],
+            writing_key: current_key()
+          )
+        end
+
+      assert error.message =~
+               "writing_key: recorded #{inspect(outgoing_key())}, this run #{inspect(current_key())}"
+
+      refute error.message =~ "only_scopes:"
+    end
+
+    # Sabotage: made `record/6` write `"complete"` as `false` on every call -
+    # the resume started after the last row and rewrote the one inserted
+    # since, with nothing saying the pass it resumed had finished.
+    test "a resume of a completed pass is a no-op that says so" do
+      _first = insert_card(pan: legacy(@pan))
+
+      assert {:ok, _first_run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      assert [%{counts: %{"complete" => true}}] = checkpoints()
+
+      late = insert_card(pan: legacy(@pan))
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :write, resume: true)
+
+      assert report.cursors == %{{TestSchemas.Card, :pan, nil} => :complete}
+      assert Enum.all?(report.counts, fn {_class, count} -> count == 0 end)
+      assert raw(:cards, late, :pan) == legacy(@pan)
+
+      assert {:ok, again} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      assert again.counts.migratable == 1
+    end
+
+    # A table whose rows are an exact multiple of the batch size ends on an
+    # empty read rather than a short batch, which is the other place a pass
+    # finds the end of its rows.
+    #
+    # Sabotage: made the empty-read arm of `run/3` return the report without
+    # calling `complete/3` - the row ended with `"complete" => false`.
+    test "a pass that ends on an empty read is marked complete too" do
+      ids = for _row <- 1..2, do: insert_card(pan: legacy(@pan))
+
+      assert {:ok, _report} = Migrator.run(TestEnginePlans.Cards, mode: :write, batch_size: 1)
+
+      last = Integer.to_string(List.last(ids))
+      assert [%{last_id: ^last, counts: %{"complete" => true}}] = checkpoints()
+    end
+
+    # Sabotage: made `normalize_scopes/1` the identity - the same scopes given
+    # in another order read as another run, and the resume was refused.
+    test "the scope filters compare in any order" do
+      _mine = insert_card(pan: legacy(@pan), merchant_id: @merchant)
+      _theirs = insert_card(pan: legacy(@pan), merchant_id: @other_merchant)
+
+      assert {:ok, _first} =
+               Migrator.run(TestEnginePlans.Cards,
+                 mode: :write,
+                 only_scopes: [@other_merchant, @merchant]
+               )
+
+      assert [%{counts: %{"run" => %{"only_scopes" => [@merchant, @other_merchant]}}}] =
+               checkpoints()
+
+      assert {:ok, report} =
+               Migrator.run(TestEnginePlans.Cards,
+                 mode: :write,
+                 resume: true,
+                 only_scopes: [@merchant, @other_merchant, @merchant]
+               )
+
+      assert report.cursors == %{{TestSchemas.Card, :pan, nil} => :complete}
+    end
+
+    # A checkpoint written before the run was recorded cannot say which run
+    # wrote it, so it is treated like a cursor that cannot be parsed.
+    #
+    # Sabotage: made the run-less arm of `Checkpoint.found/4` parse the
+    # cursor - the resume started after a cursor nothing could vouch for and
+    # left the first row in the old format.
+    test "a checkpoint that records no run is re-scanned rather than resumed" do
+      [first, second] = for _row <- 1..2, do: insert_card(pan: legacy(@pan))
+
+      record_checkpoint(TestEnginePlans.Cards, TestSchemas.Card, :pan, "", second, %{})
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :write, resume: true)
+
+      assert report.counts.migratable == 2
+      assert raw(:cards, first, :pan) != legacy(@pan)
+    end
+  end
+
   describe "scoping a run" do
     # Sabotage: made `fields/2`'s `only` clause ignore the field names - the
     # run rewrote both columns when the operator asked for one.
@@ -1327,7 +1482,17 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     )
   end
 
-  defp record_checkpoint(plan, schema, field, prefix, last_id) do
+  # The run an unfiltered pass with no writing key records, written out here
+  # rather than built by the module under test, so that a change to what the
+  # checkpoint records cannot also change what these tests expect of it.
+  @unfiltered_run %{"only_scopes" => nil, "except_scopes" => [], "writing_key" => nil}
+
+  # A checkpoint row as an earlier, interrupted pass left it. `counts` defaults
+  # to that of an unfiltered run that has not finished; `%{}` is a row written
+  # before the run was recorded.
+  defp record_checkpoint(plan, schema, field, prefix, last_id, counts \\ nil) do
+    counts = counts || %{"run" => @unfiltered_run, "complete" => false}
+
     {1, _returned} =
       TestRepo.insert_all("encryptor_ecto_migration_checkpoints", [
         %{
@@ -1336,7 +1501,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
           field: Atom.to_string(field),
           prefix: prefix,
           last_id: Integer.to_string(last_id),
-          counts: %{},
+          counts: counts,
           started_at: DateTime.truncate(DateTime.utc_now(), :second),
           updated_at: DateTime.truncate(DateTime.utc_now(), :second)
         }

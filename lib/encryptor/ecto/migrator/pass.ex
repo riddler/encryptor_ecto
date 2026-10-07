@@ -4,8 +4,9 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   This is ADR-0002 decisions 4, 5 and 6 in one place. The engine
   (`Encryptor.Ecto.Migrator`) decides *what* to visit; a pass is *how* one
-  `{schema, field, prefix}` is visited, which is also exactly the key its
-  checkpoint row is written under.
+  `{schema, field, prefix}` is visited, which is also exactly the row its
+  checkpoint is written to. The run's scope filters and writing key are
+  recorded in that row too, and only the same run resumes from it.
 
   ## The order of operations for one row, and why it is that order
 
@@ -359,10 +360,16 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     end
   end
 
+  # A resume of a pass that already reached the end of its rows visits none,
+  # and the report says so rather than reading as an empty table.
+  def run(%__MODULE__{} = pass, report, :complete) do
+    {Report.put_cursor(report, pass.schema, pass.field, pass.prefix, :complete), :ok}
+  end
+
   def run(%__MODULE__{} = pass, report, cursor) do
     case read_batch(pass, cursor) do
       [] ->
-        {report, :ok}
+        {complete(pass, report, cursor), :ok}
 
       rows ->
         {report, status, last_id} = batch(pass, report, rows)
@@ -383,24 +390,75 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     do: Report.put_cursor(report, pass.schema, pass.field, pass.prefix, last_id)
 
   @doc """
-  The cursor this field resumes from, or `nil` for a full scan.
+  The cursor this field resumes from, `nil` for a full scan, or `:complete`
+  when this run's pass already reached the end of its rows.
 
   `resume: false` returns `nil` without reading anything, which - because of
   probe-first - is always a legal thing to do.
+
+  A checkpoint row recorded by a different run - other scope filters, or
+  another writing key - is refused with an `ArgumentError` naming the
+  difference, because its cursor says nothing about the rows this run visits
+  (see `Encryptor.Ecto.Migrator.Checkpoint`, "The key carries the run").
+  `Encryptor.Ecto.Migrator.run/2` asks every pass before it runs the first, so
+  the refusal comes before any row is visited.
   """
-  @spec resume_cursor(t(), boolean()) :: term() | nil
+  @spec resume_cursor(t(), boolean()) :: term() | nil | :complete
   def resume_cursor(_pass, false), do: nil
   def resume_cursor(%__MODULE__{checkpoint: :none}, true), do: nil
 
   def resume_cursor(%__MODULE__{} = pass, true) do
-    Checkpoint.fetch_cursor(pass.repo, pass.checkpoint_table, checkpoint_key(pass), pass.key)
+    case Checkpoint.fetch(pass.repo, pass.checkpoint_table, checkpoint_key(pass), pass.key) do
+      nil -> nil
+      {:cursor, cursor} -> cursor
+      :complete -> :complete
+      {:other_run, recorded} -> raise ArgumentError, other_run_message(pass, recorded)
+    end
   end
 
-  @doc "Which checkpoint row this pass owns (ADR-0002 proposed amendment 6)."
+  @doc """
+  Which checkpoint row this pass owns (ADR-0002 proposed amendment 6), and the
+  run that may resume from it.
+  """
   @spec checkpoint_key(t()) :: Checkpoint.key()
   def checkpoint_key(%__MODULE__{} = pass) do
-    %{plan: pass.plan, schema: pass.schema, field: pass.field, prefix: pass.prefix}
+    %{
+      plan: pass.plan,
+      schema: pass.schema,
+      field: pass.field,
+      prefix: pass.prefix,
+      run: Checkpoint.run(pass.only_scopes, pass.except_scopes, pass.writing_key)
+    }
   end
+
+  @spec other_run_message(t(), term()) :: String.t()
+  defp other_run_message(pass, recorded) do
+    run = pass |> checkpoint_key() |> Map.fetch!(:run)
+
+    differences =
+      [:only_scopes, :except_scopes, :writing_key]
+      |> Enum.reject(fn option -> recorded_value(recorded, option) == Map.fetch!(run, option) end)
+      |> Enum.map_join("; ", fn option ->
+        "#{option}: recorded #{inspect(recorded_value(recorded, option))}, " <>
+          "this run #{inspect(Map.fetch!(run, option))}"
+      end)
+
+    "resume: true cannot continue the checkpoint of #{inspect(pass.schema)}.#{pass.field}" <>
+      "#{prefix_clause(pass.prefix)}: it was recorded by a run with other options " <>
+      "(#{differences}). A cursor says how far a run got through the rows that run " <>
+      "visits, so starting after another run's cursor would skip rows this run " <>
+      "has never visited. Run without `resume: true` (`--resume`) to start from " <>
+      "the beginning - probe-first makes that safe (ADR-0002 decision 5) - or " <>
+      "resume with the options the checkpoint was recorded under."
+  end
+
+  @spec recorded_value(term(), atom()) :: term()
+  defp recorded_value(%{} = recorded, option), do: Map.get(recorded, Atom.to_string(option))
+  defp recorded_value(_recorded, _option), do: nil
+
+  @spec prefix_clause(String.t() | nil) :: String.t()
+  defp prefix_clause(nil), do: ""
+  defp prefix_clause(prefix), do: " in prefix #{inspect(prefix)}"
 
   # -- batching -------------------------------------------------------------
 
@@ -414,7 +472,32 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   # A short batch is the last one: the query asked for `batch_size` rows in
   # key order and got fewer, so there is nothing above the cursor to visit.
-  defp continue(_pass, report, :ok, _last_id, _read), do: {report, :ok}
+  defp continue(pass, report, :ok, last_id, _read), do: {complete(pass, report, last_id), :ok}
+
+  # The pass reached the end of its rows: a write records that, so that a
+  # resume of this run is a no-op that says so rather than a pass that starts
+  # after the last row. It is a write of its own, after the last batch's
+  # transaction rather than inside it, and a crash between the two leaves a
+  # cursor whose resume reads nothing and then records the mark. A dry run and
+  # a verification record nothing, and a pass that never had a cursor - no row
+  # in scope - has no row to mark.
+  @spec complete(t(), Report.t(), term()) :: Report.t()
+  defp complete(%__MODULE__{mode: :write, checkpoint: :table} = pass, report, cursor)
+       when cursor != nil do
+    :ok =
+      Checkpoint.record(
+        pass.repo,
+        pass.checkpoint_table,
+        checkpoint_key(pass),
+        Checkpoint.render_cursor(cursor, pass.key),
+        counts(report),
+        true
+      )
+
+    report
+  end
+
+  defp complete(_pass, report, _cursor), do: report
 
   @spec read_batch(t(), term()) :: [list()]
   defp read_batch(pass, cursor) do
