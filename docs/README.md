@@ -23,6 +23,12 @@ Read at leisure, away from a terminal.
   draws it, the alternatives to two packages (one package, an optional
   dependency, no Ecto layer), and what the split costs: the exact pin and the
   public contract between the two.
+- [The threat model of the Ecto layer](explanation/threat-model.md) - what
+  this package adds above the vault and what it gives an attacker: what a
+  database dump reveals beside the ciphertext, what one scope's index key
+  adds, what a dump kept after a shred still shows, the key store's columns,
+  the migrator's plaintext window, and what was tested and how. Everything
+  below the Ecto type is the vault's threat model, which it links.
 
 ## How-to guides
 

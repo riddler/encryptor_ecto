@@ -55,6 +55,7 @@ defmodule Encryptor.Ecto.MixProject do
         "CHANGELOG.md",
         "docs/explanation/moving-off-cloak.md",
         "docs/explanation/why-a-second-package.md",
+        "docs/explanation/threat-model.md",
         "docs/guides/migrate-from-cloak.md",
         "docs/guides/bind-extra-context.md",
         "docs/guides/gcp-kms-key-store.md",
@@ -82,6 +83,7 @@ defmodule Encryptor.Ecto.MixProject do
         CHANGELOG.md
         docs/explanation/moving-off-cloak.md
         docs/explanation/why-a-second-package.md
+        docs/explanation/threat-model.md
         docs/guides/migrate-from-cloak.md
         docs/guides/bind-extra-context.md
         docs/guides/gcp-kms-key-store.md
