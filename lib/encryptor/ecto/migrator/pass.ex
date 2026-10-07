@@ -212,8 +212,13 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   The plaintext of one row exists between step 3 and step 4 and is never
   logged, inspected, put in an exception, or carried into the report (ADR-0002
   decision 11). The failures the report keeps carry the primary key, the
-  schema, the field, and a reason already reduced to atoms and module names by
-  `Encryptor.Ecto.Migrator.Source`.
+  schema, the field, and a reason reduced to atoms and module names as it is
+  recorded: this package's own reasons are atoms already, and a reason a
+  host's `from:` reader or `to:` writer returned keeps its atoms and has every
+  other term in it - a binary, a number, a map - replaced by `:redacted`. A
+  reader that reports what it failed to read would otherwise put the
+  plaintext into the report, the `:progress` callback and the task's failure
+  line, all of which read the reason from here.
   """
 
   alias Encryptor.Context
@@ -967,11 +972,35 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # `on_error: :continue` records the failure and finishes the pass, which
   # still exits non-zero: `Report.ok?/1` is about the failure count and not
   # about how the pass ended. There is no mode that skips a row silently.
+  #
+  # Every reason enters the report here, and is reduced to its shape on the
+  # way in: the report, the progress callback and the task's failure line all
+  # read it from there.
   @spec fail(t(), Report.t(), term(), term()) :: {Report.t(), :ok | :halt}
   defp fail(pass, report, id, reason) do
-    failure = %{schema: pass.schema, field: pass.field, id: id, reason: reason}
+    failure = %{schema: pass.schema, field: pass.field, id: id, reason: shape(reason)}
     {Report.record_failure(report, failure), status(pass.on_error)}
   end
+
+  # A reason a host module returned - a `from:` reader's `{:error, reason}`, a
+  # `to:` writer's - is a term this package cannot inspect for secrets, and a
+  # reader that reports what it failed to read puts the plaintext in it. So
+  # only atoms survive: the reason's tags and any module name it carries.
+  # Tuples and lists keep their structure with each element reduced in turn,
+  # and every other term - a binary, a number, a map, a struct, a function -
+  # becomes `:redacted`. A number goes too, unlike in
+  # `Encryptor.Ecto.Error.redact/1`: an encrypted integer field's plaintext
+  # is one. This package's own reasons are atoms and tuples of atoms, and
+  # pass through unchanged.
+  @spec shape(term()) :: term()
+  defp shape(term) when is_atom(term), do: term
+
+  defp shape(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> Enum.map(&shape/1) |> List.to_tuple()
+
+  defp shape([]), do: []
+  defp shape([head | tail]), do: [shape(head) | shape(tail)]
+  defp shape(_term), do: :redacted
 
   @spec status(:halt | :continue) :: :ok | :halt
   defp status(:halt), do: :halt

@@ -133,6 +133,23 @@ defmodule Encryptor.Ecto.TestSources do
     def load(_value), do: {:error, :wrong_key}
   end
 
+  defmodule DisclosingType do
+    @moduledoc """
+    A legacy type whose failure reason carries the value it was reading.
+
+    A host's own reader can do this without meaning to: a checksum failure
+    that reports what it checked. The decoded plaintext rides in the
+    reason, which is exactly the term the migrator must not pass on.
+    """
+
+    def type, do: :binary
+    def cast(value), do: {:ok, value}
+    def dump(value), do: {:ok, value}
+
+    def load("legacy:" <> rest), do: {:error, {:bad_checksum, String.reverse(rest)}}
+    def load(value), do: {:error, {:bad_checksum, value}}
+  end
+
   defmodule DirectSource do
     @moduledoc "A module implementing the behaviour itself, used as-is."
 

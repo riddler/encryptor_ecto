@@ -96,6 +96,36 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule DisclosingSource do
+    @moduledoc "A plan whose `from:` reader puts the value it read into its error."
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      scope_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestSources.DisclosingType,
+        to: Encryptor.Ecto.TestTypes.Pan,
+        source_authenticated: true
+    end
+  end
+
+  defmodule DisclosingTarget do
+    @moduledoc "A plan whose `to:` puts the value it was handed into its error."
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      scope_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestSources.LegacyType,
+        to: Encryptor.Ecto.TestEngineTypes.DisclosingTarget,
+        source_authenticated: true
+    end
+  end
+
   defmodule Adoption do
     @moduledoc """
     The backfill leg of an adoption migration: a plaintext column read through

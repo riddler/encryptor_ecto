@@ -305,8 +305,9 @@ re-encryption of stale plaintext.
 
 Pinned by: "a halted batch discards its writes and its checkpoint", "a row the
 application rewrote mid-pass is counted, not clobbered", "a second run finds
-every row already in the target state" and "a validator that raises is
-reported as the module and nothing else"
+every row already in the target state", "a validator that raises is
+reported as the module and nothing else" and the three tests under "a reason
+a host module returns"
 ([`test/encryptor/ecto/migrator_run_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/migrator_run_test.exs));
 "a halted pass leaves its committed batches, and a resume finishes the rest"
 ([`test/encryptor/ecto/runbook_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/runbook_test.exs));
