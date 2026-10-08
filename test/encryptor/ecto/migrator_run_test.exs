@@ -29,6 +29,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   alias Encryptor.Ecto.TestRepo
   alias Encryptor.Ecto.TestSchemas
   alias Encryptor.Ecto.TestTypes.Pan
+  alias Encryptor.Ecto.TestTypes.PanPinnedColumn
   alias Encryptor.Ecto.TestTypes.PanRekeyed
   alias Encryptor.Ecto.TestTypes.PanRotating
   alias Encryptor.Ecto.TestTypes.PanSigned
@@ -39,6 +40,14 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   @merchant "merchant_7f3"
   @other_merchant "merchant_a19"
   @pan "4111111111111111"
+
+  # A row `Pan` wrote for @merchant through encryptor 0.7.0 on
+  # aws_encryption_sdk 1.0.0, from the fixed test keys in
+  # `Encryptor.Ecto.TestVaults`: `Pan.dump/3` of @pan, base64. That engine
+  # stored every required pair in the header, `"table"`, `"column"` and
+  # `"scope_ref"` among them; the engine this package now runs on stores none
+  # of them. A ciphertext, never a key.
+  @pre_change_pan "AgR4J73XCzovjXOlW8PWJk6EM+qDz1qozsB/qJrWaij4J/EAQAADAAZjb2x1bW4AA3BhbgAJc2NvcGVfcmVmABZfWXo1bTBfWXl0bmxtMGZxa0F6blJnAAV0YWJsZQAFY2FyZHMAAQAPZW5jcnlwdG9yLXNjb3BlAC9zL19ZejVtMF9ZeXRubG0wZnFrQXpuUmcvdjEAAACAAAAADD9xlnVsOuuxceVFsQAw3/AVB7PwaHJrolvx8uAbGBMOcRCylGc+cwXfwk9lI9/Bd5NEzgMG+HeJQDzJUAgdAgAAEACe5Bm/5J6XxybaOuXyXq/q5rhJE16tLoYh0hFnxjkz61AgVvt5gq4TpVcecmnDdZr/////AAAAAQAAAAAAAAAAAAAAAQAAABDqWRyDuj5J6yH2TblsDGkzjyZUqwfSB9acCDivTPaAMg=="
 
   describe "dry run" do
     # Sabotage: made `swap/5`'s `:dry_run` clause fall through to the write
@@ -879,7 +888,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert second.failures == []
     end
 
-    # Sabotage: had `target_header/2` answer a header for an arity-1 target -
+    # Sabotage: had `target_header/3` answer a header for an arity-1 target -
     # the plain-text fixture's rows were read as unparseable messages and
     # every one of them was rewritten on every run, which is decision 5's
     # idempotence lost for every target that is not ours.
@@ -899,7 +908,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     # The vault's `:static_encryption_context` is on every message it writes
     # and on nothing a field declares, so the probe's declaration is the
     # *merge* of the two. Sabotage: dropped `config.static_encryption_context`
-    # from `target_header/2`'s `Map.merge` - the target's own rows carried a
+    # from `target_header/3`'s `Map.merge` - the target's own rows carried a
     # pair the comparison did not expect, failed it, and went to the source
     # reader, which reported every already-migrated row undecryptable.
     test "a vault's static context pairs are part of what the probe compares" do
@@ -926,7 +935,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
 
     # The `"scope_ref"` pair is compared for presence and not for value,
     # and a global field's messages carry none. Sabotage: inverted
-    # `target_header/2`'s `scope_ref?` (`params.scope == :none`) - this
+    # `target_header/3`'s `scope_ref?` (`params.scope == :none`) - this
     # field's own rows claimed a reference the message does not carry and were
     # rewritten on every run. (The scope-bearing half of the same inversion
     # is what "a second run finds every row already in the target state"
@@ -942,6 +951,103 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert second.counts.already_target == 1
       assert second.counts.migratable == 0
       assert raw(:signups, id, :variant_notes) == written
+    end
+  end
+
+  describe "a required pair the header does not store" do
+    # Sabotage: made `against_context/2` refuse a stored pair even at the
+    # declared value - the row below, whose header stores every pair, was
+    # sent to the source reader, which cannot read it, and the pass halted on
+    # it as undecryptable.
+    test "a row written while the engine stored required pairs is in the target state" do
+      bytes = Base.decode64!(@pre_change_pan)
+
+      # The fixture is only worth anything if its header really stores the
+      # pairs the current engine leaves out.
+      assert {:ok, info} = Message.describe(bytes)
+      assert %{"table" => "cards", "column" => "pan"} = info.encryption_context
+      assert is_binary(info.encryption_context["scope_ref"])
+
+      id = insert_card(pan: bytes)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      assert report.counts.already_target == 1
+      assert report.counts.migratable == 0
+      assert report.failures == []
+      assert raw(:cards, id, :pan) == bytes
+    end
+
+    # Sabotage: made `unstored/2` answer `:no` whenever a declared pair is
+    # missing from the header, required or not - the row below, which the
+    # current engine wrote without its required pairs, failed the comparison
+    # and went to the source reader, which cannot read it. Made
+    # `scope_ref_agrees?/2` require a stored `"scope_ref"` for a scope-bearing
+    # declaration: the same row failed the same way.
+    test "a row written without its required pairs is in the target state" do
+      bytes = pan_declared(@pan)
+
+      assert {:ok, info} = Message.describe(bytes)
+      refute Map.has_key?(info.encryption_context, "table")
+      refute Map.has_key?(info.encryption_context, "column")
+      refute Map.has_key?(info.encryption_context, "scope_ref")
+
+      id = insert_card(pan: bytes)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+
+      assert report.counts.already_target == 1
+      assert report.counts.migratable == 0
+      assert report.failures == []
+      assert raw(:cards, id, :pan) == bytes
+    end
+
+    # Sabotage: made `shared_proof?/3` answer `true` for every `from:` - the
+    # second row, the `from:` declaration's, claimed the identity the first
+    # row's load had proven and was counted already migrated, so a rewrite
+    # whose whole purpose is the changed `column` binding left it as it was.
+    test "a `from:` that binds a required pair differently is settled row by row" do
+      target = insert_card(pan: pan_declared(@pan))
+      source_bytes = pan_pinned_column(@pan)
+      source = insert_card(pan: source_bytes)
+
+      # Same wrapping key, same stored pairs: nothing in the header separates
+      # the two rows, which is why the claim cannot ride the first one's proof.
+      assert {:ok, target_info} = Message.describe(raw(:cards, target, :pan))
+      assert {:ok, source_info} = Message.describe(source_bytes)
+      assert target_info.encrypted_data_keys == source_info.encrypted_data_keys
+      assert target_info.encryption_context == source_info.encryption_context
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.RequiredPairEdit, mode: :write)
+
+      assert report.counts.already_target == 1
+      assert report.counts.migratable == 1
+      assert report.failures == []
+      refute raw(:cards, source, :pan) == source_bytes
+
+      Scope.put(@merchant)
+      params = Pan.init(schema: TestSchemas.Card, field: :pan)
+      assert {:ok, @pan} = Pan.load(raw(:cards, source, :pan), &Ecto.Type.load/2, params)
+    end
+
+    # Sabotage: made `shared_proof?/3` answer `false` for every `from:` of
+    # ours - the second row, whose header this package wrote over a body it
+    # can no longer open, was loaded on its own instead of riding the first
+    # row's proof, failed, and went to the source reader.
+    test "a `from:` that binds every required pair alike shares the proof" do
+      first = insert_card(pan: pinned(@pan))
+      second = insert_card(pan: pinned(@pan))
+      first_bytes = raw(:cards, first, :pan)
+
+      tampered = tamper(raw(:cards, second, :pan))
+      :ok = write_raw(second, tampered)
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.InPlaceEdit, mode: :write)
+
+      assert report.counts.already_target == 2
+      assert report.failures == []
+      assert raw(:cards, second, :pan) == tampered
+      assert raw(:cards, first, :pan) == first_bytes
     end
   end
 
@@ -1411,6 +1517,15 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     Scope.put(@merchant)
     params = Pinned.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = Pinned.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
+
+  # The same column under `PanPinnedColumn`'s binding: the same vault, scope
+  # and key as `pan_declared/1`, another `column` value.
+  defp pan_pinned_column(plaintext) do
+    Scope.put(@merchant)
+    params = PanPinnedColumn.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = PanPinnedColumn.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
   end
 

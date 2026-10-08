@@ -297,13 +297,20 @@ defmodule Encryptor.Ecto.KeyStoreShredRepoTest do
 
     # The vault here caches for thirty seconds rather than one, so the read
     # after the shred lands before `drained_at` on any host that reaches it
-    # within thirty seconds; under a one-second cache a host that took a
-    # second between the shred and the read would go red on
-    # `:decrypt_failed` with nothing wrong.
+    # within thirty seconds, while the warm entry from the setup's read of
+    # the retired version is still inside its `max_age`.
+    #
+    # Through encryptor 0.7.0 that entry served the read, and this test
+    # asserted it did. From encryptor 0.8.0 it does not (encryptor ADR-0001
+    # Amendment C): both cache partition ids carry a fingerprint of the key
+    # material, so the provider's shorter candidate list after the delete is
+    # a new partition, the warm entry is not found, and the retired version
+    # fails at once. The drain is still recorded; it no longer has anything
+    # of this version's to wait out.
     #
     # Sabotage: made `drain: :skip` wait as well. The call slept out
     # `max_age` and the elapsed-time assertion went red at 30 002 ms.
-    test "drain: :skip returns at once, and the cache still serves until drained_at" do
+    test "drain: :skip returns at once, and a warm cache no longer serves the retired version" do
       start_supervised!(LongCachedScope)
       selector = "merchant_drain_skip"
       old = cached_retire_setup!(LongCachedScope, selector)
@@ -319,7 +326,7 @@ defmodule Encryptor.Ecto.KeyStoreShredRepoTest do
       assert shred.drain == :skipped
       assert DateTime.diff(shred.drained_at, shred.deleted_at, :millisecond) == 30_000
 
-      assert {:ok, "a value"} =
+      assert {:error, %Error{reason: :decrypt_failed}} =
                LongCachedScope.decrypt(old, key: selector, encryption_context: @context)
     end
 

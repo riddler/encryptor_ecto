@@ -665,33 +665,36 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
     # `encryptor` ADR-0004's worked example, case 1: the bytes are moved into
     # another partition's row and read in that partition's scope.
     #
-    # The record's example says the read fails as the engine's
-    # `{:key_name_mismatch, _}` - the reading partition's keyring cannot
-    # unwrap the data key. That is not where it lands. ADR-0004 decision 6's
-    # context comparison runs before the engine is handed a keyring
-    # (`Encryptor.Vault.Decrypt.call/4` composes the context and calls
-    # `agree/4` ahead of `engine_decrypt/4`), and on a `:scoped` vault
-    # `scope_ref` is derived from `:key` by the vault itself, so the read is
-    # refused as `{:encryption_context_mismatch, "scope_ref"}` with the
-    # keyring never consulted. Both are authentication failures and both are
-    # `:decrypt_failed` to a caller; which guard fires first is the vault's
-    # business and not this provider's. The stale detail belongs to the
-    # upstream record and was raised there rather than worked around here.
+    # The read fails where the record's example says it does: the reading
+    # partition's keyring cannot unwrap the data key, and the engine reports
+    # `:unable_to_decrypt_data_key`. Through encryptor 0.7.0 it was refused
+    # one step earlier, as `{:encryption_context_mismatch, "scope_ref"}`: the
+    # engine stored every required pair in the header, and the vault compared
+    # the stored `scope_ref` with the reading partition's before handing the
+    # engine a keyring. From encryptor 0.8.0 (aws_encryption_sdk 1.1, encryptor
+    # ADR-0004 Amendment B) a required pair is bound to the message without
+    # being stored, so there is no stored `scope_ref` to compare; the vault
+    # supplies the reading partition's own, and the first thing that refuses
+    # is the unwrap. Both are authentication failures and both are
+    # `:decrypt_failed` to a caller.
     #
-    # That guard alone would refuse the read even against a store handing
-    # every partition one shared key, so it does not on its own show that this
-    # provider separates keys. The second half of the test is what does: the
-    # message names the writing partition's key, and that name is not one the
-    # reading partition's candidate list contains.
+    # The same refusal, engine term included, would come from a store handing
+    # every partition one shared key: the keyring's unwrap authenticates the
+    # encryption context, and the reading partition's `scope_ref` is not the
+    # one the data key was wrapped under. So the refusal does not on its own
+    # show that this provider separates keys. The second half of the test is
+    # what does: the message names the writing partition's key, and that name
+    # is not one the reading partition's candidate list contains.
     #
     # Sabotage: pinned the provider's selector-to-reference step to one
     # partition's reference, so every partition resolved to that partition's
     # rows - one shared key for the whole store. The `refute` below went red:
     # the reading partition's candidate list then contained the very name the
     # message was written under, which is the separation this store exists to
-    # provide. The `:decrypt_failed` assertion above stayed green under that
-    # same mutation, which is exactly why it is not the acceptance evidence on
-    # its own.
+    # provide. The refusal assertion above, `:unable_to_decrypt_data_key`
+    # included, stayed green under that same mutation (re-run on encryptor
+    # 0.8.0), which is exactly why it is not the acceptance evidence on its
+    # own.
     test "a ciphertext moved across partitions fails authentication" do
       TestKeyStore.provision!("merchant_7f3", 1)
       TestKeyStore.provision!("merchant_a19", 1)
@@ -714,7 +717,7 @@ defmodule Encryptor.Ecto.KeyStoreRepoTest do
               %Error{
                 reason: :decrypt_failed,
                 operation: :decrypt,
-                engine: {:encryption_context_mismatch, "scope_ref"}
+                engine: :unable_to_decrypt_data_key
               }} =
                TestKeyStore.Scope.decrypt(ciphertext,
                  key: "merchant_a19",
