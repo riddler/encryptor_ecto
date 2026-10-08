@@ -60,11 +60,13 @@ defmodule Encryptor.Ecto.MixProject do
         "docs/guides/bind-extra-context.md",
         "docs/guides/gcp-kms-key-store.md",
         "docs/guides/two-vaults-customer-and-agreement.md",
-        "docs/guides/scope-in-jobs-and-projectors.md"
+        "docs/guides/scope-in-jobs-and-projectors.md",
+        "docs/reviews/261006-adversarial-review.md"
       ],
       groups_for_extras: [
         "How-to guides": ~r{docs/guides/},
-        Explanation: ~r{docs/explanation/}
+        Explanation: ~r{docs/explanation/},
+        Reviews: ~r{docs/reviews/}
       ],
       skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
     ]
@@ -89,6 +91,7 @@ defmodule Encryptor.Ecto.MixProject do
         docs/guides/gcp-kms-key-store.md
         docs/guides/two-vaults-customer-and-agreement.md
         docs/guides/scope-in-jobs-and-projectors.md
+        docs/reviews/261006-adversarial-review.md
       ),
       links: %{
         "GitHub" => @source_url,

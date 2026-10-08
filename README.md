@@ -133,6 +133,19 @@ under a bold **Breaking** heading that says what to do about it, and pinning
 to an exact minor, `~> X.Y.0`, is the recommended way to take the package
 until then.
 
+## Security review
+
+Tested against published vectors, self-reviewed, no formal third-party audit.
+The cryptography is encryptor's, and so are the vector and interop evidence
+behind it ([what encryptor was tested against](https://github.com/riddler/encryptor/blob/main/docs/explanation/threat-model.md#what-was-tested-against-what)
+and [its review ledger](https://github.com/riddler/encryptor/blob/main/docs/reviews/261006-adversarial-review.md));
+this package's layer above the vault was reviewed by the maintainer, who is
+the team's security lead, and an LLM adversarial pass with fresh context, not
+an independent engineer. [The threat model of the Ecto layer](docs/explanation/threat-model.md)
+says what each claim rests on, and
+[this package's review ledger](docs/reviews/261006-adversarial-review.md)
+lists every finding and its disposition.
+
 ## License
 
 Apache-2.0 - see
