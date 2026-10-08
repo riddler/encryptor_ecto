@@ -1,4 +1,0 @@
-### Fixed
-
-- `Encryptor.Ecto.Migrator.run/2` with `resume: true` continues only the run that recorded the checkpoint: the checkpoint now records the run's `only_scopes:`, `except_scopes:` and `writing_key:`, and a resume under different ones raises an `ArgumentError` naming the difference instead of starting after another run's cursor, which skipped the rows below it and reported a clean pass. Run without `resume: true` (`--resume`) to start such a pass from the beginning; a checkpoint written by an earlier version records no run and is re-scanned rather than resumed.
-- A pass that reaches the end of its rows in write mode is now marked complete, and a resume of it is a no-op whose report carries `:complete` as that field's cursor (and `mix encryptor.ecto.migrate --resume` prints an "already complete" line) rather than a pass that visits only the rows inserted since.

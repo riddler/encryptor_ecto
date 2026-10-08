@@ -232,7 +232,7 @@ delay, not as an undo you plan around.
 
 The middle row is a refusal, not an outage. Cloud KMS answers a `Decrypt`
 under a destroyed version with HTTP 400, and `Encryptor.Provider.GcpKms`, in
-`encryptor` 0.7.0 (the version this package pins), reports a 400 or a 404 as
+`encryptor` 0.8.0 (the version this package pins), reports a 400 or a 404 as
 `{:invalid_key_descriptor, {:kms_refused, status}}`: the permanent family,
 not the `{:key_unavailable, selector}` a caller retries. The key store
 returns the provider's answer unrelabelled, as ADR-0005 Amendment A5 sets
@@ -257,7 +257,7 @@ denial reads as retryable, and an outage costs a wait per row.
 
 ### Which refusals are permanent
 
-`Encryptor.Provider.GcpKms`, in `encryptor` 0.7.0 (the version this package
+`Encryptor.Provider.GcpKms`, in `encryptor` 0.8.0 (the version this package
 pins), answers a failed `Decrypt` by its HTTP status (its moduledoc's
 "What a failed `Decrypt` answers"), and the key store returns that answer
 unrelabelled (ADR-0005 Amendment A5):
