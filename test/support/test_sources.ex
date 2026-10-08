@@ -22,6 +22,42 @@ defmodule Encryptor.Ecto.TestSources do
     def load(_value), do: :error
   end
 
+  defmodule ForeignColumn do
+    @moduledoc """
+    A host's own `Ecto.ParameterizedType` that writes real messages through
+    the scoped vault `Encryptor.Ecto.TestTypes.Pan` writes through, under the
+    same scope key, but binds `"column"` - a pair that vault requires - to a
+    value `Pan` does not declare.
+
+    It is not one of this package's declarations, so the migrator cannot
+    compare its binding with the target's; and the engine binds a required
+    pair without storing it, so its rows make the same header claim as
+    `Pan`'s under the same wrapping key.
+    """
+
+    alias Encryptor.Ecto.TestVaults.Merchant
+
+    @context %{"table" => "cards", "column" => "card_number"}
+
+    @doc "Bytes this type writes for `scope`."
+    def write!(scope, plaintext) do
+      {:ok, bytes} = Merchant.encrypt(plaintext, key: scope, encryption_context: @context)
+      bytes
+    end
+
+    def init(opts), do: Map.new(opts)
+    def type(_params), do: :binary
+    def cast(value, _params), do: {:ok, value}
+    def dump(value, _dumper, %{scope: scope}), do: {:ok, write!(scope, value)}
+
+    def load(bytes, _loader, %{scope: scope}) do
+      case Merchant.decrypt(bytes, key: scope, encryption_context: @context) do
+        {:ok, plaintext} -> {:ok, plaintext}
+        {:error, _error} -> :error
+      end
+    end
+  end
+
   defmodule CountingLegacyType do
     @moduledoc """
     `LegacyType`, counting its loads in the calling process.

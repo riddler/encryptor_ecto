@@ -126,12 +126,13 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   comparison. The rows that could do that in this column are the `from:`
   side's, which `Encryptor.Ecto.Migrator` resolves before the pass starts:
   when the `from:` side is one of this package's declarations and binds
-  every required key as the target does, or is not one of this package's
-  declarations at all, the claim goes to the batch's proof like any other;
-  when it binds a required key differently, every such row is loaded on its
-  own, and a rewrite whose two declarations differ only in a required pair
-  costs one decrypt per already-migrated row rather than silently doing
-  nothing.
+  every required key as the target does, the claim goes to the batch's proof
+  like any other. Otherwise - a `from:` declaration of ours that binds a
+  required key differently, or a `from:` that is not one of this package's
+  declarations and so cannot be compared, since a host's own type may write
+  this format through the same vault - every such row is loaded on its own:
+  the pass costs one decrypt per already-migrated row rather than silently
+  leaving a source row unrewritten.
 
   Two cases keep the load attempt:
 

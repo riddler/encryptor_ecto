@@ -698,18 +698,17 @@ defmodule Encryptor.Ecto.Migrator do
   # rows under one wrapping key can make the same claim while binding
   # different values for an unstored pair - and only a load can tell them
   # apart. The rows that could do that in this column are the `from:` side's,
-  # so the proof is shared in two cases: the `from:` side is one of this
+  # so the proof is shared in one case only: the `from:` side is one of this
   # package's declarations and binds every required key to the value the
-  # target binds it to, or it is not one of this package's declarations at
-  # all. In the second case its rows are in a format this package does not
-  # write - a context change between two declarations of this package is
-  # spelled with both of them (ADR-0002's amendment of 2026-09-13) - and a
-  # row that only claimed to be ours can do what a forged header can always
-  # do, which is to be left alone until `mode: :verify` loads it. A `from:`
-  # declaration of ours whose vault is not running cannot be compared and is
-  # treated as disagreeing: every such claim then takes its own load.
+  # target binds it to. A `from:` side that is not one of this package's
+  # declarations cannot be compared: a host's own type may write messages of
+  # this format through the same vault and bind a required key its own way,
+  # and on the 1.0.x engine those rows stored the pair and were rewritten, so
+  # sharing the proof with them would leave them unrewritten. Such a `from:`
+  # is treated as disagreeing, and so is a `from:` declaration of ours whose
+  # vault is not running: every such claim then takes its own load.
   @spec shared_proof?(map(), [String.t()], map() | nil) :: boolean()
-  defp shared_proof?(_context, _required, nil), do: true
+  defp shared_proof?(_context, _required, nil), do: false
 
   defp shared_proof?(context, required, from_params) do
     case from_params.vault.config() do
