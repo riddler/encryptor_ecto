@@ -6,9 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Entries for unreleased work are not written here directly. Each issue drops a
-fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.8.0/changelog.d/README.md); the fragments are assembled
+fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.9.0/changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
+
+## [0.9.0] - 2026-10-07
+
+A breaking release: this version requires `encryptor` 0.8.0, which no longer
+stores a vault's required pairs in a message's header, so a node still on an
+earlier version cannot read a row this version writes with required context;
+and a migrator resume under a different run's scopes or writing key now
+raises. The Breaking entries say what a host does about each.
+
+### **Breaking**
+
+- A node still on an earlier version cannot read a row this version writes with required context (every scoped field's `"scope_ref"`, and the keys in `:required_context`), so upgrade every node that reads a column before any node writes it. Rows written earlier still load.
+- `Encryptor.Ecto.Migrator.run/2` with `resume: true` continues only the run that recorded the checkpoint: the checkpoint now records the run's `only_scopes:`, `except_scopes:` and `writing_key:`, and a resume under different ones raises an `ArgumentError` naming the difference instead of starting after another run's cursor, which skipped the rows below it and reported a clean pass. Run without `resume: true` (`--resume`) to start such a pass from the beginning; a checkpoint written by an earlier version records no run and is re-scanned rather than resumed.
+
+### Changed
+
+- Requires `encryptor` 0.8.0, which runs on `aws_encryption_sdk` 1.1: the pin moves from `encryptor == 0.7.0` to `encryptor == 0.8.0`, and a vault's required pairs (every scoped field's `"scope_ref"`, and the keys in `:required_context`) are bound to each message without being stored in its header, so `Encryptor.Message.describe/1` no longer shows them.
+
+### Fixed
+
+- `Encryptor.Ecto.Migrator.run/2` recognises a row written through `encryptor` 0.8.0 as already in the target state: its header probe no longer expects the header to store a pair the target's vault requires, which would have counted every such row migratable on a dry run and sent it to the source reader, to be reported undecryptable, on a write run. A header that leaves such a pair out is settled by loading the row; a row written earlier, whose header stores the pairs, is recognised as before.
+- A pass that reaches the end of its rows in write mode is now marked complete, and a resume of it is a no-op whose report carries `:complete` as that field's cursor (and `mix encryptor.ecto.migrate --resume` prints an "already complete" line) rather than a pass that visits only the rows inserted since.
+- A failure reason that a plan's `from:` reader or `to:` writer returns as `{:error, reason}` is now reduced to its atoms before `Encryptor.Ecto.Migrator.run/2` and `verify/2` record it: tags and module names are kept, and every other term in it (a binary, a number, a map) becomes `:redacted`, so a reader that put the value it failed to read into its error no longer puts it into the report's `failures`, the reports the `:progress` callback receives, or the failure lines `mix encryptor.ecto.migrate` and `mix encryptor.ecto.verify` print. A host that matched on a payload its own reader returned finds `:redacted` in that position instead; match on the tag. The failure line now renders a reason through `Encryptor.Ecto.Error.redact/1`.
 
 ## [0.8.0] - 2026-10-06
 
