@@ -137,9 +137,11 @@ So choose values that survive the things that change:
   on both sides - `Encryptor.Ecto.Migration` accepts `from:` equal to `to:`
   precisely for this - and run it through `Encryptor.Ecto.Migrator`. The
   migrator constructs both sides' params itself, which is what makes the
-  same-module rewrite expressible at all, and its probe compares the whole
-  claimed context rather than parsing the header, so an unrewritten row is not
-  mistaken for a finished one (`Encryptor.Ecto.Migrator.Pass`).
+  same-module rewrite expressible at all, and its probe compares every pair
+  the header stores against the declaration rather than merely parsing the
+  header, and loads the row where the header leaves out a pair the vault
+  requires, so an unrewritten row is not mistaken for a finished one
+  (`Encryptor.Ecto.Migrator.Pass`).
 
 Budget the rewrite before you declare the pair. A pair that is right for
 today's product boundary and wrong for next quarter's costs a production data

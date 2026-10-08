@@ -23,6 +23,22 @@ defmodule Encryptor.Ecto.TestTypes do
       column: "pan"
   end
 
+  defmodule PanPinnedColumn do
+    @moduledoc """
+    `Pan`'s column under another binding: the same vault and the same key,
+    with `column` pinned to a value `Pan` does not declare.
+
+    The `from:` side of a rewrite whose two declarations differ only in a
+    pair the vault requires, which the engine binds without storing in the
+    header - so a header cannot tell this declaration's rows from `Pan`'s.
+    """
+
+    use Encryptor.Ecto.Binary,
+      vault: Encryptor.Ecto.TestVaults.Merchant,
+      table: "cards",
+      column: "card_number"
+  end
+
   defmodule PanRotating do
     @moduledoc "`Pan`'s declaration over the mid-rotation vault: same context, two versions."
 

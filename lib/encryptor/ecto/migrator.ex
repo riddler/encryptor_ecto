@@ -408,7 +408,10 @@ defmodule Encryptor.Ecto.Migrator do
     target_column = Keyword.get(spec, :into) || field
     to = Keyword.fetch!(spec, :to)
     {arity, params} = target!(to, rewrite, target_column)
-    header = target_header(arity, params)
+
+    header =
+      target_header(arity, params, source_params(Keyword.fetch!(spec, :from), rewrite, field))
+
     :ok = rotatable!(rewrite.schema, field, header, vault_profile(arity, params), options)
 
     %Pass{
@@ -660,25 +663,70 @@ defmodule Encryptor.Ecto.Migrator do
   # build time, the dump will raise soon enough if it is genuinely down, and a
   # pass that refused to start would be this function inventing a lifecycle
   # check ADR-0002 does not give it.
-  @spec target_header(1 | 3, term()) :: Pass.target_header() | nil
-  defp target_header(1, _params), do: nil
+  #
+  # The vault's required keys are read from the same configuration, because
+  # the engine binds a required pair to a message without storing it in the
+  # header (encryptor 0.8.0 on aws_encryption_sdk 1.1; a message written
+  # earlier stores it), so which of the declared pairs a header may leave out
+  # is a fact about the vault. `:shared_proof?` is computed here too, from the
+  # `from:` side's declaration when it is one of ours: see
+  # `shared_proof?/3`.
+  @spec target_header(1 | 3, term(), map() | nil) :: Pass.target_header() | nil
+  defp target_header(1, _params, _from_params), do: nil
 
-  defp target_header(3, params) do
+  defp target_header(3, params, from_params) do
     with true <- ours?(params),
          {:ok, config} <- params.vault.config() do
+      context = Map.merge(config.static_encryption_context, Binary.declared_context(params))
+
       %{
-        context: Map.merge(config.static_encryption_context, Binary.declared_context(params)),
+        context: context,
         scope_ref?: params.scope != :none,
-        suite: config.algorithm_suite_id
+        suite: config.algorithm_suite_id,
+        required: config.required_keys,
+        shared_proof?: shared_proof?(context, config.required_keys, from_params)
       }
     else
       _no_header -> nil
     end
   end
 
+  # Whether one load's proof may carry a header claim that leaves a required
+  # pair unstored to the rest of the batch (`Encryptor.Ecto.Migrator.Pass`'s
+  # "A required pair the header does not store"). A claim like that compares
+  # every pair the header stores and none of the ones it leaves out, so two
+  # rows under one wrapping key can make the same claim while binding
+  # different values for an unstored pair - and only a load can tell them
+  # apart. The rows that could do that in this column are the `from:` side's,
+  # so the proof is shared in two cases: the `from:` side is one of this
+  # package's declarations and binds every required key to the value the
+  # target binds it to, or it is not one of this package's declarations at
+  # all. In the second case its rows are in a format this package does not
+  # write - a context change between two declarations of this package is
+  # spelled with both of them (ADR-0002's amendment of 2026-09-13) - and a
+  # row that only claimed to be ours can do what a forged header can always
+  # do, which is to be left alone until `mode: :verify` loads it. A `from:`
+  # declaration of ours whose vault is not running cannot be compared and is
+  # treated as disagreeing: every such claim then takes its own load.
+  @spec shared_proof?(map(), [String.t()], map() | nil) :: boolean()
+  defp shared_proof?(_context, _required, nil), do: true
+
+  defp shared_proof?(context, required, from_params) do
+    case from_params.vault.config() do
+      {:ok, from_config} ->
+        from_context =
+          Map.merge(from_config.static_encryption_context, Binary.declared_context(from_params))
+
+        Enum.all?(required, &(Map.fetch(from_context, &1) == Map.fetch(context, &1)))
+
+      _not_running ->
+        false
+    end
+  end
+
   # The context profile of the vault this field's target writes through, read
   # at the same point and from the same frozen configuration as
-  # `target_header/2`, for the one caller that needs it: `rotatable!/5`'s scope
+  # `target_header/3`, for the one caller that needs it: `rotatable!/5`'s scope
   # rule is a question about how many key holders the vault's scope holds,
   # which is exactly what the profile says (`Encryptor.Vault.Config`'s
   # `:context_profile`). `nil` has the same three causes the header's `nil`

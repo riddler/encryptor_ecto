@@ -45,14 +45,17 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   So a pass whose target is one of this package's own vault-backed types
   probes by reading the header, in two steps.
 
-  **Step one is a comparison against what the target declares.** The context
-  the message claims must equal the context that target's declaration writes -
-  the vault's static pairs, the declared `"table"` and `"column"`, and
-  whatever `:context` added, which `Encryptor.Ecto.Binary.declared_context/1`
-  composes once rather than twice - and the algorithm suite the message names
-  must equal the one the target's vault is configured to write. The
-  `"scope_ref"` pair the vault derives is compared for presence and not for
-  value: which scope a row belongs to is not what the probe asks.
+  **Step one is a comparison against what the target declares.** Every pair
+  the message's header stores must be one that target's declaration writes,
+  at the value it writes - the vault's static pairs, the declared `"table"`
+  and `"column"`, and whatever `:context` added, which
+  `Encryptor.Ecto.Binary.declared_context/1` composes once rather than twice -
+  every declared pair the header does not store must be one the vault
+  requires (see "A required pair the header does not store" below), and the
+  algorithm suite the message names must equal the one the target's vault is
+  configured to write. The `"scope_ref"` pair the vault derives is compared
+  for presence and not for value: which scope a row belongs to is not what
+  the probe asks.
 
   Comparing the *whole* context rather than merely parsing the header is what
   keeps a context-change rewrite correct - a rewrite whose `from:` is one of
@@ -104,6 +107,31 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   the header probe trades a rewrite the load probe would have performed for
   the decrypts it saves, and the row waits until a `mode: :verify` run, which
   always loads, reports it.
+
+  ### A required pair the header does not store
+
+  The engine binds a pair the vault requires to the message without storing
+  it in the header - every `:scoped` vault's `"scope_ref"`, and every key in
+  `:required_context` - as `aws_encryption_sdk` 1.1 writes a message and
+  encryptor 0.8.0 relies on. A message written on the 1.0.x engine stores
+  them all. So a header may be silent about a declared pair, and silence is
+  not disagreement: the row is still a candidate for the target state, but
+  the header has not shown it, and nothing keyless can.
+
+  Such a claim is settled by a load, never by the header. Where the only pair
+  left out is `"scope_ref"`, nothing changes, because its value was never
+  compared. Where a declared pair is left out, two rows under one wrapping
+  key make the same claim even when they bind different values for that
+  pair, so the proof's "the same context" no longer follows from the
+  comparison. The rows that could do that in this column are the `from:`
+  side's, which `Encryptor.Ecto.Migrator` resolves before the pass starts:
+  when the `from:` side is one of this package's declarations and binds
+  every required key as the target does, or is not one of this package's
+  declarations at all, the claim goes to the batch's proof like any other;
+  when it binds a required key differently, every such row is loaded on its
+  own, and a rewrite whose two declarations differ only in a required pair
+  costs one decrypt per already-migrated row rather than silently doing
+  nothing.
 
   Two cases keep the load attempt:
 
@@ -236,15 +264,27 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   `:context` is every pair such a message carries except `"scope_ref"`, and
   `:scope_ref?` is whether it carries that one - the value is the vault's
   derivation of a scope selector and is never compared. `:suite` is the
-  algorithm suite that target's vault is configured to write. Resolved once,
-  before the pass starts, by `Encryptor.Ecto.Migrator`; `nil` there means the
-  probe cannot be answered from a header and the load attempt runs instead.
+  algorithm suite that target's vault is configured to write. `:required` is
+  the vault's required keys, `"scope_ref"` among them on a `:scoped` vault:
+  the pairs a message may carry without storing them in its header.
+  `:shared_proof?` is whether one load's proof may carry a claim that leaves
+  a declared required pair unstored to the rest of its batch (the moduledoc's
+  "A required pair the header does not store"). Resolved once, before the
+  pass starts, by `Encryptor.Ecto.Migrator`; `nil` there means the probe
+  cannot be answered from a header and the load attempt runs instead.
   """
   @type target_header :: %{
           context: %{optional(String.t()) => String.t()},
           scope_ref?: boolean(),
-          suite: non_neg_integer()
+          suite: non_neg_integer(),
+          required: [String.t()],
+          shared_proof?: boolean()
         }
+
+  # What the header comparison makes of a row: `:claims` when every pair the
+  # target declares is in the header, `:unbound` when a declared required pair
+  # is not, and `:no` when the header disagrees with the declaration.
+  @typep claim :: {:claims | :unbound, identity()} | :no
 
   @typedoc """
   The wrapping-key identity a message claims: the algorithm suite it names,
@@ -670,8 +710,26 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     case claimed(header, bytes, pass.writing_key) do
       :no -> {:not_target, proven}
       {:claims, identity} -> against_proof(pass, proven, identity, bytes)
+      {:unbound, identity} -> unbound(pass, proven, identity, bytes)
     end
   end
+
+  # A claim whose header leaves a declared required pair out is settled by a
+  # load, never by the header: through the batch's proof where the `from:`
+  # side cannot have written the same identity under another value for that
+  # pair, and by a load of this row alone where it can. See the moduledoc's
+  # "A required pair the header does not store".
+  @spec unbound(t(), MapSet.t(identity()), identity(), binary()) ::
+          {:already_target | :not_target, MapSet.t(identity())}
+  defp unbound(
+         %__MODULE__{target_header: %{shared_proof?: true}} = pass,
+         proven,
+         identity,
+         bytes
+       ),
+       do: against_proof(pass, proven, identity, bytes)
+
+  defp unbound(pass, proven, _identity, bytes), do: {load_probe(pass, bytes), proven}
 
   # An identity a load has already proven this batch is believed; the first
   # row claiming one is loaded, and joins the proof only where that load
@@ -700,14 +758,14 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # declaration - the context-change rewrite's `from:` side, most often - and
   # the row is rewritten, which is the answer a decrypt would also have given.
   # What survives this comparison is not yet an answer: it is a claim to hand
-  # to `against_proof/4` under the identity it makes.
+  # to `against_proof/4` (or to `unbound/4`) under the identity it makes.
   #
   # A rotation's predicate is the second half, and it is applied to the claim
   # rather than folded into the declaration comparison: which key version wrote
   # a row is a fact about the row, while everything `against_declaration/2`
   # compares is a fact about the declaration, and a rotation is a property of
   # the pass rather than of the column.
-  @spec claimed(target_header(), binary(), String.t() | nil) :: {:claims, identity()} | :no
+  @spec claimed(target_header(), binary(), String.t() | nil) :: claim()
   defp claimed(header, bytes, writing_key) do
     case Message.describe(bytes) do
       {:ok, info} -> claimed_by(header, info, writing_key)
@@ -717,11 +775,11 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     _exception -> :no
   end
 
-  @spec claimed_by(target_header(), Message.Info.t(), String.t() | nil) ::
-          {:claims, identity()} | :no
+  @spec claimed_by(target_header(), Message.Info.t(), String.t() | nil) :: claim()
   defp claimed_by(header, info, writing_key) do
-    with {:claims, identity} <- against_declaration(header, info) do
-      if written_under?(info, writing_key), do: {:claims, identity}, else: :no
+    case against_declaration(header, info) do
+      :no -> :no
+      claim -> if written_under?(info, writing_key), do: claim, else: :no
     end
   end
 
@@ -747,25 +805,63 @@ defmodule Encryptor.Ecto.Migrator.Pass do
 
   defp written_under?(_info, _writing_key), do: false
 
-  @spec against_declaration(target_header(), Message.Info.t()) :: {:claims, identity()} | :no
+  @spec against_declaration(target_header(), Message.Info.t()) :: claim()
   defp against_declaration(header, info) do
-    {scope_ref, context} =
+    {scope_ref, stored} =
       info.encryption_context
       |> declared_pairs()
       |> Map.pop(Context.scope_ref_key())
 
-    # The `"scope_ref"` presence comparison is a fast path rather than a guard:
-    # ADR-0001 decision 5e forbids a global field on a `:scoped`-profile vault,
-    # so a scope-bearing and a global declaration cannot coexist over one
-    # vault, and a header that disagreed could only change the answer for a row
-    # `against_proof/4`'s load would have accepted anyway. Kept because it
-    # settles the common case without a decrypt.
-    if context == header.context and is_binary(scope_ref) == header.scope_ref? and
-         info.algorithm_suite_id == header.suite do
-      {:claims, %{suite: info.algorithm_suite_id, keys: info.encrypted_data_keys}}
+    with true <- info.algorithm_suite_id == header.suite,
+         true <- scope_ref_agrees?(header, scope_ref),
+         {:ok, unstored} <- against_context(header, stored) do
+      identity = %{suite: info.algorithm_suite_id, keys: info.encrypted_data_keys}
+      if unstored == [], do: {:claims, identity}, else: {:unbound, identity}
+    else
+      _disagrees -> :no
+    end
+  end
+
+  # The `"scope_ref"` presence comparison is a fast path rather than a guard:
+  # ADR-0001 decision 5e forbids a global field on a `:scoped`-profile vault,
+  # so a scope-bearing and a global declaration cannot coexist over one vault,
+  # and a header that disagreed could only change the answer for a row
+  # `against_proof/4`'s load would have accepted anyway. Kept because it
+  # settles the common case without a decrypt.
+  #
+  # A header with no `"scope_ref"` agrees with a scope-bearing declaration
+  # when the vault requires the key, which a `:scoped` vault always does: the
+  # engine binds a required pair without storing it. Its value was never
+  # compared, so its absence costs the claim nothing and the claim stays
+  # `:claims` rather than `:unbound`.
+  @spec scope_ref_agrees?(target_header(), String.t() | nil) :: boolean()
+  defp scope_ref_agrees?(header, scope_ref) when is_binary(scope_ref), do: header.scope_ref?
+
+  defp scope_ref_agrees?(header, nil),
+    do: not header.scope_ref? or Context.scope_ref_key() in header.required
+
+  # Every pair the header stores must be one the target declares, at the value
+  # it declares. A declared pair the header does not store is a disagreement,
+  # unless the vault requires it: then the header is silent about it rather
+  # than wrong, and the key is returned so the claim is settled by a load. A
+  # message written before the engine stopped storing required pairs stores
+  # them all, and returns no key.
+  @spec against_context(target_header(), %{optional(String.t()) => String.t()}) ::
+          {:ok, [String.t()]} | :no
+  defp against_context(header, stored) do
+    if Enum.all?(stored, fn {key, value} -> Map.fetch(header.context, key) == {:ok, value} end) do
+      unstored(header, stored)
     else
       :no
     end
+  end
+
+  @spec unstored(target_header(), %{optional(String.t()) => String.t()}) ::
+          {:ok, [String.t()]} | :no
+  defp unstored(header, stored) do
+    missing = header.context |> Map.keys() |> Enum.reject(&Map.has_key?(stored, &1))
+
+    if Enum.all?(missing, &(&1 in header.required)), do: {:ok, missing}, else: :no
   end
 
   # What is left of a message's context after the pairs no declaration is

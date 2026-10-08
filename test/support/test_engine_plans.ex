@@ -349,6 +349,28 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule RequiredPairEdit do
+    @moduledoc """
+    Two declarations of ours that differ only in a pair the vault requires:
+    `Encryptor.Ecto.TestTypes.PanPinnedColumn` binds `column` to another
+    value than `Encryptor.Ecto.TestTypes.Pan` does.
+
+    The engine binds a required pair without storing it, so a row of either
+    side makes the same header claim under the same wrapping key, and only a
+    load can say which side wrote it.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      scope_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestTypes.PanPinnedColumn,
+        to: Encryptor.Ecto.TestTypes.Pan
+    end
+  end
+
   defmodule Rotation do
     @moduledoc """
     A single scope's data-key rotation: one declaration on both sides.
