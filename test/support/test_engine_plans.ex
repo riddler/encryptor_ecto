@@ -371,6 +371,26 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule ForeignColumn do
+    @moduledoc """
+    A foreign `from:` that writes this package's message format through the
+    target's vault with another value for a required pair:
+    `Encryptor.Ecto.TestSources.ForeignColumn` into
+    `Encryptor.Ecto.TestTypes.Pan`.
+    """
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      scope_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestSources.ForeignColumn,
+        to: Encryptor.Ecto.TestTypes.Pan,
+        source_authenticated: true
+    end
+  end
+
   defmodule Rotation do
     @moduledoc """
     A single scope's data-key rotation: one declaration on both sides.

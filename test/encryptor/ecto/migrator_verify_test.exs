@@ -21,9 +21,11 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
 
   alias Encryptor.Ecto.Migrator
   alias Encryptor.Ecto.Migrator.Report
+  alias Encryptor.Ecto.Scope
   alias Encryptor.Ecto.TestEnginePlans
   alias Encryptor.Ecto.TestRepo
   alias Encryptor.Ecto.TestSchemas
+  alias Encryptor.Ecto.TestTypes.Pinned
 
   @merchant "merchant_7f3"
   @pan "4111111111111111"
@@ -227,10 +229,14 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
     # decrypt verified green because its header said it was ours. That is the
     # keyless census (`Encryptor.Ecto.Migrator.Census`) wearing this
     # function's name.
+    #
+    # The plan is the two-declaration edit, whose `from:` is one of this
+    # package's declarations binding the vault's required pairs as the target
+    # does, so a rewrite shares one row's proof with the rest of the batch; a
+    # foreign `from:` would load every row and leave nothing to contrast.
     test "a row a rewrite would skip from its header is opened here" do
-      _first = insert_card(pan: legacy(@pan))
-      second = insert_card(pan: legacy(@pan))
-      assert {:ok, _run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      _first = insert_card(pan: pinned(@pan))
+      second = insert_card(pan: pinned(@pan))
 
       # One merchant, so one wrapping key and one identity: the first row
       # proves it and a rewrite then skips the second on its header, body or
@@ -238,10 +244,10 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
       tampered = tamper(raw(:cards, second, :pan))
       :ok = write_raw(second, tampered)
 
-      assert {:ok, rerun} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      assert {:ok, rerun} = Migrator.run(TestEnginePlans.InPlaceEdit, mode: :write)
       assert rerun.counts.already_target == 2
 
-      assert {:error, report} = Migrator.verify(TestEnginePlans.Cards)
+      assert {:error, report} = Migrator.verify(TestEnginePlans.InPlaceEdit)
 
       assert report.counts.already_target == 1
       assert report.counts.undecryptable == 1
@@ -253,6 +259,15 @@ defmodule Encryptor.Ecto.MigratorVerifyTest do
   # -- fixtures -------------------------------------------------------------
 
   defp legacy(plaintext), do: "legacy:" <> String.reverse(plaintext)
+
+  # Bytes the edited declaration writes: what a row `InPlaceEdit` has
+  # already migrated holds.
+  defp pinned(plaintext) do
+    Scope.put(@merchant)
+    params = Pinned.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = Pinned.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
 
   defp insert_card(attrs) do
     row = attrs |> Map.new() |> Map.put_new(:merchant_id, @merchant)

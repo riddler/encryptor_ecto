@@ -28,6 +28,7 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   alias Encryptor.Ecto.TestLegacy
   alias Encryptor.Ecto.TestRepo
   alias Encryptor.Ecto.TestSchemas
+  alias Encryptor.Ecto.TestSources
   alias Encryptor.Ecto.TestTypes.Pan
   alias Encryptor.Ecto.TestTypes.PanPinnedColumn
   alias Encryptor.Ecto.TestTypes.PanRekeyed
@@ -800,10 +801,18 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     # row below, whose header this package wrote over a body it can no longer
     # open, was sent to the source reader instead of riding the first row's
     # proof.
+    #
+    # The plan is the two-declaration edit rather than `Cards`: its `from:` is
+    # one of this package's declarations and binds every pair the vault
+    # requires as the target does, which is what lets a claim whose header
+    # leaves those pairs out share the proof (the pass's "A required pair the
+    # header does not store"; a foreign `from:` such as `Cards`' legacy reader
+    # takes a load per row instead).
     test "one proof per identity carries the rest of the batch" do
-      first = insert_card(pan: legacy(@pan))
-      second = insert_card(pan: legacy(@pan))
-      assert {:ok, _run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      first = insert_card(pan: pan_declared(@pan))
+      second = insert_card(pan: pan_declared(@pan))
+      before = raw(:cards, first, :pan)
+      assert {:ok, _run} = Migrator.run(TestEnginePlans.InPlaceEdit, mode: :write)
 
       # The two rows are one merchant's, so they carry one wrapping key and
       # one identity: the first proves it and the second is skipped on the
@@ -812,12 +821,12 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       tampered = tamper(raw(:cards, second, :pan))
       :ok = write_raw(second, tampered)
 
-      assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      assert {:ok, report} = Migrator.run(TestEnginePlans.InPlaceEdit, mode: :write)
 
       assert report.counts.already_target == 2
       assert report.failures == []
       assert raw(:cards, second, :pan) == tampered
-      refute raw(:cards, first, :pan) == legacy(@pan)
+      refute raw(:cards, first, :pan) == before
     end
 
     # Sabotage: had `against_proof/4` believe a claimed identity without
@@ -1002,8 +1011,8 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert raw(:cards, id, :pan) == bytes
     end
 
-    # Sabotage: made `shared_proof?/3` answer `true` for every `from:` - the
-    # second row, the `from:` declaration's, claimed the identity the first
+    # Sabotage: made `shared_proof?/3` answer `true` for every `from:` of
+    # ours - the second row, the `from:` declaration's, claimed the identity the first
     # row's load had proven and was counted already migrated, so a rewrite
     # whose whole purpose is the changed `column` binding left it as it was.
     test "a `from:` that binds a required pair differently is settled row by row" do
@@ -1048,6 +1057,37 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert report.failures == []
       assert raw(:cards, second, :pan) == tampered
       assert raw(:cards, first, :pan) == first_bytes
+    end
+  end
+
+  describe "a foreign `from:` that writes this format with another required value" do
+    # Sabotage: made `shared_proof?/3` answer `true` for a `from:` that is
+    # not one of this package's declarations - the second row, written by
+    # the host's own type through the target's vault under another `column`,
+    # claimed the identity the first row's load had proven and was counted
+    # already migrated, so the rewrite left it as it was.
+    test "its rows are settled row by row and rewritten" do
+      target = insert_card(pan: pan_declared(@pan))
+      source_bytes = TestSources.ForeignColumn.write!(@merchant, @pan)
+      source = insert_card(pan: source_bytes)
+
+      # Nothing in the header separates the two rows: same wrapping key, same
+      # stored pairs.
+      assert {:ok, target_info} = Message.describe(raw(:cards, target, :pan))
+      assert {:ok, source_info} = Message.describe(source_bytes)
+      assert target_info.encrypted_data_keys == source_info.encrypted_data_keys
+      assert target_info.encryption_context == source_info.encryption_context
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.ForeignColumn, mode: :write)
+
+      assert report.counts.already_target == 1
+      assert report.counts.migratable == 1
+      assert report.failures == []
+      refute raw(:cards, source, :pan) == source_bytes
+
+      Scope.put(@merchant)
+      params = Pan.init(schema: TestSchemas.Card, field: :pan)
+      assert {:ok, @pan} = Pan.load(raw(:cards, source, :pan), &Ecto.Type.load/2, params)
     end
   end
 
