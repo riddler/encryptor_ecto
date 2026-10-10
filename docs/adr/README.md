@@ -9,7 +9,7 @@
 | [0005](0005-wrapped-key-row-shape.md) | A wrapped-key row declares its wrapping shape, in a column of its own | accepted (2026-09-13, with amendments) |
 | [0006](0006-scope-names-the-keys-owner.md) | Scope names the key's owner here too, and the key store's column keeps its name | accepted (2026-09-24), Amendment A accepted (2026-10-06) |
 | [0007](0007-suspension-store-and-shred.md) | A Repo-backed suspension store, and a shred on the key store that returns what it destroyed | accepted (2026-09-24) |
-| [0008](0008-publish-from-the-release-workflow-on-a-tag-push.md) | A version tag pushed on the default branch publishes the package from the release workflow, and nobody publishes by hand | proposed |
+| [0008](0008-publish-from-the-release-workflow-on-a-tag-push.md) | A version tag pushed on the default branch publishes the package from the release workflow, and nobody publishes by hand | accepted (2026-10-10) |
 
 Every amendment section in these four records - the 2026-08-27 and
 2026-08-28 sets, and ADR-0003's Amendment C of 2026-09-12 - was accepted by
@@ -32,6 +32,12 @@ record's foot Note says what was verified. It replaces decision 3's table,
 so the index row's "the key
 store's column keeps its name" describes releases through 0.7.x; the row's
 title is left as written.
+
+ADR-0008 (a version tag pushed on the default branch publishes the package
+from the release workflow) was accepted on 2026-10-10, once the release
+workflow had published `encryptor_ecto` 0.7.1; the record's foot Note says
+what was verified, and names two sentences later commits on `main`
+superseded.
 
 New ADRs: next number, same three-section format (Context, Decision,
 Consequences), plus the typespecs and worked-example sections this family's

@@ -1,6 +1,6 @@
 # ADR-0008: A version tag pushed on the default branch publishes the package from the release workflow, and nobody publishes by hand
 
-Status: proposed
+Status: accepted (2026-10-10, encryptor_ecto 0.7.1)
 
 ## Context
 
@@ -180,3 +180,112 @@ stopped there; the fix lands on `main` and `v0.8.1` is prepared and tagged.
 None the record leaves open. The first publish through the workflow is the
 first time its steps from the toolchain on run on a tag; that run is the
 evidence this record is verified against before it is accepted.
+
+## Note (2026-10-10): accepted on 0.7.1; what was verified
+
+This record is accepted on 2026-10-10. The release workflow first published
+this package as encryptor_ecto 0.7.1: the tag `v0.7.1` on the commit
+`a7f595c`, published by the run
+https://github.com/riddler/encryptor_ecto/actions/runs/37309186667, which
+succeeded on its first attempt with every step green, from "Fetch the
+default branch" to "Print the published version's address". The workflow
+has published every version since: 0.7.2 (`v0.7.2` on `cfbb89f`, run
+https://github.com/riddler/encryptor_ecto/actions/runs/37479078484), 0.8.0
+(`v0.8.0` on `99ea9de`, run
+https://github.com/riddler/encryptor_ecto/actions/runs/37496552099) and
+0.9.0 (`v0.9.0` on `3119bc9`, run
+https://github.com/riddler/encryptor_ecto/actions/runs/37712847636), each on
+its first attempt. hex.pm's release resource answers 200 for all four
+versions, and hexdocs.pm serves each one's docs. Every claim below was
+re-verified at `3119bc9`, the tip of `main` when this Note was written. The
+one commit on `.github/workflows/release.yml` between `v0.7.1` and `3119bc9`
+is `58bfed6`, which changes comment lines only. That the release-workflow
+records flip together, with the first publish through the workflow as the
+evidence, was ruled by the operator, 2026-10-06; that the Status line names
+the first version published through the workflow, and this Note the later
+ones, was decided by the conductor under a standing consent, 2026-10-10.
+That the sentence `58bfed6` superseded is named here by that commit's SHA
+was ruled by the operator, 2026-10-10; the Context's job count is named the
+same way, by the commits that changed it. This Note changes no
+decision, and it carries the record's status rather than one of its own.
+
+- **Decision 1.** `release.yml`'s `on:` is a push of a tag matching
+  `v*.*.*` and nothing else (`:11-14`): no branch, no pull request, no
+  `workflow_dispatch`.
+- **Decision 2.** "Fetch the default branch" (`:86`) reads
+  `github.event.repository.default_branch` and fetches it by that name;
+  "Check the tagged commit is on the default branch" (`:94`) asks
+  `git merge-base --is-ancestor`; "Check the tag names the version in
+  mix.exs" (`:106`) compares the tag without its `v` with `@version`
+  (`mix.exs:4`, read by `project/0` at `:10`). All three precede "Read the
+  toolchain out of mise.toml" (`:136`). The job-level `services:` and
+  `env:` (`:46-76`) are byte-identical to those of `ci.yml`'s `gate` job
+  (`ci.yml:36-66`), `ECTO_REQUIRE_DATABASE` included, and the toolchain,
+  cache, dependency and gate steps (`:133-208`) are byte-identical to that
+  job's steps (`ci.yml:71-146`), comments included. "Full quality gate"
+  (`:202`) runs `gate.full` from `.claude/wurk.json`, which is
+  `mix quality` (`.claude/wurk.json:28`). The workflow reads no CI result.
+- **Decision 3.** "Check Hex does not already show this version" (`:120`)
+  asks `https://hex.pm/api/packages/encryptor_ecto/releases/<version>`
+  before the toolchain: `404` continues, `200` stops with a report, and any
+  other answer stops.
+- **Decision 4.** "Publish to Hex" (`:213`) runs `mix hex.publish --yes`
+  with `HEX_API_KEY` set from the secret in its own `env:` (`:214-215`), and
+  no other step names a secret. The workflow's token is read-only
+  (`permissions: contents: read`, `:18-19`). The last step prints the
+  hex.pm and hexdocs.pm addresses (`:218-225`). `HEX_API_KEY` is listed by
+  name among the organisation secrets this repository can read; no one read
+  its value, and the four publish steps that succeeded are the evidence it
+  is set.
+- **Decision 5.** The publish passes no flag that skips the docs, and
+  hexdocs.pm serves 0.7.1, 0.7.2, 0.8.0 and 0.9.0.
+- **Decision 6.** No step retries the publish, and `concurrency` groups
+  runs by `github.ref` with `cancel-in-progress: false` (`:23-25`). Every
+  run so far succeeded on its first attempt, so the hand re-run this
+  decision allows has not been needed.
+- **Decision 7.** `CLAUDE.md`'s row "a release, `mix hex.publish`" and its
+  "Release preps" paragraph say an agent or a session never runs
+  `mix hex.publish` and that a failed workflow is re-run from its Actions
+  page; the release-prep row and that paragraph say the tag is pushed once
+  the prep is merged.
+- **Context.** `mix help hex.publish` documents `--yes`, and
+  `mix help hex.config` documents `HEX_API_KEY`. `mix.exs` states the
+  version once, as `@version`.
+- **Consequences.** `mix help hex.publish`, "Reverting a package", says a
+  new version of an existing package can be reverted or updated within one
+  hour, and `mix help hex.retire` retires a version. GitHub's documentation
+  of the push event says events are not created for tags when more than
+  three tags are pushed at once. The consequence "This record stays
+  proposed until the workflow has published a version of this package; it
+  is then verified against that run" is met by this Note and is not
+  edited; so is the open-questions paragraph's sentence that the first run
+  is the evidence.
+- **Worked example.** It was written before 0.7.1 and is an illustration:
+  the real 0.8.0 release ran as run
+  https://github.com/riddler/encryptor_ecto/actions/runs/37496552099, on
+  `99ea9de`, from a prep that moved `@version` from `"0.7.2"`, and
+  published.
+
+**Sentences that no longer hold as written.**
+
+- The Consequences bullet on the copied blocks ends "(the cache step's
+  comment still calls the vault a git dependency, which `mix.exs` no longer
+  makes it)". The commit `58bfed6` ("Describes encryptor as an exact Hex pin
+  in the CI cache comments"), on `main` before the `v0.7.2` tag, rewrote
+  that comment in both files: at `3119bc9` the "Cache deps and build"
+  comment (`release.yml:156-168`, `ci.yml:94-106`) says every dependency is
+  a Hex package, `encryptor` included, pinned to one exact Hex version
+  (`mix.exs:112`). The bullet's consequence, that the copied blocks carry
+  the same comments and go stale together, still holds: `58bfed6` changed
+  both blocks alike, and they are byte-identical at `3119bc9`.
+- The Context says `.github/workflows/ci.yml` "runs its one job", as it
+  did at `d4155fb`, where the Context's cites were read. The commits
+  `5f669cc` ("Adds a CI job running the tests on Erlang/OTP 26") and
+  `bf8e2dc` ("Checks a hackney 1.x host resolves this"), both on `main`,
+  added the jobs `test-otp26` (`ci.yml:160`) and `hackney-1x`
+  (`ci.yml:233`) beside `gate` (`ci.yml:18`) and changed no line of the
+  `gate` job. The release workflow copies the `gate` job and runs the gate,
+  not those two jobs, which is what decision 2 says.
+
+These sentences are not edited. No decision changes, and no line above is
+edited other than the Status line.
