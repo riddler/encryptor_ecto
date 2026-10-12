@@ -19,7 +19,7 @@ option is added or removed, and no stored format changes.
 
 ### Changed
 
-- Requires `encryptor` 0.8.1: the pin moves from `encryptor == 0.8.0` to `encryptor == 0.8.1`, so a host resolving this package gets that release's Fixed changes (`Encryptor.Vault.derive/3` returns its configuration errors instead of raising; `Encryptor.Envelope.unwrap/2` and `rewrap/2` refuse a wrapped-key row whose `name` or `bits` is not what its scope and version derive, with a new refusal detail on `unwrap/2`; the Cloud KMS provider refuses a key-store row naming another scope and answers a store's descriptor refusal on `provision` as the read path does; `{:key_name_in_use, selector}` from a read callback answers as off-contract; a vault's suspended set is written only through the vault). Its changelog says what each refusal answers.
+- Requires `encryptor` 0.8.1: the pin moves from `encryptor == 0.8.0` to `encryptor == 0.8.1`, so a host resolving this package gets that release's Fixed changes (`Encryptor.Vault.derive/3` returns its configuration errors instead of raising; `Encryptor.Envelope.unwrap/2` and `rewrap/2` refuse a wrapped-key row whose `name` is not the name its `scope_ref` and `version` derive, or whose `bits` is not 256, and on `unwrap/2` two existing refusals change their detail; the Cloud KMS provider refuses a key-store row naming another scope and answers a store's descriptor refusal on `provision` as the read path does; `{:key_name_in_use, selector}` from a read callback answers as off-contract; a vault's suspended set is written only through the vault). Its changelog says what each refusal answers.
 
 ### Fixed
 
