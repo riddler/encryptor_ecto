@@ -111,6 +111,21 @@ defmodule Encryptor.Ecto.TestEnginePlans do
     end
   end
 
+  defmodule ImproperDisclosingSource do
+    @moduledoc "A plan whose `from:` reader fails with an improper-list reason."
+
+    use Encryptor.Ecto.Migration, repo: Encryptor.Ecto.TestRepo
+
+    rewrite Encryptor.Ecto.TestSchemas.Card do
+      scope_from :merchant_id
+
+      field :pan,
+        from: Encryptor.Ecto.TestSources.ImproperDisclosingType,
+        to: Encryptor.Ecto.TestTypes.Pan,
+        source_authenticated: true
+    end
+  end
+
   defmodule DisclosingTarget do
     @moduledoc "A plan whose `to:` puts the value it was handed into its error."
 

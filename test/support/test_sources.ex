@@ -186,6 +186,19 @@ defmodule Encryptor.Ecto.TestSources do
     def load(value), do: {:error, {:bad_checksum, value}}
   end
 
+  defmodule ImproperDisclosingType do
+    @moduledoc """
+    A legacy type whose failure reason is an improper list holding the value it
+    was reading: a tag consed onto a binary tail.
+    """
+
+    def type, do: :binary
+    def cast(value), do: {:ok, value}
+    def dump(value), do: {:ok, value}
+
+    def load(value), do: {:error, [:bad_checksum | value]}
+  end
+
   defmodule DirectSource do
     @moduledoc "A module implementing the behaviour itself, used as-is."
 
