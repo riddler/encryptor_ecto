@@ -498,12 +498,13 @@ defmodule Encryptor.Ecto.KeyStore do
       it would make an older version current again, and a scope whose only
       version goes is P3, which asks for a decision of its own.
     * `:drain` - `:wait` (the default) returns only once the vault's
-      materials cache can no longer serve a deleted version, which is its
-      cache `max_age` after the delete commits, and at once for a vault
-      configured `cache: false`. `:skip` returns at once, for a host that
-      restarts its vaults instead; the record's `:drained_at` still says when
-      waiting would have finished. "How far `:drained_at` holds" below says
-      what the bound does not cover.
+      materials cache has dropped every entry made before the delete
+      committed, which is its cache `max_age` after the delete commits, and
+      at once for a vault configured `cache: false`. The wait is a step of
+      the procedures and is harmless; it is not what keeps a deleted version
+      from being served (see "How far `:drained_at` holds" below). `:skip`
+      returns at once, for a host that restarts its vaults instead; the
+      record's `:drained_at` still says when waiting would have finished.
 
   ## What it answers
 
@@ -563,16 +564,20 @@ defmodule Encryptor.Ecto.KeyStore do
 
   ## How far `:drained_at` holds
 
-  `:drained_at` is `:deleted_at` plus `max_age`, and it bounds every cache
-  entry made before the delete committed. It is not a hard bound on every
-  entry. A decrypt that asked the store before the commit, and finished
-  after it, puts its materials in the cache at that later moment, and they
-  serve until that moment plus `max_age`: past `:drained_at` by as long as
-  that decrypt was in flight. Under P3 this cannot serve a read, because
-  `encryptor` asks the provider before it reads the cache and the provider
-  answers `{:unknown_key, selector}`; under P4 it can, for that long. A host
-  that needs a hard bound restarts its vaults after the shred, which drops
-  every entry at once.
+  `:drained_at` is `:deleted_at` plus `max_age`, and it bounds how long a
+  cache entry made before the delete committed stays resident. Residency is
+  not serving. From `encryptor` 0.8.0 (its ADR-0001 Amendment C) both cache
+  partition ids carry a fingerprint of the key material, and the read side's
+  id is computed over the provider's whole candidate list, so a list that
+  loses a version is a new partition. Under P4 the provider's shorter list
+  after the delete is a new partition: the warm entry for a value written
+  under the retired version is not found, and the next read of that value
+  fails at once with `:decrypt_failed`, with or without the drain. Under P3
+  the provider answers `{:unknown_key, selector}` before the cache is
+  consulted, as before. The amendment does not speak to a read that was
+  already past the provider's answer when the delete committed. A host that
+  wants the entries gone from memory at once restarts its vaults after the
+  shred.
 
   ## Telemetry
 
@@ -760,9 +765,10 @@ defmodule Encryptor.Ecto.KeyStore do
   defp procedure(:all), do: :scope
   defp procedure(_version), do: :version
 
-  # enc-ADR-0005 decision 2: a running node decrypts from cached materials for
-  # up to `max_age` seconds after the row is gone, and the bound a shred waits
-  # on is that one.
+  # enc-ADR-0005 decision 2: a cached entry made before the delete stays
+  # resident for up to `max_age` seconds after the row is gone, and the bound a
+  # shred waits on is that one. From encryptor 0.8.0 (its ADR-0001 Amendment C)
+  # a read after the delete no longer finds the entry.
   @spec drain_seconds(Vault.Config.t()) :: non_neg_integer()
   defp drain_seconds(%Vault.Config{cache: false}), do: 0
   defp drain_seconds(%Vault.Config{cache: %{max_age: max_age}}), do: max_age

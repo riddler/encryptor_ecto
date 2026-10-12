@@ -271,10 +271,11 @@ defmodule Encryptor.Ecto.KeyStoreShredRepoTest do
   end
 
   describe "the drain" do
-    # The cache is why the drain exists. After P4 the vault still resolves the
-    # scope - its other versions are live - so a value written under the
-    # retired version is served out of cached materials until `max_age`
-    # passes, exactly as enc-ADR-0005's P4 step 2 warns.
+    # The cache is why the drain exists: it holds the entries made before the
+    # delete until `max_age` passes, as enc-ADR-0005's P4 step 2 says. From
+    # encryptor 0.8.0 (encryptor ADR-0001 Amendment C) it no longer serves a
+    # value written under the retired version in that time, so the drain waits
+    # out residency, not a serving window.
     #
     # Sabotage: made `drain_seconds/1` answer 0 for every vault. The call
     # returned at once and the elapsed-time assertion went red on 1 ms.

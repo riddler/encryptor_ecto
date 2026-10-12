@@ -198,21 +198,30 @@ What a dump taken *after* the shred, or kept from before it, still shows:
   remaining rows. It identifies the scope to no one without the reference
   subkey.
 
-Two limits of the shred itself are documented at `shred/3` and belong in a
+Two facts about the shred itself are documented at `shred/3` and belong in a
 threat model. A version provisioned concurrently with a whole-scope shred is
 deleted if it commits before the shred's second look, and survives as the
 scope's newest key if it commits after; the host closes that window by
 stopping provisioning for the scope first and confirming afterwards that no
-row remains. And the vault's materials cache can serve a deleted version for
-up to its `max_age` after the delete, a little longer for a decrypt that was in
-flight at the commit; `drain: :wait` waits that bound out, and a host that
-needs a hard bound restarts its vaults.
+row remains. And the vault's materials cache does not serve a deleted version
+after the delete: from `encryptor` 0.8.0 (its ADR-0001 Amendment C) the
+cache's partition ids carry a fingerprint of the key material and, on the
+read side, cover the provider's whole candidate list, so the provider's
+answer after the delete is a partition the warm entries are not in. A
+whole-scope shred is refused by the provider with `{:unknown_key, selector}`
+before the cache is consulted; a single-version shred fails the retired
+version's values at once with `:decrypt_failed`. The entries themselves stay
+in memory for up to the vault's `max_age`; `drain: :wait` waits that out and
+is harmless, and a host that wants them gone at once restarts its vaults. The
+amendment does not speak to a read already past the provider's answer when
+the delete committed.
 
 Pinned by: "deletes every version, and a read then fails unknown_key",
 "leaves every other scope's rows alone", "deletes one version; its values fail
 decrypt_failed and the rest still serve", "drain: :wait returns only after the
-cache's max_age, and the read then fails" and "after P3 a warm cache does not
-serve the scope, even with the drain skipped"
+cache's max_age, and the read then fails", "drain: :skip returns at once, and a
+warm cache no longer serves the retired version" and "after P3 a warm cache does
+not serve the scope, even with the drain skipped"
 ([`test/encryptor/ecto/key_store_shred_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/key_store_shred_repo_test.exs));
 the late-version re-check in
 [`test/encryptor/ecto/key_store_shred_recheck_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/key_store_shred_recheck_repo_test.exs).

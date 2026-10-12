@@ -456,3 +456,37 @@ reading that holds on main. The sentence is not edited.
 This Note decides nothing. Cites were read at `4722b05`.
 
 Provenance: bead ece-tdw0.
+
+## Note (2026-10-12): after encryptor 0.8.0 the drain waits out residency, not a serving window
+
+Two passages above describe the cache as serving a deleted version for up
+to `max_age`: the Context's paragraph on P4 ("so it serves until `max_age`
+passes") and the Consequences bullet "`drained_at` is not a hard bound
+(decision 4)" ("under P4 they can serve past `drained_at`"). They describe
+`encryptor` 0.5.0 through 0.7.0. This package pins `encryptor` 0.8.0, whose ADR-0001
+Amendment C makes both cache partition ids carry a fingerprint of the key
+material and makes the read side's id cover the provider's whole candidate
+list. After a delete the provider's list is shorter, which is a new
+partition, so the warm entry for a value written under the retired version is
+not found and its next read fails at once with `:decrypt_failed`, with or
+without the drain. Amendment C names this consequence itself: "A single
+retired version (ADR-0005 P4) no longer waits on the cache for readability".
+Under P3 the provider's `{:unknown_key, selector}` still comes first.
+
+Read the two passages as the state before 0.8.0. On main `:drained_at` is
+when the cache has dropped the entries made before the delete committed:
+residency in memory, not a window in which a deleted version is served. The
+drain stays a step of both procedures and is harmless. Decisions 3 and 4 are
+unchanged: the call still waits `max_age` by default and the record still
+carries `:drained_at`. `shred/3` and `Encryptor.Ecto.KeyStore.Shred` carry the
+corrected prose, and the threat model's shred section says the same.
+
+Amendment C does not speak to a read already past the provider's answer when
+the delete committed, and this Note claims nothing about one.
+
+Pinned by "drain: :skip returns at once, and a warm cache no longer serves the
+retired version" and "after P3 a warm cache does not serve the scope, even
+with the drain skipped" in
+`test/encryptor/ecto/key_store_shred_repo_test.exs`. Amendment C was read in
+`encryptor`'s `docs/adr/0001-vault-layer.md` at the tag `v0.8.0` (`84f6676`).
+This Note decides nothing; no line above it is edited.
