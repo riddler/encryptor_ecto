@@ -855,12 +855,15 @@ defmodule Encryptor.Ecto.MigratorRunTest do
     end
 
     # Sabotage: had `against_proof/4` believe a claimed identity without
-    # proving it - the re-keyed rows below were counted already migrated and
-    # the pass left them exactly as it found them, which is ADR-0002's R3
-    # rewrite reporting success over a column it never touched.
+    # proving it - the re-keyed row below was counted already migrated and the
+    # pass left it exactly as it found it, which is ADR-0002's R3 rewrite
+    # reporting success over a column it never touched. The plan's `from:` is
+    # one of this package's own types, so the re-keyed row is readable and a
+    # pass that proves the claim rewrites it; a foreign `from:` would load
+    # every row one by one and never reach `against_proof/4` at all.
     test "a row written under another wrapping key is not this field's target" do
-      proven = insert_card(pan: legacy(@pan))
-      assert {:ok, _run} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      proven = insert_card(pan: pan_declared(@pan))
+      proven_bytes = raw(:cards, proven, :pan)
 
       # Same declared context, same scope reference, same algorithm suite,
       # different wrapping key: every pair the header comparison can check
@@ -868,13 +871,16 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       bytes = rekeyed(@pan)
       rekeyed = insert_card(pan: bytes)
 
-      assert {:error, report} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Rekey, mode: :write)
 
       assert report.counts.already_target == 1
-      assert report.counts.undecryptable == 1
-      assert [%{id: ^rekeyed, field: :pan}] = report.failures
-      assert raw(:cards, rekeyed, :pan) == bytes
-      refute raw(:cards, proven, :pan) == legacy(@pan)
+      assert report.counts.migratable == 1
+      assert report.failures == []
+      assert raw(:cards, proven, :pan) == proven_bytes
+      refute raw(:cards, rekeyed, :pan) == bytes
+
+      Scope.put(@merchant)
+      assert %TestSchemas.Card{pan: @pan} = TestRepo.get(TestSchemas.Card, rekeyed)
     end
 
     # Sabotage: dropped the algorithm-suite comparison from
