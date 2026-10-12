@@ -1541,7 +1541,7 @@ Provenance: bead ece-6k1o.
 
 ## Amendment (2026-10-12): a resume continues only the run that recorded the checkpoint, and the completion mark counts only in write mode
 
-Status: proposed
+Status: accepted (2026-10-12)
 
 Decision 6 says "`run/2` with `resume: true` starts after the recorded
 cursor." This amendment narrows that sentence and nothing else: which run
@@ -1638,3 +1638,57 @@ Decided by the conductor under a standing consent, 2026-10-11: all six
 follow-ups of the bead, this amendment at proposed riding the code.
 
 Provenance: bead ece-nd19.
+
+## Note (2026-10-12): the amendment of 2026-10-12 on the resume is accepted
+
+The Status line of the amendment above, "a resume continues only the run
+that recorded the checkpoint, and the completion mark counts only in write
+mode", now reads `accepted (2026-10-12)`. The record's own Status line and
+its index row, `accepted (2026-08-27, with amendments)`, do not change. The
+amendment's closing "no status word above flips" was true of it and stays
+true: the status word that flips is the amendment's own, and it flips here.
+Its line "this amendment at proposed riding the code" says how it merged,
+with its code half in pull request 163; it stays as written, and this Note
+records the flip.
+
+Its code shipped in `encryptor_ecto` 0.9.1, published from CI on 2026-10-12;
+its changelog's `[0.9.1]` section carries the two `Fixed` entries the code
+half names (a dry run resuming a completed write scans from the beginning;
+`counts` is read as a map whatever the adapter returns), and the `[0.9.0]`
+section carries rules 1 and 2. Each claim was re-verified at the commit
+tagged `v0.9.1` (`01c943a`):
+
+- Rule 1. `Encryptor.Ecto.Migrator.Checkpoint.record/6` puts the run, built
+  by `run/3` from the two scope filters (each sorted, without repeats) and
+  the writing key's name, into `counts` under `"run"`.
+  `Encryptor.Ecto.Migrator.Pass.resume_cursor/2` raises an `ArgumentError`
+  naming each difference for a row recorded by another run, and
+  `Encryptor.Ecto.Migrator`'s private `report/2` asks every pass for its
+  resume point before the first pass runs.
+- Rule 2. `Encryptor.Ecto.Migrator.Pass`'s private `complete/3` records
+  `"complete" => true` only in `mode: :write` with a checkpoint table, and
+  `Encryptor.Ecto.Migrator.Pass.run/3` given `:complete` visits no row and
+  puts `:complete` as the field's cursor. Under `on_error: :continue` a
+  failed row leaves the batch's status `:ok`, so the pass reaches its end
+  and is marked complete.
+- Rule 3. `Encryptor.Ecto.Migrator.Pass`'s private `completed/1` answers
+  `:complete` in `mode: :write` and `nil` otherwise, so a dry run resuming a
+  completed pass scans from the beginning. `verify/2` accepts only
+  `:sample` and `:prefix` and fixes `resume: false` and `checkpoint: :none`.
+- Rule 4. `Encryptor.Ecto.Migrator.Checkpoint.fetch/4` selects `counts`
+  through `type(c.counts, :map)`, reads a row with no `"run"` as `nil`, and
+  reads an unparseable `last_id` as `nil`.
+- Unchanged surfaces. The generated checkpoint table keeps its columns and
+  its unique index over `[:plan, :schema, :field, :prefix]`
+  (`Mix.Tasks.Encryptor.Ecto.Gen.Migration`), and `checkpoint: :none` with
+  `resume: true` is still an `ArgumentError`.
+- The tests the amendment names are present under those names in the
+  migrator run suite and the checkpoint suite.
+
+The commits after pull request 163 that touch the amendment's cited files
+change none of these: two change only tests in the run suite, and in
+`Encryptor.Ecto.Migrator` the third changes only a comment on how the
+migrator recognises its own field types.
+
+Provenance: the flip, decided by the conductor under a standing consent,
+2026-10-12.
