@@ -8,7 +8,8 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
   checkpoint table, and `run/2` with `resume: true` starts after the recorded
   cursor. Decision 5 is what makes that merely a performance record: the pass
   probes every row before rewriting it, so losing a checkpoint costs a
-  re-scan and never correctness.
+  re-scan and never correctness. The record's Amendment on the resume, and
+  the sections below, narrow which run a cursor resumes.
 
   ## The key carries the prefix
 
@@ -50,10 +51,13 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
   re-scans, which decision 5 makes correct.
 
   A pass that reaches the end of its rows in `:write` mode records
-  `"complete" => true` beside the run. A resume of that run is then a no-op
-  that says so (`:complete`), rather than a pass that starts after the last
-  row and quietly visits only what was inserted since. Starting the run again
-  from the beginning is `resume: false`, which is always legal.
+  `"complete" => true` beside the run. A `:write` resume of that run is then
+  a no-op that says so (`:complete`), rather than a pass that starts after the
+  last row and quietly visits only what was inserted since. Starting the run
+  again from the beginning is `resume: false`, which is always legal. The
+  mark counts only in `:write` mode: a dry run resuming a completed pass scans
+  from the beginning (`Encryptor.Ecto.Migrator.Pass.resume_cursor/2`), because
+  a rehearsal answered as a no-op reports every count at zero.
 
   ## The table is the host's, and this package will not create it
 
@@ -93,7 +97,7 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
   would let a later write-mode run resume past rows it never wrote - a silent
   skip produced by the rehearsal, which is the one thing a rehearsal must not
   do. Reading a checkpoint in a dry run is fine and is what makes the
-  rehearsal resemble the run.
+  rehearsal resemble the run - its cursor, though not its completion mark.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -186,6 +190,11 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
   completion mark says, because neither describes the rows this run visits.
   Otherwise `:complete` when the recorded pass reached the end of its rows,
   and `{:cursor, cursor}` when it did not.
+
+  `counts` is read as a map whatever the adapter hands back for the column:
+  the source is schemaless here, so without the type an adapter that returns
+  JSON as text would have every row read as one with no recorded run - a
+  silent re-scan, and another run's checkpoint not refused.
   """
   @spec fetch(module(), String.t(), key(), Keyset.key()) :: found()
   def fetch(repo, table, key, keyset_key) do
@@ -194,7 +203,7 @@ defmodule Encryptor.Ecto.Migrator.Checkpoint do
         where:
           c.plan == ^module_text(key.plan) and c.schema == ^module_text(key.schema) and
             c.field == ^Atom.to_string(key.field) and c.prefix == ^prefix_text(key.prefix),
-        select: {c.last_id, c.counts},
+        select: {c.last_id, type(c.counts, :map)},
         limit: 1
       )
 

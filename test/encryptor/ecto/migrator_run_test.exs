@@ -394,6 +394,31 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert again.counts.migratable == 1
     end
 
+    # A dry run resuming a completed write is how a rotation would be checked,
+    # and a no-op there reports every count at zero over rows it never read.
+    #
+    # Sabotage: made `completed/1` answer `:complete` in every mode - the dry
+    # run carried `:complete` as its cursor and counted nothing, the late row
+    # included.
+    test "a dry run resuming a completed write scans from the beginning" do
+      first = insert_card(pan: legacy(@pan))
+
+      assert {:ok, _write} = Migrator.run(TestEnginePlans.Cards, mode: :write)
+      assert [%{counts: %{"complete" => true}}] = checkpoints()
+
+      late = insert_card(pan: legacy(@pan))
+      before = checkpoints()
+
+      assert {:ok, report} = Migrator.run(TestEnginePlans.Cards, mode: :dry_run, resume: true)
+
+      assert report.cursors == %{{TestSchemas.Card, :pan, nil} => late}
+      assert report.counts.already_target == 1
+      assert report.counts.migratable == 1
+      assert raw(:cards, late, :pan) == legacy(@pan)
+      assert raw(:cards, first, :pan) != legacy(@pan)
+      assert checkpoints() == before
+    end
+
     # A table whose rows are an exact multiple of the batch size ends on an
     # empty read rather than a short batch, which is the other place a pass
     # finds the end of its rows.

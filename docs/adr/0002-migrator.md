@@ -1538,3 +1538,103 @@ This Note decides nothing: no decision, no amendment's rule and no status
 word above changes.
 
 Provenance: bead ece-6k1o.
+
+## Amendment (2026-10-12): a resume continues only the run that recorded the checkpoint, and the completion mark counts only in write mode
+
+Status: proposed
+
+Decision 6 says "`run/2` with `resume: true` starts after the recorded
+cursor." This amendment narrows that sentence and nothing else: which run
+a cursor may be resumed by, what a resume of a pass that already reached
+the end of its rows does, and which checkpoint rows a resume reads as no
+checkpoint at all. Keyset batching, the checkpoint table's columns and its
+unique index over `{plan, schema, field, prefix}`, decision 9's refusal to
+issue DDL, and `resume: false` starting from the beginning are unchanged.
+The decision text above is unchanged.
+
+### Why the sentence needed narrowing
+
+A cursor says how far one run got through the rows **that run visits**,
+and which rows a run visits depends on more than its field and prefix: the
+`only_scopes:` and `except_scopes:` filters choose the scopes, and the
+rotation amendment's `writing_key:` decides which rows count as already
+done. A cursor recorded by a pass over one scope says nothing about another
+scope's rows below it, so a resume of that other scope that started after
+it would skip them. Decision 5 does not cover that: probe-first makes a
+re-visited row safe, and these are rows never visited.
+
+### The rules
+
+**1. A resume continues only the run that recorded the checkpoint.** The
+checkpoint row stays one row per field per prefix, and the run - the two
+scope filters, each given filter as a sorted list without repeats, and
+the writing key's name - is recorded in the row's `counts` map under
+`"run"`
+(`Encryptor.Ecto.Migrator.Checkpoint.record/6` at `8b5b955`). A resume
+whose run differs is refused with an `ArgumentError` naming each difference
+(`Encryptor.Ecto.Migrator.Pass.resume_cursor/2` at `8b5b955`), before any
+row of any field is visited (`Encryptor.Ecto.Migrator`'s private
+`report/2` at `8b5b955`).
+
+**2. A completed write is a no-op to resume.** A pass that reaches the end
+of its rows in `mode: :write` records `"complete" => true` beside the run
+(`Encryptor.Ecto.Migrator.Pass`'s private `complete/3` at `8b5b955`), and a
+`mode: :write` resume of that run visits no row and reports `:complete` as
+that field's cursor (`Encryptor.Ecto.Migrator.Pass.run/3` at `8b5b955`),
+rather than starting after the last row and visiting only rows inserted
+since. Under `on_error: :continue` the pass reaches the end past the rows it
+failed, so it is marked complete with them in its failures; the report
+names them, and a run without `resume: true` visits them again.
+
+**3. The completion mark counts only in `mode: :write`.** A `mode:
+:dry_run` resume of a completed pass scans the field from the beginning
+(`Encryptor.Ecto.Migrator.Pass`'s private `completed/1`, cited by anchor
+alone: it lands with this amendment). A rotation is verified by a dry run
+that reports an empty migratable count (the rotation amendment above, "A
+rotation is verified by its own dry run, not by `verify/2`"), and a dry run
+answered by the mark would report that count over rows it never read.
+`verify/2` takes no `resume:` option, so a verification never reads a
+checkpoint (`Encryptor.Ecto.Migrator.verify/2` at `8b5b955`).
+
+**4. A row that records no run is no checkpoint.** A checkpoint row written
+before the run was recorded, like one whose `last_id` cannot be parsed back
+at the key's type, is read as absent, and the pass re-scans, which decision
+5 makes correct (`Encryptor.Ecto.Migrator.Checkpoint.fetch/4` at
+`8b5b955`). The `counts` column is read as a map whatever the adapter
+returns for it (`Encryptor.Ecto.Migrator.Checkpoint.fetch/4`, cited by
+anchor alone: it lands with this amendment), so an adapter that returns
+JSON as text does not make every row read as one that records no run.
+
+What a `resume: true` call does, by what the field's checkpoint row holds
+and the mode (`checkpoint: :none` with `resume: true` stays an
+`ArgumentError`, and `verify/2` never resumes):
+
+| The field's checkpoint row | `mode: :write` | `mode: :dry_run` |
+|---|---|---|
+| none; or no recorded run; or a `last_id` that cannot be parsed | scans from the beginning | scans from the beginning |
+| recorded by another run | refused, before any row is visited | refused, before any row is visited |
+| this run's, not complete | starts after the recorded cursor | starts after the recorded cursor |
+| this run's, complete | visits no row; the cursor reads `:complete` | scans from the beginning |
+
+### The code half
+
+Rules 1, 2 and the first sentence of rule 4 are on `main` at `8b5b955`;
+rule 3 and the map read in rule 4 land with this amendment, recorded as a
+`Fixed` changelog fragment because a host could have noticed each: a dry
+run after a completed write answered with every count at zero, and on an
+adapter that returns JSON as text another run's checkpoint was re-scanned
+rather than refused. The tests that pin the rules are in the migrator run
+suite ("a resume under other scope filters is refused before a row is
+visited", "a resume of a completed pass is a no-op that says so", "a
+checkpoint that records no run is re-scanned rather than resumed", "a dry
+run resuming a completed write scans from the beginning") and the
+checkpoint suite ("the recorded run and the completion mark are still
+read").
+
+Nothing in the decision text above changes, no other amendment changes,
+and no status word above flips.
+
+Decided by the conductor under a standing consent, 2026-10-11: all six
+follow-ups of the bead, this amendment at proposed riding the code.
+
+Provenance: bead ece-nd19.

@@ -73,7 +73,7 @@ defmodule Encryptor.Ecto.Migrator do
   |---|---|---|
   | `:mode` | **required** | `:dry_run` or `:write` |
   | `:batch_size` | `500` | Rows per transaction |
-  | `:resume` | `false` | Start after the cursor this run recorded |
+  | `:resume` | `false` | Continue the checkpoint this same run recorded (below) |
   | `:prefix` | `nil` | The schema prefix to visit; the repo's default when absent |
   | `:checkpoint` | `:table` | `:none` runs with no checkpoint at all |
   | `:checkpoint_table` | `"encryptor_ecto_migration_checkpoints"` | |
@@ -90,6 +90,12 @@ defmodule Encryptor.Ecto.Migrator do
   its own list. No mode enumerates prefixes and no database catalog is read to
   find them.
 
+  `on_error: :continue` carries a pass past the rows it fails, so the pass
+  still reaches the end of its rows and is marked complete with those rows in
+  its failures: a `:write` resume of it is then a no-op that visits none of
+  them again. The report names them; re-visit them with a run without
+  `resume: true`.
+
   `checkpoint: :none` with `resume: true` is an `ArgumentError`: resuming from
   a checkpoint that was never written is a request with no meaning.
 
@@ -99,9 +105,11 @@ defmodule Encryptor.Ecto.Migrator do
   naming the difference, raised before any row is visited: the recorded
   cursor says how far *that* run got through the rows *it* visits, and
   starting after it would skip rows this run has never seen. A pass that
-  reached the end of its rows is marked complete, and a resume of it is a
-  no-op whose report carries `:complete` as that field's cursor. Either way,
-  `resume: false` starts from the beginning, which probe-first makes safe.
+  reached the end of its rows is marked complete, and a `mode: :write` resume
+  of it is a no-op whose report carries `:complete` as that field's cursor; a
+  `mode: :dry_run` resume of it scans from the beginning, so that a rehearsal
+  is never answered by a mark it did not make. Either way, `resume: false`
+  starts from the beginning, which probe-first makes safe.
 
   ## A rotation is a pass with `writing_key:` set
 
@@ -147,6 +155,13 @@ defmodule Encryptor.Ecto.Migrator do
   `writing_key:`, which reports an empty migratable count over the whole
   scope. It is not verified by `verify/2`: a verification takes the load
   attempt by design, and by A12 the outgoing version loads.
+
+  A host rotating several scopes loops `run/2` over them, one scope per pass,
+  and runs each pass without `resume: true`. The checkpoint holds one row per
+  field per prefix, so each scope's pass records over the previous scope's,
+  and a resume under the next scope's `only_scopes:` is refused as another
+  run's. Resume only the scope whose pass was interrupted, before the next
+  scope's pass starts.
 
   ## Which failures are exceptions and which are reports
 

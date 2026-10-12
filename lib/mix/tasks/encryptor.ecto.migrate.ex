@@ -40,7 +40,7 @@ defmodule Mix.Tasks.Encryptor.Ecto.Migrate do
   |---|---|---|
   | `--mode dry-run\\|write` | `:mode` | **Required, no default.** `dry-run` performs every read, probe, decrypt and encrypt and discards the write |
   | `--batch-size N` | `:batch_size` | Rows per transaction; 500 by default |
-  | `--resume` / `--no-resume` | `:resume` | Start after the recorded checkpoint cursor. Off by default |
+  | `--resume` / `--no-resume` | `:resume` | Continue the checkpoint this same run recorded; a checkpoint another run's options recorded is refused (exit 2), and a `--mode write` pass that already reached the end is a no-op. Off by default |
   | `--prefix PREFIX` | `:prefix` | The one schema prefix to visit; the repo's default when absent. No mode enumerates prefixes - a host with several loops the command over its own list |
   | `--no-checkpoint` | `:checkpoint` | `:none`, the documented degraded mode for a host that will not add the checkpoint table: every run is a full scan, which probe-first idempotence makes correct rather than merely tolerable |
   | `--only Schema:field,Schema:field` | `:only` | Narrow the plan to these fields, in the plan's own order |

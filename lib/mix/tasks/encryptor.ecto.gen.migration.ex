@@ -7,9 +7,10 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.Migration do
       mix encryptor.ecto.gen.migration [--table NAME] [--migrations-path PATH]
 
   The pass records `{plan, schema, field, prefix, last_id, counts}` after each
-  batch, inside the batch's own transaction, and `--resume` starts after the
-  recorded cursor (ADR-0002 decision 6). The table that lives in is the
-  **host's**, and this package will not create it.
+  batch, inside the batch's own transaction, and `--resume` continues the run
+  that recorded it (ADR-0002 decision 6, and that record's Amendment on the
+  resume; `Encryptor.Ecto.Migrator.Checkpoint`). The table that lives in is
+  the **host's**, and this package will not create it.
 
   ## This task issues no DDL
 
