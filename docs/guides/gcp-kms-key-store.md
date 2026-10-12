@@ -244,11 +244,12 @@ leaves the scope alone. Call `shred/3` promptly after the destroy all the
 same: until the row is deleted, a restore inside the window above brings the
 values back.
 
-A shred is also not immediate: `Encryptor.Vault`'s documentation of
-`suspend/2` notes that, unlike a suspension, a shred's runbook has to drain
-the vault's materials cache, and that drain is what `shred/3` waits for by
-default. The answers above are what a vault configured with `cache: false`
-sees on the very next call.
+A shred's runbook also drains the vault's materials cache, and that drain is
+what `shred/3` waits for by default. The drain is harmless and is not what
+makes the answers above hold: from `encryptor` 0.8.0 (its ADR-0001
+Amendment C) a warm cache does not serve a deleted version, so a vault sees
+the answers above on the very next call whether or not it caches, and with
+or without `drain: :skip`. The drain drops the entries' residency in memory.
 
 ## When Cloud KMS refuses, or does not answer
 

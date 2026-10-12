@@ -18,11 +18,12 @@ defmodule Encryptor.Ecto.KeyStore.Shred do
   | `:remaining` | the versions still live for the scope after the delete, ascending. `[]` after P3, which is what P3's re-check found; after P4, the versions the shred read under its lock, less the one it deleted |
   | `:table`, `:prefix` | where the rows were deleted from, as the key store is configured |
   | `:deleted_at` | when the delete committed, UTC |
-  | `:drained_at` | when every vault serving the scope has stopped decrypting under a deleted version from a cache entry made before the delete committed: `:deleted_at` plus the vault's cache `max_age`, or `:deleted_at` for a vault with `cache: false`. Not a hard bound: `Encryptor.Ecto.KeyStore.shred/3` says which entry can outlive it |
+  | `:drained_at` | when every vault serving the scope has dropped the cache entries made before the delete committed: `:deleted_at` plus the vault's cache `max_age`, or `:deleted_at` for a vault with `cache: false`. A residency bound, not a serving bound: from `encryptor` 0.8.0 a deleted version is not served from a warm entry, and `Encryptor.Ecto.KeyStore.shred/3` says why |
   | `:drain` | `:waited` when the call returned at or after `:drained_at`, `:skipped` when the caller asked it not to wait |
 
   `:drained_at` is the moment enc-ADR-0005's P3 step 3 and P4 step 2 are
-  complete for a host that waits rather than restarts, and it holds for every
+  complete for a host that waits rather than restarts (the drain is harmless,
+  and a deleted version is refused at once without it), and it holds for every
   node only when every node runs the vault with the same `max_age`, which is
   what one vault module's configuration gives. A host that restarts its vaults
   instead completes the drain at the restart, and a record with
