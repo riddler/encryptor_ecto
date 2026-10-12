@@ -75,6 +75,39 @@ defmodule Encryptor.Ecto.Migrator.CheckpointTest do
     end
   end
 
+  describe "fetch/4 on a counts column the adapter reads back as text" do
+    # A host's adapter may hand a JSON column back as text. This table stands
+    # in for it with a `text` column the sandbox's transaction drops again.
+    #
+    # Sabotage: selected `c.counts` without `type(c.counts, :map)` - the
+    # counts came back as a string, the row read as one with no recorded run,
+    # and both answers were `nil`: a silent re-scan, and no refusal.
+    test "the recorded run and the completion mark are still read" do
+      TestRepo.query!("""
+      CREATE TABLE checkpoints_with_text_counts (
+        plan text, schema text, field text, prefix text, last_id text, counts text
+      )
+      """)
+
+      insert_text_row("12", ~s({"run": #{run_json(nil)}, "complete": false}))
+
+      assert Checkpoint.fetch(TestRepo, "checkpoints_with_text_counts", key(nil), @key) ==
+               {:cursor, 12}
+
+      TestRepo.query!("DELETE FROM checkpoints_with_text_counts")
+      insert_text_row("12", ~s({"run": #{run_json(nil)}, "complete": true}))
+
+      assert Checkpoint.fetch(TestRepo, "checkpoints_with_text_counts", key(nil), @key) ==
+               :complete
+
+      TestRepo.query!("DELETE FROM checkpoints_with_text_counts")
+      insert_text_row("12", ~s({"run": #{run_json(["scope_a"])}, "complete": false}))
+
+      assert {:other_run, %{"only_scopes" => ["scope_a"]}} =
+               Checkpoint.fetch(TestRepo, "checkpoints_with_text_counts", key(nil), @key)
+    end
+  end
+
   describe "preflight/2" do
     # Sabotage: made `preflight/2` answer `:ok` unconditionally - a missing
     # table was found on the first batch's insert instead of before the first
@@ -98,5 +131,16 @@ defmodule Encryptor.Ecto.Migrator.CheckpointTest do
 
   defp key(prefix) do
     %{plan: Some.Plan, schema: TestSchemas.Card, field: :pan, prefix: prefix}
+  end
+
+  defp insert_text_row(last_id, counts) do
+    TestRepo.query!(
+      "INSERT INTO checkpoints_with_text_counts VALUES ($1, $2, $3, $4, $5, $6)",
+      ["Some.Plan", inspect(TestSchemas.Card), "pan", "", last_id, counts]
+    )
+  end
+
+  defp run_json(only_scopes) do
+    Jason.encode!(%{"only_scopes" => only_scopes, "except_scopes" => [], "writing_key" => nil})
   end
 end

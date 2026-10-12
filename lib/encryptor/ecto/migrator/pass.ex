@@ -448,6 +448,12 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   (see `Encryptor.Ecto.Migrator.Checkpoint`, "The key carries the run").
   `Encryptor.Ecto.Migrator.run/2` asks every pass before it runs the first, so
   the refusal comes before any row is visited.
+
+  The completion mark counts only in `:write` mode. A completed write has
+  rewritten every row it visited, so a dry run that took the mark as a no-op
+  would report every count at zero - which reads as a rotation verified by its
+  own dry run (ADR-0002's rotation amendment) when nothing was visited. Outside
+  `:write` mode a completed pass is scanned from the beginning instead.
   """
   @spec resume_cursor(t(), boolean()) :: term() | nil | :complete
   def resume_cursor(_pass, false), do: nil
@@ -457,10 +463,16 @@ defmodule Encryptor.Ecto.Migrator.Pass do
     case Checkpoint.fetch(pass.repo, pass.checkpoint_table, checkpoint_key(pass), pass.key) do
       nil -> nil
       {:cursor, cursor} -> cursor
-      :complete -> :complete
+      :complete -> completed(pass)
       {:other_run, recorded} -> raise ArgumentError, other_run_message(pass, recorded)
     end
   end
+
+  # A dry run resuming a completed write starts from the beginning: the mark
+  # says the write visited every row, not that a rehearsal has nothing to read.
+  @spec completed(t()) :: :complete | nil
+  defp completed(%__MODULE__{mode: :write}), do: :complete
+  defp completed(_pass), do: nil
 
   @doc """
   Which checkpoint row this pass owns (ADR-0002 proposed amendment 6), and the
