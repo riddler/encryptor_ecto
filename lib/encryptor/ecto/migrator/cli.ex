@@ -502,7 +502,7 @@ defmodule Encryptor.Ecto.Migrator.CLI do
     table = Keyword.get(parsed, :table, spec[:default_table].())
     path = Keyword.get(parsed, :migrations_path, @gen_default_path)
 
-    if table =~ ~r/^[a-z_][a-z0-9_]*$/ do
+    if table =~ ~r/\A[a-z_][a-z0-9_]*\z/ do
       {:ok, table, path}
     else
       {:error,

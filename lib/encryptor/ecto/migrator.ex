@@ -763,15 +763,14 @@ defmodule Encryptor.Ecto.Migrator do
   # does not own.
   #
   # Recognised by the frozen params rather than by the
-  # `__encryptor_ecto__/1` marker `Encryptor.Ecto.Declarations` uses, and the
-  # reason is worth stating: today that marker is defined by
-  # `Encryptor.Ecto.Binary`'s `__using__` alone, so a field declared through
-  # `Encryptor.Ecto.String` or `Encryptor.Ecto.Map` does not carry it. Adding
-  # it there would also change which fields `Declarations.check_unique!/1`
-  # sees, which is ADR-0001's contract and not this record's to widen. The
-  # shape checked here is the whole of what `Encryptor.Ecto.Binary.init/2`
-  # freezes - six keys, `:vault` and `:legacy` among them - which an unrelated
-  # parameterized type does not carry by accident.
+  # `__encryptor_ecto__/1` marker `Encryptor.Ecto.Declarations` uses. Every
+  # field type this package ships defines that marker (the `__using__` of
+  # `Encryptor.Ecto.Binary`, `Encryptor.Ecto.Map`, `Encryptor.Ecto.Scalar` and
+  # `Encryptor.Ecto.String` each do), but it says only that a field is
+  # encrypted, not what it froze. The shape checked here is the whole of what
+  # `Encryptor.Ecto.Binary.init/2` freezes - six keys, `:vault` and `:legacy`
+  # among them - which an unrelated parameterized type does not carry by
+  # accident.
   @our_params [:vault, :scope, :context, :table, :column, :legacy]
 
   @spec ours?(term()) :: boolean()

@@ -103,7 +103,7 @@ defmodule Encryptor.Ecto.SuspensionStore do
   import Ecto.Query, only: [from: 2]
 
   @default_table "encryptor_suspensions"
-  @table_name ~r/^[a-z_][a-z0-9_]*$/
+  @table_name ~r/\A[a-z_][a-z0-9_]*\z/
   @options [:repo, :table, :prefix]
 
   @typedoc "What `init/2` resolves the options into. Constant, and no connection."

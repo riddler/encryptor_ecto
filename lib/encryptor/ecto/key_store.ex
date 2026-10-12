@@ -339,7 +339,7 @@ defmodule Encryptor.Ecto.KeyStore do
 
   @default_table "encryptor_wrapped_keys"
   @reference_subkey_bytes 32
-  @table_name ~r/^[a-z_][a-z0-9_]*$/
+  @table_name ~r/\A[a-z_][a-z0-9_]*\z/
 
   @typedoc """
   What `c:Encryptor.Provider.init/1` freezes for the life of the vault.
