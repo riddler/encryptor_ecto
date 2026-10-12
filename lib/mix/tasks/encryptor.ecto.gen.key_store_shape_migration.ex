@@ -71,9 +71,10 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreShapeMigration do
   someone else's rotation. `from:` on the `modify` is what makes the whole
   thing reversible, so `mix ecto.rollback` is available on the way back.
 
-  No index: neither column is ever a lookup key - the lookup key is
-  `tenant_ref` - and an index on a two-valued column over a table with one row
-  per tenant per version buys nothing.
+  No index: on the pre-0.8.0 tables this task applies to, neither column is
+  ever a lookup key - the lookup key on those tables is `tenant_ref` - and an
+  index on a two-valued column over a table with one row per tenant per version
+  buys nothing.
   """
 
   use Mix.Task
