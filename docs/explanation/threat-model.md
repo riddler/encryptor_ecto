@@ -190,9 +190,16 @@ What a dump taken *after* the shred, or kept from before it, still shows:
   all and do not participate in its shred
   ([ADR-0001](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0001-vault-backed-ecto-types.md)
   decision 5e; [the field that opts out](moving-off-cloak.md#crypto-shredding-and-the-field-that-opts-out)).
-- **A suspension row**, if the scope was suspended before it was shredded and
-  never reinstated: the selector, in the clear. Nothing in the shred deletes
-  it, because the shred's delete is scoped to the key store's table.
+- **A suspension row**, only where the shred could not delete it. A
+  whole-scope shred deletes the scope's suspension row in the transaction
+  that deletes its keys when the vault's suspension store is
+  `Encryptor.Ecto.SuspensionStore` on the key store's own repo, so a dump
+  taken after it holds neither; a dump kept from before the shred still holds
+  the row, with the selector in the clear. A suspension store on another
+  repo, or a store module other than this package's, keeps the scope's entry
+  until the host reinstates the scope after the shred, and a dump of such a
+  store shows the selector until then. A single-version shred leaves the
+  scope alive and its suspension in place.
 - **The scope reference** wherever it still appears: in every surviving
   message header and, for a scope shredded one version at a time, in its
   remaining rows. It identifies the scope to no one without the reference
@@ -224,7 +231,10 @@ warm cache no longer serves the retired version" and "after P3 a warm cache does
 not serve the scope, even with the drain skipped"
 ([`test/encryptor/ecto/key_store_shred_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/key_store_shred_repo_test.exs));
 the late-version re-check in
-[`test/encryptor/ecto/key_store_shred_recheck_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/key_store_shred_recheck_repo_test.exs).
+[`test/encryptor/ecto/key_store_shred_recheck_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/key_store_shred_recheck_repo_test.exs);
+"deletes the scope's suspension row and no other" and "a failed suspension
+delete rolls back the key delete with it"
+([`test/encryptor/ecto/key_store_shred_suspension_repo_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/key_store_shred_suspension_repo_test.exs)).
 No test shreds a scope and then computes a `derive: :per_scope` index value
 against the retained column: the "noise" claim rests on the derivation running
 through the vault under the scope's key material, which the tests above show
