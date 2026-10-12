@@ -6,9 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Entries for unreleased work are not written here directly. Each issue drops a
-fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.9.0/changelog.d/README.md); the fragments are assembled
+fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.9.1/changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
+
+## [0.9.1] - 2026-10-12
+
+A patch release: the vault pin moves to `encryptor` 0.8.1, a patch release
+of the vault, and the migrator, the key store's whole-scope shred and the
+table-name check are fixed as the Fixed entries say. No module, function or
+option is added or removed, and no stored format changes.
+
+### Changed
+
+- Requires `encryptor` 0.8.1: the pin moves from `encryptor == 0.8.0` to `encryptor == 0.8.1`, so a host resolving this package gets that release's Fixed changes (`Encryptor.Vault.derive/3` returns its configuration errors instead of raising; `Encryptor.Envelope.unwrap/2` and `rewrap/2` refuse a wrapped-key row whose `name` or `bits` is not what its scope and version derive, with a new refusal detail on `unwrap/2`; the Cloud KMS provider refuses a key-store row naming another scope and answers a store's descriptor refusal on `provision` as the read path does; `{:key_name_in_use, selector}` from a read callback answers as off-contract; a vault's suspended set is written only through the vault). Its changelog says what each refusal answers.
+
+### Fixed
+
+- A table name with a trailing newline, such as `"wrapped_keys\n"`, is now refused at configuration like any other name that is not an unquoted lowercase identifier: `Encryptor.Ecto.KeyStore` and `Encryptor.Ecto.SuspensionStore` answer `{:error, {:invalid_config, :table, :invalid_name}}`, and the `--table` option of the migration generators exits with their usual "unquoted table name" refusal. The grammar previously let one trailing newline through.
+- A `mode: :dry_run` pass with `resume: true` (`--mode dry-run --resume`) after a completed `mode: :write` pass scans the field from the beginning and reports its counts, instead of answering as a no-op with every count at zero, migratable included. The completion mark counts only in `mode: :write`, where a resume of a completed pass is still a no-op.
+- `Encryptor.Ecto.Migrator.run/2` reads the checkpoint row's `counts` as a map whatever the adapter returns for the column, so an adapter that returns JSON as text no longer reads every checkpoint as having no recorded run: a resume under different options is refused, and a `mode: :write` resume of a completed pass is a no-op, as they already were on an adapter that returns a map.
+- The `mix encryptor.ecto.migrate` failure line prints a host reason that is an improper list, such as `[:a | "x"]`, instead of crashing; `Encryptor.Ecto.Error.redact/1` renders the tail after a bar. The reduction applied to a host reason keeps a list's length, so a charlist payload shows as many `:redacted` elements as it has characters, as `redact/1` shows a binary's byte count.
+- `Encryptor.Ecto.KeyStore.shred/3` with `version: :all` deletes the scope's suspension row, in the same transaction as its keys, when the vault's suspension store is `Encryptor.Ecto.SuspensionStore` on the key store's repo, so the selector no longer outlives the shred in the suspension table; after the vault's next suspension poll a read of the shredded scope answers `{:unknown_key, selector}`. A suspension store on another repo, or another store module, is left alone, and the host reinstates the scope after the shred.
 
 ## [0.9.0] - 2026-10-07
 
