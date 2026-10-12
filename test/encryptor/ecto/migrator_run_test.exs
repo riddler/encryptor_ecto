@@ -1089,6 +1089,34 @@ defmodule Encryptor.Ecto.MigratorRunTest do
       assert raw(:cards, second, :pan) == tampered
       assert raw(:cards, first, :pan) == first_bytes
     end
+
+    # Sabotage: dropped the wrapping keys from the identity
+    # `against_declaration/2` hands to the proof, so the identity was the
+    # suite alone - the second row, another scope's, whose body no longer
+    # opens, claimed the identity the first row's load had proven and was
+    # counted already migrated instead of failing its own load.
+    test "rows under different scopes never share a proof" do
+      first = insert_card(pan: pinned_for(@merchant, @pan))
+      second = insert_card(pan: pinned_for(@other_merchant, @pan), merchant_id: @other_merchant)
+
+      tampered = tamper(raw(:cards, second, :pan))
+      :ok = write_raw(second, tampered)
+
+      # Same suite, same stored pairs, same claim: only the wrapping key,
+      # which the scope fixes, separates the two headers.
+      assert {:ok, first_info} = Message.describe(raw(:cards, first, :pan))
+      assert {:ok, second_info} = Message.describe(tampered)
+      assert first_info.algorithm_suite_id == second_info.algorithm_suite_id
+      assert first_info.encryption_context == second_info.encryption_context
+      refute first_info.encrypted_data_keys == second_info.encrypted_data_keys
+
+      assert {:error, report} =
+               Migrator.run(TestEnginePlans.InPlaceEdit, mode: :write, on_error: :continue)
+
+      assert report.counts.already_target == 1
+      assert [%{id: ^second}] = report.failures
+      assert raw(:cards, second, :pan) == tampered
+    end
   end
 
   describe "a foreign `from:` that writes this format with another required value" do
@@ -1586,6 +1614,14 @@ defmodule Encryptor.Ecto.MigratorRunTest do
   # probe has to read further than "it parses".
   defp pinned(plaintext) do
     Scope.put(@merchant)
+    params = Pinned.init(schema: TestSchemas.Card, field: :pan)
+    {:ok, bytes} = Pinned.dump(plaintext, &Ecto.Type.dump/2, params)
+    bytes
+  end
+
+  # The `pinned/1` bytes for a named scope.
+  defp pinned_for(scope, plaintext) do
+    Scope.put(scope)
     params = Pinned.init(schema: TestSchemas.Card, field: :pan)
     {:ok, bytes} = Pinned.dump(plaintext, &Ecto.Type.dump/2, params)
     bytes
