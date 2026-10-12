@@ -48,6 +48,17 @@ defmodule Encryptor.Ecto.Integer do
   that reaches `dump/3` without passing `cast/2` - through `insert_all/3`, say
   - raises `ArgumentError` naming the shape it was given and never the value.
 
+  ## The length shows the magnitude
+
+  The ciphertext is as long as the decimal text it encrypts, plus a fixed
+  overhead, so a reader of the column learns how many digits each value has
+  and therefore its order of magnitude: every extra character, a minus sign
+  included, is one extra byte. In the test vault a one-digit and a ten-digit
+  value differ by nine bytes. Encryption hides the digits and not their
+  count. This type does not pad; a host that cannot show the count to a
+  reader of the database stores a fixed-width text form through
+  `Encryptor.Ecto.String`.
+
   ## Everything else
 
   `nil` is `NULL` and is not encrypted; `0` is a value like any other and is

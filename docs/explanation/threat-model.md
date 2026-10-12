@@ -52,7 +52,12 @@ decision 9). Each is also something a database dump carries.
 
 A copy of the database, from a replica, a backup or an injection, with no key
 material. Ciphertext columns yield what encryptor's page says they yield: no
-plaintext, each value's length and its context. The rest, table by table:
+plaintext, each value's length and its context. For `Encryptor.Ecto.Integer`
+and `Encryptor.Ecto.Float` the length is the decimal text's length plus a fixed
+overhead, so a reader learns each value's digit count and with it its order of
+magnitude: one extra digit is one extra byte. In the test vault a one-digit
+and a ten-digit integer differ by nine bytes. The date and time types write a
+form whose length varies by no more than the sign of a year. The rest, table by table:
 
 **Blind index columns** yield equality structure: which rows share a value,
 and how many distinct values there are, within each scope for a
@@ -72,17 +77,17 @@ by one.
 **Suspension rows** yield the selector of every suspended scope, as the host
 wrote it. This is the one table this package writes that stores a raw scope
 identifier for every scope it concerns (a checkpoint row stores only those a
-migration pass was filtered by, below): the suspension store has to answer selectors, and a keyed
-reference cannot be turned back into one (`Encryptor.Ecto.SuspensionStore`'s
-"The table"). A dump therefore tells its reader which scopes an operator has
-suspended.
+migration pass was filtered by, below): the suspension store has to answer
+selectors, and a keyed reference cannot be turned back into one
+(`Encryptor.Ecto.SuspensionStore`'s "The table"). A dump therefore tells its
+reader which scopes an operator has suspended.
 
 **Checkpoint rows** yield the plan, schema and field of each migration pass,
 the primary key it last committed, and its classification counts: how many
 rows were migrated, skipped, or could not be read. Beside the counts, each row
 also records the run that wrote it and whether that pass reached the end of its
-rows: the raw scope identifiers it was given in `only_scopes:` or
-`except_scopes:`, and the wrapping key name a rotation's `writing_key:` named
+rows. The run is the raw scope identifiers the pass was given in `only_scopes:`
+or `except_scopes:` and the wrapping key name a rotation's `writing_key:` named
 (a name, never key material), so a dump tells its reader which scopes were
 migrated or rotated separately and under which key name. That is a
 description of the migration, not of any value
@@ -131,6 +136,17 @@ the repository-backed scope test in
 "a different table or column derives different bytes" and "a different scope
 derives different bytes" for the index columns
 ([`test/encryptor/ecto/blind_index/derivation_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/blind_index/derivation_test.exs)).
+
+The suspension table is outside that protection: no integrity covers it.
+Its rows are plain `{vault, selector}` pairs with no tag, so a writer to the
+database can delete a row, which lifts the scope's suspension on every node at
+the vault's next poll, or insert one, which suspends a scope that was serving
+(its data stays intact and unreadable until the row is removed). The vault
+reads the table as the truth about what is suspended. Treat write access to
+that table as the authority to suspend and reinstate scopes. No test holds
+this in place; it follows from the table's shape
+([ADR-0007](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0007-suspension-store-and-shred.md)
+decision 1).
 
 ## What a dump and one scope's index key reveal
 
@@ -240,6 +256,25 @@ against the retained column: the "noise" claim rests on the derivation running
 through the vault under the scope's key material, which the tests above show
 is gone.
 
+## What an exception or its inspect output shows
+
+Every exception this package raises from a field's dump or load carries the
+declared table and column, the encryption-context key names, a reduced form of
+the vault's reason, and the resolved scope selector, raw. The selector is the
+one value the prohibition on secrets in an exception exempts
+([ADR-0001](https://github.com/riddler/encryptor_ecto/blob/main/docs/adr/0001-vault-backed-ecto-types.md)
+decision 6; `Encryptor.Ecto.Error`), and both `Exception.message/1` and
+`inspect/1` render it. A host that logs or reports these exceptions therefore
+writes its scope identifiers into the log or the error tracker, where the key
+store and the blind index columns keep only a keyed reference. Plaintext,
+ciphertext bytes and key material are not in either rendering. A host whose
+selectors are themselves sensitive filters them before the exception leaves
+the process.
+
+Pinned by: "message/1 names the declared table, column, context keys and
+scope" and "no member leaks a plaintext or key material through Inspect"
+([`test/encryptor/ecto/error_test.exs`](https://github.com/riddler/encryptor_ecto/blob/main/test/encryptor/ecto/error_test.exs)).
+
 ## The key store's columns, and what each exposes
 
 The table is the six fields of encryptor's `Encryptor.Envelope.WrappedKey`
@@ -334,7 +369,18 @@ the new ciphertext of earlier, committed batches: no plaintext, and no row
 half-written. The next run probes every row before rewriting it, so a re-run
 converges on the same end state, and the compare-and-swap means a row the
 application rewrote in the meantime is counted rather than overwritten with a
-re-encryption of stale plaintext.
+re-encryption of stale plaintext, on the condition the next paragraph states.
+
+**What the compare-and-swap compares.** It compares the target column only:
+the update applies when that column still holds the bytes the pass read
+(`Encryptor.Ecto.Migrator.Keyset.swap_query/5`, and `Encryptor.Ecto.Migrator.Pass`'s
+"The order of operations for one row"). When the source and the target
+are the same column, which is a re-encryption in place, that is the whole row's
+value, and a concurrent write is caught. When they differ, as in the backfill
+of a plaintext column into a new binary column, a write to the source column
+alone changes nothing the comparison looks at, so the pass writes a
+re-encryption of the stale source value. The guard holds in that case only if
+the application also writes the target column for the length of the pass.
 
 Pinned by: "a halted batch discards its writes and its checkpoint", "a row the
 application rewrote mid-pass is counted, not clobbered", "a second run finds
@@ -374,9 +420,13 @@ against the same service; and a host on hackney 1.x, which resolves and
 compiles this package from Hex ranges with no committed lock and runs no
 tests.
 
-**The cryptography is encryptor's.** This package performs no cryptography of
-its own: encryption, decryption, the index key derivation and the Argon2id
-slow hash are all calls into the vault. The published vectors, the
+**The cryptography is encryptor's, except one call.** Encryption, decryption,
+the index key derivation and the Argon2id slow hash are calls into the vault.
+The exception is the blind index value itself: this package computes the
+HMAC-SHA256 with `:crypto.mac/4` (`Encryptor.Ecto.BlindIndex.Value`), over an
+index key it receives from `Encryptor.Vault.derive/3`, so the key leaves the
+vault and is held in this package's process while the value is computed.
+The published vectors, the
 interoperability runs against another SDK, and the SP 800-38D construction
 tests are encryptor's, and its
 [What was tested against what](https://github.com/riddler/encryptor/blob/main/docs/explanation/threat-model.md#what-was-tested-against-what)
