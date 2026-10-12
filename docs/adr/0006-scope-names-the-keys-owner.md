@@ -655,3 +655,24 @@ read with this Note:
   flip; both now say accepted.
 
 Provenance: bead ece-2nq4.
+
+## Note (2026-10-12): the history list also names the acceptance Note's decision 8 bullet
+
+Amendment A's list "What reads as history from 0.8.0" ends with "the
+acceptance Note's decision 3 bullet, and the Note of 2026-09-29's reading of
+the generators' sentences as text about W1 and W2". It omits the acceptance
+Note's decision 8 bullet, which belongs beside the decision 3 bullet. That
+bullet says every `tenant` left in `lib/` is one of decision 3's spellings or
+text about the kept column, and that the key-store generator's moduledoc
+still describes its table as "one row per tenant per key version" around the
+`tenant_ref` column and the `{tenant_ref, version}` index. It describes
+encryptor_ecto 0.6.0 through 0.7.x. At `fcbe088` the create generator's
+moduledoc (`Mix.Tasks.Encryptor.Ecto.Gen.KeyStoreMigration`) says "one row
+per scope per key version" and spells no `tenant`, and Amendment A's A4
+states what decision 8 reads from 0.8.0.
+
+So the list reads as if it also carried that bullet: from 0.8.0 the
+acceptance Note's decision 8 bullet is history, read with Amendment A, A4.
+Nothing above is edited.
+
+Provenance: bead ece-3pjk.
