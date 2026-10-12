@@ -8,7 +8,17 @@ locals_without_parens = [
 ]
 
 [
-  inputs: ["{mix,.formatter}.exs", "{config,lib,test}/**/*.{ex,exs}"],
+  # The test inputs are listed by subdirectory so that the dependencies
+  # fetched into test/fixtures/hackney1_host/deps are never formatted. The
+  # fixture's own tracked mix.exs and lib/ are still checked.
+  inputs: [
+    "{mix,.formatter}.exs",
+    "{config,lib}/**/*.{ex,exs}",
+    "test/*.{ex,exs}",
+    "test/{encryptor,mix,support}/**/*.{ex,exs}",
+    "test/fixtures/hackney1_host/mix.exs",
+    "test/fixtures/hackney1_host/lib/**/*.{ex,exs}"
+  ],
 
   # `setup_scope "merchant_7f3"` reads as a declaration rather than a call,
   # the way `field` and `setup` do, so it keeps its parens off. The migration
