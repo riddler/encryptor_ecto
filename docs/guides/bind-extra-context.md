@@ -26,11 +26,15 @@ encryption context is and why it is authenticated rather than encrypted, read
 
 ## Step 1. Decide whether the value belongs there
 
-The context rides every message **in the clear** and is covered by the
-header's authentication tag. So a pair you add is public to anyone holding a
-ciphertext, unforgeable by anyone who does not hold the key, and permanent for
-every row written while it is declared. Those three properties decide the
-whole table:
+The context is covered by every message's header authentication tag, and a
+pair rides the message **in the clear** unless the vault lists it in its
+`:required_context`. A required pair is bound by the tag without being stored:
+a reader reproduces it (`Encryptor.Context`; a message the 1.0.x engine wrote
+stores its required pairs too). So a pair you add is public to anyone holding a
+ciphertext, stored or required alike, because a required pair is not secret
+either - whoever reads the message reproduces it. It is also unforgeable by
+anyone who does not hold the key, and permanent for every row written while it
+is declared. Those three properties decide the whole table:
 
 | Bind it | Do not bind it |
 |---|---|
