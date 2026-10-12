@@ -91,6 +91,13 @@ defmodule Encryptor.Ecto.SuspensionStoreRepoTest do
                SuspensionStore.init(SuspendedScope, repo: TestRepo, prefix: "")
     end
 
+    # Sabotage: anchored the grammar with `^` and `$`, which let one trailing
+    # newline through; `\A` and `\z` refuse it.
+    test "refuses a table name with a trailing newline" do
+      assert {:error, {:invalid_config, :table, :invalid_name}} =
+               SuspensionStore.init(SuspendedScope, repo: TestRepo, table: "vault_suspensions\n")
+    end
+
     # Sabotage: changed the default table to `"suspensions"`. The state
     # comparison went red on the table.
     test "resolves the defaults, keyed by the vault" do

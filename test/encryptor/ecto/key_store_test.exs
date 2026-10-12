@@ -84,6 +84,13 @@ defmodule Encryptor.Ecto.KeyStoreTest do
       end
     end
 
+    # Sabotage: anchored the grammar with `^` and `$`, which let one trailing
+    # newline through; `\A` and `\z` refuse it.
+    test "refuses a table name with a trailing newline" do
+      assert {:error, {:invalid_config, :table, :invalid_name}} =
+               KeyStore.init(TestKeyStore.provider_opts(table: "wrapped_keys\n"))
+    end
+
     test "refuses a table that is not a string" do
       assert {:error, {:invalid_config, :table, :invalid_name}} =
                KeyStore.init(TestKeyStore.provider_opts(table: :wrapped_keys))

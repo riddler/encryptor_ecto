@@ -107,6 +107,15 @@ defmodule Mix.Tasks.Encryptor.Ecto.Gen.MigrationTest do
     assert Path.wildcard(Path.join(path, "*.exs")) == []
   end
 
+  # Sabotage: anchored the `--table` grammar with `^` and `$`, which let one
+  # trailing newline through into the generated source.
+  test "refuses a table name with a trailing newline", %{path: path} do
+    assert {2, output} = generate(["--migrations-path", path, "--table", "cards\n"])
+
+    assert output =~ "--table expects an unquoted table name"
+    assert Path.wildcard(Path.join(path, "*.exs")) == []
+  end
+
   test "takes no positional arguments, and says which verbs do", %{path: path} do
     assert {2, output} = generate(["MyApp.Plan", "--migrations-path", path])
 
