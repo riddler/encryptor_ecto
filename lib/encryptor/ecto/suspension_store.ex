@@ -73,6 +73,9 @@ defmodule Encryptor.Ecto.SuspensionStore do
   row names a scope an operator suspended, in the host's own database, and
   enc-ADR-0010 decision 8 sends an operator who needs to know which scope was
   suspended to exactly this table (ADR-0007 decision 1).
+  `Encryptor.Ecto.KeyStore.shred/3` deletes a scope's row when it shreds the
+  whole scope through a vault whose key store shares this store's repo, so
+  the selector does not outlive the scope's keys there.
 
   ## What it answers
 

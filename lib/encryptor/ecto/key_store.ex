@@ -329,6 +329,7 @@ defmodule Encryptor.Ecto.KeyStore do
   import Ecto.Query, only: [from: 2]
 
   alias Encryptor.Ecto.KeyStore.Shred
+  alias Encryptor.Ecto.SuspensionStore
   alias Encryptor.Envelope
   alias Encryptor.Envelope.WrappedKey
   alias Encryptor.Key.Aes
@@ -562,6 +563,24 @@ defmodule Encryptor.Ecto.KeyStore do
   the one version it names, so a version provisioned during it is left alone
   and is not listed in `:remaining`.
 
+  ## The scope's suspension row
+
+  A scope suspended before its whole-scope shred keeps a row in the
+  suspension table, and that row holds the selector as the host wrote it.
+  When the vault's `:suspension_store` is `Encryptor.Ecto.SuspensionStore` on
+  the same repo as this key store, P3 deletes that row too, last and in the
+  same transaction as the key rows: a failure there deletes nothing, the
+  keys included, and answers as any other failure of the delete does. After
+  the vault's next suspension poll the scope is no longer in its suspended
+  set, and a read answers `{:unknown_key, selector}`.
+
+  A suspension store on another repo is outside the transaction, and a
+  store module other than this package's keeps its set where this call
+  cannot see; the shred leaves either alone. There the host removes the
+  scope's entry itself after the shred, with
+  `Encryptor.Vault.reinstate/2`. P4 leaves the scope alive, so its
+  suspension stands.
+
   ## How far `:drained_at` holds
 
   `:drained_at` is `:deleted_at` plus `max_age`, and it bounds how long a
@@ -596,7 +615,8 @@ defmodule Encryptor.Ecto.KeyStore do
          {:ok, config} <- Vault.config(vault),
          {:ok, state} <- key_store_state(config),
          {:ok, ref} <- scope_ref(state, selector),
-         {:ok, {deleted, remaining}} <- delete_versions(state, ref, which, selector) do
+         {:ok, {deleted, remaining}} <-
+           delete_versions(state, ref, which, selector, suspension_state(config, state)) do
       deleted_at = DateTime.utc_now()
       emit_shred(vault, which, state, deleted)
       drained_at = DateTime.add(deleted_at, drain_seconds(config), :second)
@@ -651,6 +671,23 @@ defmodule Encryptor.Ecto.KeyStore do
     end
   end
 
+  # The vault's suspension store, when the shred's transaction can reach it:
+  # this package's store on the key store's own repo. Another repo is another
+  # transaction, and another store module keeps its set where this package
+  # cannot see; either way the shred leaves it, and `shred/3`'s documentation
+  # gives the host the step.
+  @spec suspension_state(Vault.Config.t(), state()) :: SuspensionStore.state() | nil
+  defp suspension_state(
+         %Vault.Config{
+           suspension_store: {SuspensionStore, _opts},
+           suspension_store_state: %{repo: repo} = suspension
+         },
+         %{repo: repo}
+       ),
+       do: suspension
+
+  defp suspension_state(_config, _state), do: nil
+
   # The provider state the vault froze at start, which is what makes the
   # shred reach the store the vault reads and no other.
   @spec key_store_state(Vault.Config.t()) :: {:ok, state()} | {:error, shred_error()}
@@ -674,9 +711,19 @@ defmodule Encryptor.Ecto.KeyStore do
   # `{:key_unavailable, selector}`, and a missing table still raises. A
   # connection lost after `COMMIT` was sent is one of those conditions, and
   # there the outcome is not known: the moduledoc of `shred/3` says so.
-  @spec delete_versions(state(), String.t(), :all | pos_integer(), Provider.selector()) ::
+  #
+  # P3 also deletes the scope's suspension row, last and in the same
+  # transaction (`forget_suspension/3`), so a failure there takes the key
+  # delete back with it and a row naming the selector never outlives the keys.
+  @spec delete_versions(
+          state(),
+          String.t(),
+          :all | pos_integer(),
+          Provider.selector(),
+          SuspensionStore.state() | nil
+        ) ::
           {:ok, {[pos_integer(), ...], [pos_integer()]}} | {:error, shred_error()}
-  defp delete_versions(state, ref, which, selector) do
+  defp delete_versions(state, ref, which, selector, suspension) do
     opts = query_opts(state)
 
     state.repo.transaction(fn ->
@@ -703,7 +750,9 @@ defmodule Encryptor.Ecto.KeyStore do
               opts
             )
 
-          recheck(state, ref, which, {doomed, remaining}, opts)
+          deleted_and_remaining = recheck(state, ref, which, {doomed, remaining}, opts)
+          :ok = forget_suspension(which, suspension, selector)
+          deleted_and_remaining
 
         {:error, reason} ->
           state.repo.rollback(reason)
@@ -747,6 +796,21 @@ defmodule Encryptor.Ecto.KeyStore do
   end
 
   defp recheck(_state, _ref, _version, deleted_and_remaining, _opts), do: deleted_and_remaining
+
+  # A scope with no key left has nothing to suspend, and its suspension row
+  # is where this package would keep the host's selector past the shred.
+  # P4 leaves the scope alive, so its suspension stands. The delete is the
+  # store's own `reinstate/2`, which runs on the connection this transaction
+  # holds.
+  @spec forget_suspension(
+          :all | pos_integer(),
+          SuspensionStore.state() | nil,
+          Provider.selector()
+        ) :: :ok
+  defp forget_suspension(:all, %{} = suspension, selector),
+    do: SuspensionStore.reinstate(suspension, selector)
+
+  defp forget_suspension(_which, _suspension, _selector), do: :ok
 
   @spec doomed([pos_integer()], :all | pos_integer(), Provider.selector()) ::
           {:ok, [pos_integer(), ...], [pos_integer()]} | {:error, shred_error()}
