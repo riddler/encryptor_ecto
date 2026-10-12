@@ -1196,3 +1196,34 @@ flip:
   types needs no declaration".
 
 Provenance: bead ece-vvez.
+
+## Note (2026-10-12): decision 5's "does not weaken any migrated row" holds only once `legacy:` is dropped
+
+Decision 5 ends its first paragraph: "The window does not weaken any
+*migrated* row; it means the guarantee is per-row until the pass finishes."
+Read literally, that is too strong while `legacy:` is declared, and this Note
+narrows what it can be taken to say. It changes no decision and no status
+word above.
+
+- What the sentence gets right. A row the rewrite has migrated is read
+  through the primary load first, always (decision 4), so its own new-format
+  bytes keep the context, scope and key separation the vault gives them.
+- What it leaves out. While `legacy:` is declared, the fallback answers any
+  bytes the vault refuses, and legacy-format bytes carry no context. A writer
+  with access to the database can put legacy-format bytes into a row that was
+  already migrated, and they load, counted as a legacy read. So the window
+  weakens a migrated row too: finishing the rewrite does not close it.
+- What closes it. Dropping `legacy:`, the last step of the runbook (decision
+  8, step 8). From then on the same bytes raise
+  `Encryptor.Ecto.DecryptError`, and the migrated row still loads.
+
+The code and its tests already say this: `Encryptor.Ecto.Binary`'s moduledoc,
+in the section "The window is a security downgrade, and it is meant to end",
+and `test/encryptor/ecto/legacy_test.exs`, in the describe block
+"legacy-format bytes put into a migrated row" (its two tests: "load while
+legacy: is declared, and are counted as a legacy read" and "raise once
+legacy: is dropped, while the migrated row still loads"). This Note brings
+the record into line with them by addition; the sentence above stands as
+written.
+
+Provenance: bead ece-wncp.
