@@ -81,6 +81,22 @@ defmodule Mix.Tasks.Encryptor.Ecto.MigrateTest do
       assert output =~ "reason={:bad_checksum, :redacted}"
       refute output =~ @pan
     end
+
+    # Sabotage: made `redact_list/1` call `Enum.map_join/3` on the whole list -
+    # an improper-list reason raised FunctionClauseError instead of printing.
+    test "prints an improper-list reason instead of crashing" do
+      _id = insert_card(pan: legacy(@pan))
+
+      assert {1, output} =
+               migrate([
+                 "Encryptor.Ecto.TestEnginePlans.ImproperDisclosingSource",
+                 "--mode",
+                 "write"
+               ])
+
+      assert output =~ "reason=[:bad_checksum | :redacted]"
+      refute output =~ @pan
+    end
   end
 
   describe "exit 2" do

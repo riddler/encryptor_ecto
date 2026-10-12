@@ -139,13 +139,18 @@ defmodule Encryptor.Ecto.Error do
 
   Atoms and integers render as themselves. Tuples and lists render
   structurally, with every element redacted in turn. A binary renders as its
-  byte count, and any other term as a bare marker.
+  byte count, and any other term as a bare marker. An improper list renders
+  with its tail after a bar. The number of elements of a list, like the byte
+  count of a binary, is shown.
 
       iex> Encryptor.Ecto.Error.redact(:decrypt_failed)
       ":decrypt_failed"
 
       iex> Encryptor.Ecto.Error.redact({:missing_required_context_keys, [:table]})
       "{:missing_required_context_keys, [:table]}"
+
+      iex> Encryptor.Ecto.Error.redact([:a | "x"])
+      "[:a | <<redacted 1 bytes>>]"
 
       iex> Encryptor.Ecto.Error.redact("4111111111111111")
       "<<redacted 16 bytes>>"
@@ -158,13 +163,23 @@ defmodule Encryptor.Ecto.Error do
   def redact(term) when is_integer(term), do: Integer.to_string(term)
   def redact(term) when is_binary(term), do: "<<redacted #{byte_size(term)} bytes>>"
 
-  def redact(term) when is_list(term),
-    do: "[" <> Enum.map_join(term, ", ", &redact/1) <> "]"
+  def redact(term) when is_list(term), do: "[" <> redact_list(term) <> "]"
 
   def redact(term) when is_tuple(term),
     do: "{" <> Enum.map_join(Tuple.to_list(term), ", ", &redact/1) <> "}"
 
   def redact(_term), do: "<redacted>"
+
+  # A list is walked by hand rather than through `Enum`, which raises on an
+  # improper list: a vault reason such as `[:a | "x"]` renders its tail after a
+  # bar instead of crashing the caller.
+  defp redact_list([]), do: ""
+  defp redact_list([last]), do: redact(last)
+
+  defp redact_list([head | tail]) when is_list(tail),
+    do: redact(head) <> ", " <> redact_list(tail)
+
+  defp redact_list([head | tail]), do: redact(head) <> " | " <> redact(tail)
 
   @doc """
   The rendered detail pairs every exception in the family carries.

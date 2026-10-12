@@ -1088,7 +1088,10 @@ defmodule Encryptor.Ecto.Migrator.Pass do
   # becomes `:redacted`. A number goes too, unlike in
   # `Encryptor.Ecto.Error.redact/1`: an encrypted integer field's plaintext
   # is one. This package's own reasons are atoms and tuples of atoms, and
-  # pass through unchanged.
+  # pass through unchanged. The structure kept is a disclosure too: a charlist
+  # payload shows its length as the count of `:redacted` elements, the same
+  # class as the byte count `redact/1` shows for a binary, and an improper
+  # list stays improper (`redact/1` renders it).
   @spec shape(term()) :: term()
   defp shape(term) when is_atom(term), do: term
 

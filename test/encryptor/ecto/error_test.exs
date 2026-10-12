@@ -87,6 +87,13 @@ defmodule Encryptor.Ecto.ErrorTest do
       assert Error.redact([:a, [@plaintext]]) == "[:a, [<<redacted 16 bytes>>]]"
     end
 
+    # sabotage: make redact_list/1 call Enum.map_join/3 on the whole list -> red
+    test "an improper list renders its tail after a bar, redacted" do
+      assert Error.redact([:a | @plaintext]) == "[:a | <<redacted 16 bytes>>]"
+      assert Error.redact([:a, :b | :c]) == "[:a, :b | :c]"
+      refute Error.redact([:a | @plaintext]) =~ @plaintext
+    end
+
     # sabotage: make the catch-all clause return inspect(term) -> red
     test "a map, a struct and a float are redacted wholesale" do
       refute Error.redact(%{card_number: @plaintext}) =~ @plaintext
