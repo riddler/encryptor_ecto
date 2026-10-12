@@ -25,9 +25,11 @@ decision 11), so a ciphertext column holds exactly what encryptor's page
 describes. One thing about it is this package's choice rather than the
 vault's: the encryption context a field writes. It is the declared `"table"`
 and `"column"`, the vault's static pairs, the scope reference on a scoped
-field, and any pairs the field's `:context` option adds. Every one of them
-travels in the clear in every message, so a pair a host adds is public to
-anyone holding the dump
+field, and any pairs the field's `:context` option adds. Every one of them is
+covered by the message's header tag. A pair the vault does not require is
+stored in the header, in the clear; a pair the vault requires is bound without
+being stored, and a reader reproduces it. Either way a pair a host adds is
+public to anyone holding the dump
 ([How to bind extra identifiers](../guides/bind-extra-context.md) says what
 belongs there for that reason).
 
