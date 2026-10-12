@@ -51,6 +51,17 @@ defmodule Encryptor.Ecto.Float do
   raises `ArgumentError` naming the shape it was given and never the value.
   An integer is one of those shapes: `cast/2` widens it, `dump/3` does not.
 
+  ## The length shows the magnitude
+
+  The ciphertext is as long as the text `Float.to_string/1` writes, plus a
+  fixed overhead, so a reader of the column learns how long each value's
+  shortest form is: how many digits it needs, and whether it is written in
+  scientific notation, which is to say roughly its order of magnitude and its
+  precision. Every extra character is one extra byte. Encryption hides the
+  digits and not their count. This type does not pad; a host that cannot show
+  the count to a reader of the database stores a fixed-width text form
+  through `Encryptor.Ecto.String`.
+
   ## Money is not a float, and this type does not make it one
 
   Said here rather than left to be discovered, because an encrypted amount is
