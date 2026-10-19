@@ -91,10 +91,10 @@ defmodule Encryptor.Ecto.GcpKmsLiveTest do
     :ok
   end
 
-  # sabotage (on a copy whose HTTP client answered from
-  # Encryptor.Ecto.TestGcpKms.Http and recorded each status; the live key was
-  # not used): made Encryptor.Ecto.Binary.load_arm/2 hand back the stored
-  # bytes undecrypted - red, the read-back compared unequal.
+  # sabotage: Encryptor.Ecto.Binary.load_arm/2 handing back the stored bytes
+  # undecrypted, red - the read-back compared unequal (on a copy whose HTTP
+  # client answered from Encryptor.Ecto.TestGcpKms.Http and recorded each
+  # status; the live key was not used).
   test "writes a row on the test key, and a field written through it reads back", ctx do
     selector = selector()
 
@@ -117,10 +117,10 @@ defmodule Encryptor.Ecto.GcpKmsLiveTest do
     assert [{:decrypt, 200}] == GcpKmsLive.calls()
   end
 
-  # sabotage (the same copy): made KeyStore.encryption_key/2 unwrap the
-  # oldest row instead of the newest - red, the rotation's row was not the
-  # one served. Separately, made a one-version shred delete the newest
-  # version instead of the named one - red, the shred record named version 2.
+  # sabotage: KeyStore.encryption_key/2 unwrapping the oldest row instead of
+  # the newest, red - the rotation's row was not the one served. Separately,
+  # a one-version shred deleting the newest version instead of the named
+  # one, red - the shred record named version 2 (on the same copy).
   test "rotates to a second row, then shreds one version and the scope", ctx do
     selector = selector()
 

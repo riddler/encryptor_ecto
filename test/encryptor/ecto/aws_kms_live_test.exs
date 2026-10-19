@@ -75,10 +75,10 @@ defmodule Encryptor.Ecto.AwsKmsLiveTest do
     :ok
   end
 
-  # sabotage (on a copy whose client answered from an in-memory AES-GCM
-  # keyring bound to the encryption context and recorded 200 or 400 per call;
-  # the live key was not used): made the client hand back other bytes than
-  # the data key Decrypt unwrapped - red, the read raised DecryptError.
+  # sabotage: the client handing back other bytes than the data key Decrypt
+  # unwrapped, red - the read raised DecryptError (on a copy whose client
+  # answered from an in-memory AES-GCM keyring bound to the encryption
+  # context and recorded 200 or 400 per call; the live key was not used).
   test "writes a field under the test key and reads back exactly the value written" do
     selector = selector()
     plaintext = :crypto.strong_rand_bytes(48)
@@ -98,9 +98,9 @@ defmodule Encryptor.Ecto.AwsKmsLiveTest do
     assert [{:decrypt, 200}] == AwsKmsLive.calls()
   end
 
-  # sabotage (the same copy): made the in-memory keyring bind no encryption
-  # context - red, Decrypt answered 200 under the other scope's binding and
-  # the row loaded.
+  # sabotage: the in-memory keyring binding no encryption context, red -
+  # Decrypt answered 200 under the other scope's binding and the row loaded
+  # (on the same copy).
   test "refuses to load a field under another scope's binding" do
     owner = selector()
     other = selector()
