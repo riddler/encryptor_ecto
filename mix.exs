@@ -150,6 +150,14 @@ defmodule Encryptor.Ecto.MixProject do
       # package, and present so that the slow path is exercised end to end
       # rather than asserted about.
       {:argon2_elixir, "~> 4.0", only: [:dev, :test]},
+
+      # The token server `Encryptor.Provider.GcpKms` asks for a bearer token,
+      # optional in the vault and test-only here, at the version the vault
+      # locks. Only the live KMS suites use it (`Encryptor.Ecto.GcpKmsLive`
+      # and `Encryptor.Ecto.AwsKmsLive`, the second for the `Finch` pool it
+      # brings); the default run never starts it. Absent from the published
+      # package, like `ecto_sql` above.
+      {:goth, "~> 1.4", only: :test},
       {:ex_quality, "~> 0.16", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

@@ -64,7 +64,10 @@ defmodule Encryptor.Ecto.TestRepo do
     {14, Encryptor.Ecto.TestMigrationScopeInJobs},
     # The runbook's host again, taking the parallel-column exit instead: a
     # `<field>_encrypted` column beside each of the three encrypted ones.
-    {15, Encryptor.Ecto.TestMigrationRunbookParallel}
+    {15, Encryptor.Ecto.TestMigrationRunbookParallel},
+    # The live KMS suites' two tables, one per cloud. Only the tagged suites
+    # write them.
+    {16, Encryptor.Ecto.TestMigrationLiveKms}
   ]
 
   @doc """
