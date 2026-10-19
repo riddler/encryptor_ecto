@@ -22,17 +22,25 @@ for vault <- [
   {:ok, _pid} = vault.start_link()
 end
 
+# The live KMS suites are excluded unless asked for (`mix test --only
+# gcp_kms_integration`, `mix test --only aws_kms_integration`, as CI's
+# gcp-kms-integration and aws-kms-integration jobs run them): each needs
+# credentials and a test key, and Postgres. Encryptor.Ecto.GcpKmsLive and
+# Encryptor.Ecto.AwsKmsLive say how; docs/guides/live-kms-suites.md is the
+# maintainer's page.
+live_kms = [:gcp_kms_integration, :aws_kms_integration]
+
 case Encryptor.Ecto.TestDatabase.exunit_options() do
   {:ok, []} ->
     # The repository is started only on this arm. Starting it when nothing is
     # listening would turn the legible skip below into a connection error at
     # boot, which is the failure this whole arrangement exists to avoid.
     :ok = Encryptor.Ecto.TestRepo.setup!()
-    ExUnit.start()
+    ExUnit.start(exclude: live_kms)
 
   {:ok, options} ->
     IO.puts(:stderr, Encryptor.Ecto.TestDatabase.skip_message())
-    ExUnit.start(options)
+    ExUnit.start(Keyword.update(options, :exclude, live_kms, &(&1 ++ live_kms)))
 
   {:error, message} ->
     IO.puts(:stderr, message)

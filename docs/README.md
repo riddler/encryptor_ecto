@@ -62,6 +62,14 @@ Task-shaped, for someone who already understands the target state.
   that hands each event's scope to a resolver of its own, so that replay
   and inline projection neither need nor disturb the process scope.
 
+For maintainers of this repository, not published with the package:
+
+- [How to run the live KMS suites](guides/live-kms-suites.md) - the two
+  excluded-by-default suites that meet a real KMS: the key store's Cloud KMS
+  rows written, read back, rotated and shredded, and an encrypted field on an
+  AWS KMS-backed vault; what each needs, the commands to run them locally,
+  and how their CI jobs authenticate and skip.
+
 ## Reference
 
 No page here. The mix tasks' flag tables, exit codes and grammar are their own
