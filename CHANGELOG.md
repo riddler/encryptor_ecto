@@ -6,9 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Entries for unreleased work are not written here directly. Each issue drops a
-fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.9.1/changelog.d/README.md); the fragments are assembled
+fragment in [`changelog.d/`](https://github.com/riddler/encryptor_ecto/blob/v0.10.0/changelog.d/README.md); the fragments are assembled
 into a version section at release. See that README for the format and for when a
 change warrants an entry at all.
+
+## [0.10.0] - 2026-10-20
+
+A breaking release: this version requires `encryptor` 0.9.0, whose vault
+refuses on decrypt two kinds of message it used to read - one whose stored
+context lacks a pair the field passes, and one under an algorithm suite
+the vault neither writes nor accepts. Each has a vault option that keeps
+it readable while the host re-encrypts; the Breaking entries say which
+rows meet each refusal and what a host does about it.
+
+### **Breaking**
+
+- A field's row whose stored context lacks a pair the field now declares, such as a row written before a key was added to the field's `:context`, no longer loads: this package passes a field's declared pairs to the vault as per-call context, and `encryptor` 0.9.0's vault refuses on decrypt, as `:decrypt_failed`, a per-call context key the message's stored context lacks, so the load raises `Encryptor.Ecto.DecryptError`. A host with such rows sets the vault's new `:legacy_context` option to `:accept` (default `:refuse`) while re-encrypting those pre-context ciphertexts, then sets it back.
+- A field's row, or a wrapped key the key store holds, written under an algorithm suite that is neither the vault's configured `:algorithm_suite_id` nor listed in `encryptor` 0.9.0's new `:accept_suites` option (default empty), such as one written before the vault's suite was changed, is refused on decrypt as `:decrypt_failed`; a host whose stored messages use another suite lists that suite in `:accept_suites` while it re-encrypts them, then removes it.
+
+### Changed
+
+- Requires `encryptor` 0.9.0: the pin moves from `encryptor == 0.8.1` to `encryptor == 0.9.0`, so a host resolving this package gets that release's two decrypt refusals, the Breaking entries above, and its two new vault options, `:accept_suites` and `:legacy_context`. Its changelog says what each refusal answers.
+- A host upgrading from `encryptor_ecto` 0.9.0 or earlier still holds the suspension rows that earlier whole-scope shreds left behind; a second shred of such a scope answers `{:unknown_key, selector}` before it reaches the row, so clear each one with `Encryptor.Vault.reinstate/2`.
+- `Encryptor.Ecto.KeyStore.shred/3` emits no suspension write event when it deletes a scope's suspension row, so a vault that held the scope suspended keeps it suspended until its next poll.
+
+### Fixed
+
+- A migration plan field with no `source_authenticated:` whose vault-backed `from:` type fails on the second `init/1` call now raises a `CompileError` with the plan's file and line, naming the field, where it raised the type's own bare exception.
 
 ## [0.9.1] - 2026-10-12
 

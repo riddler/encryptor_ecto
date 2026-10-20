@@ -1,7 +1,7 @@
 defmodule Encryptor.Ecto.MixProject do
   use Mix.Project
 
-  @version "0.9.1"
+  @version "0.10.0"
   @source_url "https://github.com/riddler/encryptor_ecto"
 
   def project do
@@ -111,7 +111,7 @@ defmodule Encryptor.Ecto.MixProject do
       # any pre-1.0 releases, so a range here would let a host's deps.update
       # change what stored rows mean; the pin widens when the vault's
       # guarantees do.
-      {:encryptor, "== 0.8.1"},
+      {:encryptor, "== 0.9.0"},
 
       # The serializer `Encryptor.Ecto.Map` defaults to (ADR-0001 decision 8).
       # A direct dependency rather than a transitive one: the vault happens to
