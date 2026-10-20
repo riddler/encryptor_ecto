@@ -574,12 +574,22 @@ defmodule Encryptor.Ecto.KeyStore do
   the vault's next suspension poll the scope is no longer in its suspended
   set, and a read answers `{:unknown_key, selector}`.
 
+  The shred deletes the row through the store directly, so it emits no
+  suspension write event: no `[:encryptor, :suspension, :changed]` event
+  reports the reinstatement, and the vault that held the scope suspended
+  keeps it suspended until that next poll.
+
   A suspension store on another repo is outside the transaction, and a
   store module other than this package's keeps its set where this call
   cannot see; the shred leaves either alone. There the host removes the
   scope's entry itself after the shred, with
   `Encryptor.Vault.reinstate/2`. P4 leaves the scope alive, so its
   suspension stands.
+
+  A suspension row left by a whole-scope shred on `encryptor_ecto` 0.9.0
+  or earlier stays: those releases never deleted it, and a second shred of
+  that scope answers `{:unknown_key, selector}` before it reaches the row.
+  A host upgrading clears such a row with `Encryptor.Vault.reinstate/2`.
 
   ## How far `:drained_at` holds
 

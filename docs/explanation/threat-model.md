@@ -214,8 +214,13 @@ What a dump taken *after* the shred, or kept from before it, still shows:
   the row, with the selector in the clear. A suspension store on another
   repo, or a store module other than this package's, keeps the scope's entry
   until the host reinstates the scope after the shred, and a dump of such a
-  store shows the selector until then. A single-version shred leaves the
-  scope alive and its suspension in place.
+  store shows the selector until then. Where the shred does delete the row,
+  it goes through the store directly and emits no suspension write event.
+  A whole-scope shred on `encryptor_ecto` 0.9.0 or earlier left the row in
+  every case; upgrading does not remove it, and a second shred of that scope
+  answers `{:unknown_key, selector}` before it reaches the row, so the host
+  clears such a row with `Encryptor.Vault.reinstate/2`. A single-version shred
+  leaves the scope alive and its suspension in place.
 - **The scope reference** wherever it still appears: in every surviving
   message header and, for a scope shredded one version at a time, in its
   remaining rows. It identifies the scope to no one without the reference
