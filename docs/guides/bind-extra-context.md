@@ -3,12 +3,12 @@
 Every encrypted field already binds `"table"` and `"column"`, and every
 scoped one binds a `"scope_ref"` the vault derives from the scope
 selector. That is what makes a ciphertext non-substitutable across columns
-and scopes: bytes written for `cards.pan` under one scope fail
-authentication when they are loaded as `cards.notes`, or under a different
+and scopes: bytes written for `records.secret` under one scope fail
+authentication when they are loaded as `records.notes`, or under a different
 scope, whatever else an attacker with database access can rearrange.
 
 The binding stops at the column and the scope. Nothing in the context names
-the row, so two rows of `cards.pan` under one scope can have their bytes
+the row, so two rows of `records.secret` under one scope can have their bytes
 swapped and both load, each as the other's value. This guide does not
 change that: the pairs it adds are the same for every row of the column,
 and Step 1 below puts a per-row value such as a primary key in the
@@ -38,9 +38,9 @@ is declared. Those three properties decide the whole table:
 
 | Bind it | Do not bind it |
 |---|---|
-| A stable classification of the column: `"purpose" => "pii"` | A secret, a token, a key fingerprint, a password hash - the context is not encrypted |
-| A logical partition the column is split by and that a row never moves between: `"ledger" => "settlement"` | Anything that varies per row: a primary key, a row id, a user id, a request id, a timestamp |
-| A deployment-independent name for the data's owner: `"app" => "payments"` | Anything mutable: a display name, a status, a plan tier, an email address |
+| A stable classification of the column: `"purpose" => "restricted"` | A secret, a token, a key fingerprint, a password hash - the context is not encrypted |
+| A logical partition the column is split by and that a row never moves between: `"partition" => "alpha"` | Anything that varies per row: a primary key, a row id, a user id, a request id, a timestamp |
+| A deployment-independent name for the data's owner: `"app" => "my_app"` | Anything mutable: a display name, a status, a plan tier, a contact address |
 | A value you can still produce, character for character, in five years | A schema prefix, a database name, a hostname, an environment name - a restore into a differently-placed database would stop reading |
 
 Two of those rows are stronger than style advice.
@@ -66,10 +66,10 @@ in the bytes.
 type module and every field naming that module gets it:
 
 ```elixir
-defmodule Payments.Encrypted.SettlementBinary do
+defmodule MyApp.Encrypted.PartitionBinary do
   use Encryptor.Ecto.Binary,
-    vault: Payments.Vault,
-    context: %{"purpose" => "pii", "ledger" => "settlement"}
+    vault: MyApp.Vault,
+    context: %{"purpose" => "restricted", "partition" => "alpha"}
 end
 ```
 
@@ -122,7 +122,7 @@ cheap on the first test run and expensive in a background job.
 **A declared context pair is bound into every row written under it, and
 changing the pair makes those rows unreadable.** There is no re-interpretation
 and no fallback: the authentication tag covers the context, so a load composing
-`"ledger" => "clearing"` against bytes written under `"ledger" => "settlement"`
+`"partition" => "beta"` against bytes written under `"partition" => "alpha"`
 fails authentication and raises `Encryptor.Ecto.DecryptError`. That is the
 anti-substitution property working correctly, and it looks exactly like it
 looks when an attacker moves a row.
@@ -158,7 +158,7 @@ encrypted, and under what context", which is otherwise spread across every
 schema:
 
 ```elixir
-Encryptor.Ecto.Declarations.list(apps: [:payments])
+Encryptor.Ecto.Declarations.list(apps: [:my_app])
 |> Enum.map(&{&1.table, &1.column})
 ```
 
@@ -174,11 +174,11 @@ values - that is the property the check
 is defending, and the extra context is additional binding rather than a
 substitute for it.
 
-## A worked example: a signup wizard's two funnels
+## A worked example: two variants in one table
 
-A signup wizard stores `signups.email` for two products that share one table
-and one scope. Nothing in the schema keeps a row of one funnel from being
-written over a row of the other, and the funnel is a column on the row, so it
+A host stores `entries.handle` for two variants that share one table
+and one scope. Nothing in the schema keeps a row of one variant from being
+written over a row of the other, and the variant is a column on the row, so it
 is not eligible for the context.
 
 The right move is not a `:context` pair at all: it is two columns, each with

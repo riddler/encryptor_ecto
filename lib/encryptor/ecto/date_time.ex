@@ -3,16 +3,16 @@ defmodule Encryptor.Ecto.DateTime do
   An encrypted UTC instant field: `Encryptor.Ecto.Binary` over the value's
   ISO 8601 form (ADR-0001 decision 1).
 
-      defmodule Payments.Encrypted.DateTime do
-        use Encryptor.Ecto.DateTime, vault: Payments.Vault
+      defmodule MyApp.Encrypted.DateTime do
+        use Encryptor.Ecto.DateTime, vault: MyApp.Vault
       end
 
-      defmodule Payments.Cards.Card do
+      defmodule MyApp.Records.Record do
         use Ecto.Schema
 
-        schema "cards" do
-          field :merchant_id, :string
-          field :verified_at, Payments.Encrypted.DateTime
+        schema "records" do
+          field :scope_id, :string
+          field :verified_at, MyApp.Encrypted.DateTime
         end
       end
 
@@ -98,10 +98,10 @@ defmodule Encryptor.Ecto.DateTime do
   @doc """
   Checks a declaration's option set while the declaring module compiles.
 
-      iex> Encryptor.Ecto.DateTime.validate_declaration!(Payments.Encrypted.DateTime,
-      ...>   vault: Payments.Vault
+      iex> Encryptor.Ecto.DateTime.validate_declaration!(MyApp.Encrypted.DateTime,
+      ...>   vault: MyApp.Vault
       ...> )
-      [vault: Payments.Vault]
+      [vault: MyApp.Vault]
   """
   @spec validate_declaration!(module(), keyword()) :: keyword()
   def validate_declaration!(module, opts),

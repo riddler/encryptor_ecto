@@ -11,7 +11,7 @@ defmodule Encryptor.Ecto.Scope do
 
   The host sets the scope explicitly at the edge of a unit of work:
 
-      Encryptor.Ecto.Scope.put("merchant_7f3")
+      Encryptor.Ecto.Scope.put("scope-1")
 
   ## Scope does not propagate
 
@@ -52,8 +52,8 @@ defmodule Encryptor.Ecto.Scope do
   was set before it rather than clearing, so nesting one unit of work
   inside another is safe:
 
-      Encryptor.Ecto.Scope.wrap("merchant_7f3", fn ->
-        # ... one signup wizard variant's writes, scoped to this merchant
+      Encryptor.Ecto.Scope.wrap("scope-1", fn ->
+        # ... one unit of work's writes, scoped to scope-1
       end)
 
   `put/1` without a matching `clear/0` or `wrap/2` is the failure mode this
@@ -77,10 +77,10 @@ defmodule Encryptor.Ecto.Scope do
   Returns `:ok`. Any scope already set is replaced; the previous value is
   not returned, because a caller that needs it should be using `wrap/2`.
 
-      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.put("scope-1")
       :ok
       iex> Encryptor.Ecto.Scope.get()
-      {:ok, "merchant_7f3"}
+      {:ok, "scope-1"}
   """
   @spec put(String.t()) :: :ok
   def put(scope) when is_binary(scope) do
@@ -117,9 +117,9 @@ defmodule Encryptor.Ecto.Scope do
   host bug at the boundary, rather than the per-field failure the type modules
   raise, and it names no table or column because it knows none.
 
-      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.put("scope-1")
       iex> Encryptor.Ecto.Scope.fetch!()
-      "merchant_7f3"
+      "scope-1"
   """
   @spec fetch!() :: String.t()
   def fetch! do
@@ -140,7 +140,7 @@ defmodule Encryptor.Ecto.Scope do
   that owns its whole unit of work; a process that runs several should use
   `wrap/2`, which restores rather than clears.
 
-      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
+      iex> Encryptor.Ecto.Scope.put("scope-1")
       iex> Encryptor.Ecto.Scope.clear()
       :ok
       iex> Encryptor.Ecto.Scope.get()
@@ -162,13 +162,13 @@ defmodule Encryptor.Ecto.Scope do
 
   This is what makes the call safe in a pooled process and safe to nest:
 
-      iex> Encryptor.Ecto.Scope.put("merchant_7f3")
-      iex> Encryptor.Ecto.Scope.wrap("merchant_a19", fn ->
+      iex> Encryptor.Ecto.Scope.put("scope-1")
+      iex> Encryptor.Ecto.Scope.wrap("scope-2", fn ->
       ...>   Encryptor.Ecto.Scope.fetch!()
       ...> end)
-      "merchant_a19"
+      "scope-2"
       iex> Encryptor.Ecto.Scope.fetch!()
-      "merchant_7f3"
+      "scope-1"
   """
   @spec wrap(String.t(), (-> result)) :: result when result: var
   def wrap(scope, fun) when is_binary(scope) and is_function(fun, 0) do

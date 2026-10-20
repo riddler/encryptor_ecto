@@ -3,16 +3,16 @@ defmodule Encryptor.Ecto.Map do
   An encrypted map field: `Encryptor.Ecto.Binary` over a serialized map
   (ADR-0001 decisions 1 and 8).
 
-      defmodule Payments.Encrypted.Map do
-        use Encryptor.Ecto.Map, vault: Payments.Vault
+      defmodule MyApp.Encrypted.Map do
+        use Encryptor.Ecto.Map, vault: MyApp.Vault
       end
 
-      defmodule Payments.Cards.Card do
+      defmodule MyApp.Records.Record do
         use Ecto.Schema
 
-        schema "cards" do
-          field :merchant_id, :string
-          field :metadata, Payments.Encrypted.Map
+        schema "records" do
+          field :scope_id, :string
+          field :metadata, MyApp.Encrypted.Map
         end
       end
 
@@ -201,11 +201,11 @@ defmodule Encryptor.Ecto.Map do
   @doc """
   Checks a declaration's option set while the declaring module compiles.
 
-      iex> Encryptor.Ecto.Map.validate_declaration!(Payments.Encrypted.Map,
-      ...>   vault: Payments.Vault,
+      iex> Encryptor.Ecto.Map.validate_declaration!(MyApp.Encrypted.Map,
+      ...>   vault: MyApp.Vault,
       ...>   json: Jason
       ...> )
-      [vault: Payments.Vault, json: Jason]
+      [vault: MyApp.Vault, json: Jason]
   """
   @spec validate_declaration!(module(), keyword()) :: keyword()
   def validate_declaration!(module, opts),

@@ -54,8 +54,8 @@ defmodule Encryptor.Ecto.TestRepo do
     # The migrate-from-cloak runbook's own host: one secret column and two
     # token columns under a single legacy key.
     {11, Encryptor.Ecto.TestMigrationRunbook},
-    # The two-vaults guide's host: a customer-scoped table, an
-    # agreement-scoped one, and the agreement vault's own key table.
+    # The two-vaults guide's host: an owner-scoped table, a grant-scoped
+    # one, and the grant vault's own key table.
     {12, Encryptor.Ecto.TestMigrationTwoVaults},
     # `Encryptor.Ecto.SuspensionStore`'s table, as its generator writes it.
     {13, Encryptor.Ecto.TestMigrationSuspensions},
@@ -67,7 +67,11 @@ defmodule Encryptor.Ecto.TestRepo do
     {15, Encryptor.Ecto.TestMigrationRunbookParallel},
     # The live KMS suites' two tables, one per cloud. Only the tagged suites
     # write them.
-    {16, Encryptor.Ecto.TestMigrationLiveKms}
+    {16, Encryptor.Ecto.TestMigrationLiveKms},
+    # The two guides' tables and columns, renamed to the domain-free names the
+    # guides use. A migration of its own so a database that already recorded
+    # versions 12 and 14 is renamed in place.
+    {17, Encryptor.Ecto.TestMigrationGuideNames}
   ]
 
   @doc """

@@ -4,16 +4,16 @@ defmodule Encryptor.Ecto.Binary do
 
   A host writes one module per encrypted type and names it from the schema:
 
-      defmodule Payments.Encrypted.Binary do
-        use Encryptor.Ecto.Binary, vault: Payments.Vault
+      defmodule MyApp.Encrypted.Binary do
+        use Encryptor.Ecto.Binary, vault: MyApp.Vault
       end
 
-      defmodule Payments.Cards.Card do
+      defmodule MyApp.Records.Record do
         use Ecto.Schema
 
-        schema "cards" do
-          field :merchant_id, :string
-          field :pan, Payments.Encrypted.Binary
+        schema "records" do
+          field :scope_id, :string
+          field :secret, MyApp.Encrypted.Binary
         end
       end
 
@@ -62,8 +62,8 @@ defmodule Encryptor.Ecto.Binary do
   column costs nothing: pin the old strings with `:table` and `:column` and
   stored rows stay readable.
 
-      schema "payment_cards" do
-        field :pan, Payments.Encrypted.Binary, table: "cards", column: "pan"
+      schema "legacy_records" do
+        field :secret, MyApp.Encrypted.Binary, table: "records", column: "secret"
       end
 
   A pin written at the field wins over one written at the `use`, which wins
@@ -142,8 +142,8 @@ defmodule Encryptor.Ecto.Binary do
   here rather than left to the record, because the option is declared at the
   field and its consequence is a compliance one.
 
-      defmodule Payments.Encrypted.Global do
-        use Encryptor.Ecto.Binary, vault: Payments.AppVault, scope: :none
+      defmodule MyApp.Encrypted.Global do
+        use Encryptor.Ecto.Binary, vault: MyApp.AppVault, scope: :none
       end
 
   ### A `:none` field must name a `:single`-profile vault
@@ -179,10 +179,10 @@ defmodule Encryptor.Ecto.Binary do
   both formats at once is readable for as long as the migration takes
   (ADR-0001 acceptance amendment 4, ADR-0004 decision 4).
 
-      defmodule Payments.Encrypted.Binary do
+      defmodule MyApp.Encrypted.Binary do
         use Encryptor.Ecto.Binary,
-          vault: Payments.Vault,
-          legacy: Payments.Cloak.Encrypted.Binary
+          vault: MyApp.Vault,
+          legacy: MyApp.Cloak.Encrypted.Binary
       end
 
   ### Order, and what triggers the fallback
@@ -260,7 +260,7 @@ defmodule Encryptor.Ecto.Binary do
   Every load that falls through to the legacy path emits
 
       :telemetry.execute([:encryptor_ecto, :legacy_load], %{count: 1},
-        %{table: "cards", column: "pan"})
+        %{table: "records", column: "secret"})
 
   and the metadata set is closed at those two keys: no value, no bytes, no
   reason, no scope. Widening it is a security review rather than a feature
@@ -393,10 +393,10 @@ defmodule Encryptor.Ecto.Binary do
   Returns the options unchanged when they are acceptable, so the macro above
   can assign the result straight into a module attribute.
 
-      iex> Encryptor.Ecto.Binary.validate_declaration!(Payments.Encrypted.Binary,
-      ...>   vault: Payments.Vault
+      iex> Encryptor.Ecto.Binary.validate_declaration!(MyApp.Encrypted.Binary,
+      ...>   vault: MyApp.Vault
       ...> )
-      [vault: Payments.Vault]
+      [vault: MyApp.Vault]
   """
   @spec validate_declaration!(module(), keyword()) :: keyword()
   def validate_declaration!(module, opts),

@@ -25,14 +25,14 @@ defmodule Encryptor.Ecto.Declarations do
   start, nothing to keep in sync. `check_unique!/1` is a pure function over
   loaded modules, and the host calls it where it wants the failure:
 
-      defmodule Payments.Application do
+      defmodule MyApp.Application do
         use Application
 
         @impl Application
         def start(_type, _args) do
-          :ok = Encryptor.Ecto.Declarations.check_unique!(apps: [:payments])
+          :ok = Encryptor.Ecto.Declarations.check_unique!(apps: [:my_app])
 
-          Supervisor.start_link(children(), strategy: :one_for_one, name: Payments.Supervisor)
+          Supervisor.start_link(children(), strategy: :one_for_one, name: MyApp.Supervisor)
         end
       end
 
@@ -66,13 +66,13 @@ defmodule Encryptor.Ecto.Declarations do
   table or column is free: pin the old values with `:table` and `:column` and
   stored rows stay readable.
 
-      defmodule Payments.Cards.Card do
+      defmodule MyApp.Records.Record do
         use Ecto.Schema
 
-        # The physical table is `payment_cards` now; the declared context is
+        # The physical table is `legacy_records` now; the declared context is
         # still what the rows were written under.
-        schema "payment_cards" do
-          field :pan, Payments.Encrypted.Binary, table: "cards", column: "pan"
+        schema "legacy_records" do
+          field :secret, MyApp.Encrypted.Binary, table: "records", column: "secret"
         end
       end
 

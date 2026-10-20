@@ -3,16 +3,16 @@ defmodule Encryptor.Ecto.Float do
   An encrypted float field: `Encryptor.Ecto.Binary` over the value's textual
   form (ADR-0001 decision 1).
 
-      defmodule Payments.Encrypted.Float do
-        use Encryptor.Ecto.Float, vault: Payments.Vault
+      defmodule MyApp.Encrypted.Float do
+        use Encryptor.Ecto.Float, vault: MyApp.Vault
       end
 
-      defmodule Payments.Cards.Card do
+      defmodule MyApp.Records.Record do
         use Ecto.Schema
 
-        schema "cards" do
-          field :merchant_id, :string
-          field :fee_rate, Payments.Encrypted.Float
+        schema "records" do
+          field :scope_id, :string
+          field :rate, MyApp.Encrypted.Float
         end
       end
 
@@ -103,10 +103,10 @@ defmodule Encryptor.Ecto.Float do
   @doc """
   Checks a declaration's option set while the declaring module compiles.
 
-      iex> Encryptor.Ecto.Float.validate_declaration!(Payments.Encrypted.Float,
-      ...>   vault: Payments.Vault
+      iex> Encryptor.Ecto.Float.validate_declaration!(MyApp.Encrypted.Float,
+      ...>   vault: MyApp.Vault
       ...> )
-      [vault: Payments.Vault]
+      [vault: MyApp.Vault]
   """
   @spec validate_declaration!(module(), keyword()) :: keyword()
   def validate_declaration!(module, opts),

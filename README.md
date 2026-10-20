@@ -94,9 +94,9 @@ end
   - [How to migrate a host app off cloak_ecto](docs/guides/migrate-from-cloak.md): the runbook step by step, each command in release `eval` and `mix` form, with the output to expect.
   - [How to bind extra identifiers into an encrypted field's context](docs/guides/bind-extra-context.md): what belongs in a declared `:context`, how the pairs compose, and why a bound value is permanent.
   - [How to keep scope keys in Google Cloud KMS through the key store](docs/guides/gcp-kms-key-store.md): the token server, the key store's `:gcp_kms` option, provisioning a row and the shred.
-  - [How to keep a customer scope and an agreement scope in two vaults](docs/guides/two-vaults-customer-and-agreement.md): two key tables, a process resolver beside a resolver fed from the row, and the shred of one agreement.
+  - [How to keep a long-lived scope and a short-lived scope in two vaults](docs/guides/two-vaults-long-and-short-lived-scopes.md): two key tables, a process resolver beside a resolver fed from the row, and the shred of one short-lived scope.
   - [How to resolve the scope in jobs and projectors](docs/guides/scope-in-jobs-and-projectors.md): carrying the scope into a `Task`, a background job and an event projector.
-  - [Declare and query a blind index](https://hexdocs.pm/encryptor_ecto/Encryptor.Ecto.BlindIndex.html): the declaration, its options and the two query helpers, in the API reference until a guide page exists.
+  - [How to declare and query a blind index](docs/guides/declare-and-query-a-blind-index.md): the index column, the declaration and its options, writing the index from a changeset, querying it, and backfilling and checking the rows that already exist.
 - Look up
   - [The field types](https://hexdocs.pm/encryptor_ecto/Encryptor.Ecto.Binary.html): the closed option set, the encryption context, `nil`, failures and the `:legacy` window.
   - [What a blind index leaks](https://hexdocs.pm/encryptor_ecto/Encryptor.Ecto.BlindIndex.html#module-security-properties): what a dump, a dump plus one scope's index key, and a retained dump after a shred each reveal.

@@ -14,25 +14,25 @@ defmodule Encryptor.Ecto.ScopeSetup do
 
   ## Usage
 
-      defmodule Payments.CardsTest do
+      defmodule MyApp.RecordsTest do
         use ExUnit.Case, async: true
         import Encryptor.Ecto.ScopeSetup
 
-        setup_scope "merchant_7f3"
+        setup_scope "scope-1"
 
-        test "stores a card under the merchant in scope" do
-          assert {:ok, _card} = Payments.Cards.store(%{pan: "4111111111111111"})
+        test "stores a record under the scope" do
+          assert {:ok, _record} = MyApp.Records.store(%{secret: "example value"})
         end
       end
 
   Inside a `describe` block it scopes that block alone, so one case can cover
-  two merchants without either leaking into the other:
+  two scopes without either leaking into the other:
 
-      describe "the A variant of the signup wizard" do
-        setup_scope "merchant_7f3"
+      describe "the second scope" do
+        setup_scope "scope-2"
 
-        test "records the variant the applicant saw" do
-          assert :ok = Signups.record_variant(:a)
+        test "records the variant it ran" do
+          assert :ok = MyApp.Variants.record(:a)
         end
       end
 
@@ -82,7 +82,7 @@ defmodule Encryptor.Ecto.ScopeSetup do
   may be: at the top of a case, or inside a `describe`. `scope` is any
   expression evaluating to a non-empty binary, evaluated once per test.
 
-      setup_scope "merchant_7f3"
+      setup_scope "scope-1"
   """
   defmacro setup_scope(scope) do
     quote do
@@ -101,15 +101,15 @@ defmodule Encryptor.Ecto.ScopeSetup do
   refusal:
 
       setup context do
-        Encryptor.Ecto.ScopeSetup.put_scope(context.merchant_id)
+        Encryptor.Ecto.ScopeSetup.put_scope(context.scope_id)
       end
 
   Returns `:ok`, which is also a valid ExUnit setup return.
 
-      iex> Encryptor.Ecto.ScopeSetup.put_scope("merchant_7f3")
+      iex> Encryptor.Ecto.ScopeSetup.put_scope("scope-1")
       :ok
       iex> Encryptor.Ecto.Scope.get()
-      {:ok, "merchant_7f3"}
+      {:ok, "scope-1"}
   """
   @spec put_scope(String.t()) :: :ok
   def put_scope(scope) when is_binary(scope) and byte_size(scope) > 0 do

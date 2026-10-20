@@ -58,8 +58,9 @@ defmodule Encryptor.Ecto.MixProject do
         "docs/explanation/threat-model.md",
         "docs/guides/migrate-from-cloak.md",
         "docs/guides/bind-extra-context.md",
+        "docs/guides/declare-and-query-a-blind-index.md",
         "docs/guides/gcp-kms-key-store.md",
-        "docs/guides/two-vaults-customer-and-agreement.md",
+        "docs/guides/two-vaults-long-and-short-lived-scopes.md",
         "docs/guides/scope-in-jobs-and-projectors.md",
         "docs/reviews/261006-adversarial-review.md"
       ],
@@ -88,8 +89,9 @@ defmodule Encryptor.Ecto.MixProject do
         docs/explanation/threat-model.md
         docs/guides/migrate-from-cloak.md
         docs/guides/bind-extra-context.md
+        docs/guides/declare-and-query-a-blind-index.md
         docs/guides/gcp-kms-key-store.md
-        docs/guides/two-vaults-customer-and-agreement.md
+        docs/guides/two-vaults-long-and-short-lived-scopes.md
         docs/guides/scope-in-jobs-and-projectors.md
         docs/reviews/261006-adversarial-review.md
       ),

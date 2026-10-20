@@ -2,17 +2,16 @@ defmodule Encryptor.Ecto.TestTwoVaults do
   @moduledoc """
   The two-vaults guide's host, compiled and run.
 
-  `docs/guides/two-vaults-customer-and-agreement.md` shows a generic SaaS
-  host - a catalog service for libraries - that runs two scoped vaults: one
-  whose scope is the customer (the library), for platform data and
-  credentials, and one whose scope is a data agreement, for the loan records
-  a library shares under that agreement. Every module below is one of the
+  `docs/guides/two-vaults-long-and-short-lived-scopes.md` shows a host that
+  runs two scoped vaults: one whose scope is the owner, which lives as long
+  as the owner does, and one whose scope is a grant, which ends on its own
+  while the owner stays. Every module below is one of the
   guide's code blocks with these literal substitutions and nothing else:
 
-    * `alias Library.Repo` is `alias Encryptor.Ecto.TestRepo, as: Repo`, and
-      any other `Library.Repo` is `Encryptor.Ecto.TestRepo`;
-    * every other `Library.` prefix is `Encryptor.Ecto.TestTwoVaults.`;
-    * the `:library` application is `:encryptor_ecto`.
+    * `alias MyApp.Repo` is `alias Encryptor.Ecto.TestRepo, as: Repo`, and
+      any other `MyApp.Repo` is `Encryptor.Ecto.TestRepo`;
+    * every other `MyApp.` prefix is `Encryptor.Ecto.TestTwoVaults.`;
+    * the `:my_app` application is `:encryptor_ecto`.
 
   `Encryptor.Ecto.TwoVaultsGuideTest` holds the two to that: it reads the
   guide, applies the same substitutions, and asserts every `defmodule` block
@@ -27,14 +26,14 @@ end
 defmodule Encryptor.Ecto.TestTwoVaults.Keys do
   @moduledoc """
   The guide's key-material module: the root, both subkeys, provisioning into
-  either key table, and the agreement shred.
+  either key table, and the grant shred.
   """
 
   alias Encryptor.Ecto.KeyStore
   alias Encryptor.Ecto.TestRepo, as: Repo
   alias Encryptor.Envelope
 
-  @agreement_table "agreement_keys"
+  @grant_table "grant_keys"
 
   def root_key do
     :encryptor_ecto
@@ -44,13 +43,13 @@ defmodule Encryptor.Ecto.TestTwoVaults.Keys do
 
   def wrapping_subkey, do: Envelope.root_subkey(root_key(), "root-wrap")
   def reference_subkey, do: Envelope.root_subkey(root_key(), "scope-ref")
-  def agreement_table, do: @agreement_table
+  def grant_table, do: @grant_table
 
-  def provision(:customer, customer_id),
-    do: provision(KeyStore.default_table(), "library-customer", customer_id)
+  def provision(:owner, owner_id),
+    do: provision(KeyStore.default_table(), "my-app-owner", owner_id)
 
-  def provision(:agreement, agreement_id),
-    do: provision(@agreement_table, "library-agreement", agreement_id)
+  def provision(:grant, grant_id),
+    do: provision(@grant_table, "my-app-grant", grant_id)
 
   defp provision(table, namespace, selector) do
     with {:ok, wrapped} <-
@@ -76,10 +75,10 @@ defmodule Encryptor.Ecto.TestTwoVaults.Keys do
     end
   end
 
-  def shred_agreement(agreement_id, opts \\ []) do
+  def shred_grant(grant_id, opts \\ []) do
     KeyStore.shred(
-      Encryptor.Ecto.TestTwoVaults.AgreementVault,
-      agreement_id,
+      Encryptor.Ecto.TestTwoVaults.GrantVault,
+      grant_id,
       Keyword.put(opts, :version, :all)
     )
   end
@@ -98,13 +97,13 @@ defmodule Encryptor.Ecto.TestTwoVaults.RootVault do
        config,
        :provider,
        {Encryptor.Provider.Static,
-        key: Keys.wrapping_subkey(), namespace: "library-root", name: "root/v1"}
+        key: Keys.wrapping_subkey(), namespace: "my-app-root", name: "root/v1"}
      )}
   end
 end
 
-defmodule Encryptor.Ecto.TestTwoVaults.CustomerVault do
-  @moduledoc "The guide's customer vault: scope = the customer, keys in the default table."
+defmodule Encryptor.Ecto.TestTwoVaults.OwnerVault do
+  @moduledoc "The guide's owner vault: scope = the owner, keys in the default table."
 
   use Encryptor.Vault,
     otp_app: :encryptor_ecto,
@@ -127,8 +126,8 @@ defmodule Encryptor.Ecto.TestTwoVaults.CustomerVault do
   end
 end
 
-defmodule Encryptor.Ecto.TestTwoVaults.AgreementVault do
-  @moduledoc "The guide's agreement vault: scope = the agreement, keys in their own table."
+defmodule Encryptor.Ecto.TestTwoVaults.GrantVault do
+  @moduledoc "The guide's grant vault: scope = the grant, keys in their own table."
 
   use Encryptor.Vault,
     otp_app: :encryptor_ecto,
@@ -146,22 +145,22 @@ defmodule Encryptor.Ecto.TestTwoVaults.AgreementVault do
           repo: Encryptor.Ecto.TestRepo,
           root_vault: Encryptor.Ecto.TestTwoVaults.RootVault,
           reference_subkey: Keys.reference_subkey(),
-          table: Keys.agreement_table()},
+          table: Keys.grant_table()},
        reference_subkey: Keys.reference_subkey()
      )}
   end
 end
 
-defmodule Encryptor.Ecto.TestTwoVaults.AgreementScope do
-  @moduledoc "The guide's agreement resolver: the agreement id the caller took off the row."
+defmodule Encryptor.Ecto.TestTwoVaults.GrantScope do
+  @moduledoc "The guide's grant resolver: the grant id the caller took off the row."
 
   @behaviour Encryptor.Ecto.ScopeContext
 
-  @key {__MODULE__, :agreement_id}
+  @key {__MODULE__, :grant_id}
 
-  def with_agreement(agreement_id, fun) when is_binary(agreement_id) and is_function(fun, 0) do
+  def with_grant(grant_id, fun) when is_binary(grant_id) and is_function(fun, 0) do
     previous = Process.get(@key)
-    Process.put(@key, agreement_id)
+    Process.put(@key, grant_id)
 
     try do
       fun.()
@@ -173,85 +172,85 @@ defmodule Encryptor.Ecto.TestTwoVaults.AgreementScope do
   @impl Encryptor.Ecto.ScopeContext
   def resolve(_operation, _params) do
     case Process.get(@key) do
-      agreement_id when is_binary(agreement_id) -> {:ok, agreement_id}
-      nil -> {:error, :no_agreement_in_scope}
+      grant_id when is_binary(grant_id) -> {:ok, grant_id}
+      nil -> {:error, :no_grant_in_scope}
     end
   end
 end
 
-defmodule Encryptor.Ecto.TestTwoVaults.Encrypted.CustomerBinary do
-  @moduledoc "The guide's customer-scoped type: the built-in process resolver."
+defmodule Encryptor.Ecto.TestTwoVaults.Encrypted.OwnerBinary do
+  @moduledoc "The guide's owner-scoped type: the built-in process resolver."
 
-  use Encryptor.Ecto.Binary, vault: Encryptor.Ecto.TestTwoVaults.CustomerVault
+  use Encryptor.Ecto.Binary, vault: Encryptor.Ecto.TestTwoVaults.OwnerVault
 end
 
-defmodule Encryptor.Ecto.TestTwoVaults.Encrypted.AgreementString do
-  @moduledoc "The guide's agreement-scoped type: the agreement resolver."
+defmodule Encryptor.Ecto.TestTwoVaults.Encrypted.GrantString do
+  @moduledoc "The guide's grant-scoped type: the grant resolver."
 
   use Encryptor.Ecto.String,
-    vault: Encryptor.Ecto.TestTwoVaults.AgreementVault,
-    scope: Encryptor.Ecto.TestTwoVaults.AgreementScope
+    vault: Encryptor.Ecto.TestTwoVaults.GrantVault,
+    scope: Encryptor.Ecto.TestTwoVaults.GrantScope
 end
 
-defmodule Encryptor.Ecto.TestTwoVaults.Account do
-  @moduledoc "The guide's customer-scoped schema."
+defmodule Encryptor.Ecto.TestTwoVaults.OwnerRecord do
+  @moduledoc "The guide's owner-scoped schema."
 
   use Ecto.Schema
 
-  schema "library_accounts" do
-    field :customer_id, :string
-    field :catalog_api_token, Encryptor.Ecto.TestTwoVaults.Encrypted.CustomerBinary
+  schema "owner_records" do
+    field :owner_id, :string
+    field :secret_token, Encryptor.Ecto.TestTwoVaults.Encrypted.OwnerBinary
   end
 end
 
-defmodule Encryptor.Ecto.TestTwoVaults.SharedLoan do
-  @moduledoc "The guide's agreement-scoped schema."
+defmodule Encryptor.Ecto.TestTwoVaults.GrantRecord do
+  @moduledoc "The guide's grant-scoped schema."
 
   use Ecto.Schema
 
-  schema "shared_loans" do
-    field :customer_id, :string
-    field :agreement_id, :string
-    field :patron_email, Encryptor.Ecto.TestTwoVaults.Encrypted.AgreementString
+  schema "grant_records" do
+    field :owner_id, :string
+    field :grant_id, :string
+    field :note, Encryptor.Ecto.TestTwoVaults.Encrypted.GrantString
   end
 end
 
-defmodule Encryptor.Ecto.TestTwoVaults.Loans do
-  @moduledoc "The guide's loan functions: every read and write names its agreement."
+defmodule Encryptor.Ecto.TestTwoVaults.GrantRecords do
+  @moduledoc "The guide's record functions: every read and write names its grant."
 
   import Ecto.Query, only: [from: 2]
 
   alias Ecto.Changeset
   alias Encryptor.Ecto.TestRepo, as: Repo
-  alias Encryptor.Ecto.TestTwoVaults.AgreementScope
-  alias Encryptor.Ecto.TestTwoVaults.SharedLoan
+  alias Encryptor.Ecto.TestTwoVaults.GrantRecord
+  alias Encryptor.Ecto.TestTwoVaults.GrantScope
 
   def record(attrs) do
-    %SharedLoan{}
-    |> Changeset.cast(attrs, [:customer_id, :agreement_id, :patron_email])
-    |> Changeset.validate_required([:customer_id, :agreement_id])
-    |> insert_under_agreement()
+    %GrantRecord{}
+    |> Changeset.cast(attrs, [:owner_id, :grant_id, :note])
+    |> Changeset.validate_required([:owner_id, :grant_id])
+    |> insert_under_grant()
   end
 
-  defp insert_under_agreement(%Changeset{valid?: false} = changeset), do: {:error, changeset}
+  defp insert_under_grant(%Changeset{valid?: false} = changeset), do: {:error, changeset}
 
-  defp insert_under_agreement(changeset) do
-    agreement_id = Changeset.fetch_field!(changeset, :agreement_id)
+  defp insert_under_grant(changeset) do
+    grant_id = Changeset.fetch_field!(changeset, :grant_id)
 
-    AgreementScope.with_agreement(agreement_id, fn ->
+    GrantScope.with_grant(grant_id, fn ->
       Repo.insert(changeset)
     end)
   end
 
-  def list(agreement_id) do
-    AgreementScope.with_agreement(agreement_id, fn ->
-      Repo.all(from(l in SharedLoan, where: l.agreement_id == ^agreement_id))
+  def list(grant_id) do
+    GrantScope.with_grant(grant_id, fn ->
+      Repo.all(from(l in GrantRecord, where: l.grant_id == ^grant_id))
     end)
   end
 
-  def forget(agreement_id) do
+  def forget(grant_id) do
     {count, _rows} =
-      Repo.delete_all(from(l in SharedLoan, where: l.agreement_id == ^agreement_id))
+      Repo.delete_all(from(l in GrantRecord, where: l.grant_id == ^grant_id))
 
     {:ok, count}
   end

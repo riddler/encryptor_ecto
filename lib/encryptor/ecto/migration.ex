@@ -8,10 +8,10 @@ defmodule Encryptor.Ecto.Migration do
       defmodule MyApp.Encryption.CloakMigration do
         use Encryptor.Ecto.Migration, repo: MyApp.Repo
 
-        rewrite MyApp.Accounts.Customer do
-          scope_from :account_id
+        rewrite MyApp.Records.Record do
+          scope_from :scope_id
 
-          field :tax_id, from: MyApp.Cloak.Encrypted.Binary, to: MyApp.Encrypted.Binary
+          field :reference, from: MyApp.Cloak.Encrypted.Binary, to: MyApp.Encrypted.Binary
           field :notes, from: MyApp.Cloak.Encrypted.String, to: MyApp.Encrypted.String
         end
 
@@ -108,14 +108,14 @@ defmodule Encryptor.Ecto.Migration do
   only, and the index is a separate backfill after the rewrite is verified
   (ADR-0004 decision 9), exactly as before.
 
-      rewrite MyApp.Accounts.Customer do
-        scope_from :account_id
+      rewrite MyApp.Records.Record do
+        scope_from :scope_id
 
-        field :contact_email,
+        field :handle,
           from: MyApp.Cloak.Encrypted.String,
           to: MyApp.Encrypted.String,
           source_authenticated: true,
-          index: :contact_email_index
+          index: :handle_index
       end
 
   The column must be one a `blind_index` declaration on the schema names, over
@@ -146,7 +146,7 @@ defmodule Encryptor.Ecto.Migration do
       verification that never happened; and the pass refuses to run in
       `--mode write` for that field unless `validate:` is declared with it.
     * `validate:` is a host-supplied `(term() -> boolean())` applied to the
-      loaded plaintext before it is re-encrypted (decision 3b) - a tax
+      loaded plaintext before it is re-encrypted (decision 3b) - a reference
       identifier is nine digits, a serialized map parses, a kept legacy hash
       column recomputes (decision 3c). A row it rejects is `:undecryptable`,
       handled like any other failure. There is no built-in generic validator:

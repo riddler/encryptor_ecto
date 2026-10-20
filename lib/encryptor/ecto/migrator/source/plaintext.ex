@@ -23,7 +23,7 @@ defmodule Encryptor.Ecto.Migrator.Source.Plaintext do
   when the backfill finishes.
 
       field :notes, from: Encryptor.Ecto.Migrator.Source.Plaintext,
-                    to: Signup.Encrypted.String,
+                    to: MyApp.Encrypted.String,
                     into: :notes_encrypted
   """
 
