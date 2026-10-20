@@ -8,8 +8,8 @@ defmodule Encryptor.Ecto.KeyStoreShredSuspensionRepoTest do
   store's own repo, `Encryptor.Ecto.KeyStore.shred/3` deletes that row in the
   transaction that deletes the scope's keys, so a dump taken afterwards holds
   neither. A single-version shred leaves the scope alive and its suspension
-  in place; a store on another repo is not reached by the transaction and is
-  left alone.
+  in place; a store on another repo, or a store module other than this
+  package's, is not reached by the transaction and is left alone.
 
   Not async: the vault's suspension refresher is a process of its own, so the
   sandbox connection is shared with it.
@@ -100,6 +100,57 @@ defmodule Encryptor.Ecto.KeyStoreShredSuspensionRepoTest do
          provider: {KeyStore, TestKeyStore.provider_opts()},
          reference_subkey: TestKeyStore.reference_subkey(),
          suspension_store: {SuspensionStore, repo: TestKeyStore.UnstartedRepo}
+       )}
+    end
+  end
+
+  defmodule OtherStore do
+    @moduledoc """
+    A suspension store module other than this package's, over the same repo
+    and table: it keeps the vault's set in the rows `SuspensionStore` reads,
+    so a shred that reached it by the repo alone would delete its row.
+    """
+
+    @behaviour Encryptor.Vault.Suspension.Store
+
+    alias Encryptor.Ecto.SuspensionStore
+    alias Encryptor.Ecto.TestRepo
+
+    @impl true
+    def init(vault, _opts), do: SuspensionStore.init(vault, repo: TestRepo)
+
+    @impl true
+    defdelegate suspend(state, selector), to: SuspensionStore
+
+    @impl true
+    defdelegate reinstate(state, selector), to: SuspensionStore
+
+    @impl true
+    defdelegate list(state), to: SuspensionStore
+  end
+
+  defmodule OtherStoreScope do
+    @moduledoc """
+    A scoped vault whose suspension store is a module other than this
+    package's, on the key store's own repo.
+    """
+
+    use Encryptor.Vault,
+      otp_app: :encryptor_ecto,
+      context_profile: :scoped,
+      required_context: ["table", "column"],
+      cache: false,
+      suspension_poll_interval: 60_000
+
+    alias Encryptor.Ecto.KeyStore
+    alias Encryptor.Ecto.TestKeyStore
+
+    def init(config) do
+      {:ok,
+       Keyword.merge(config,
+         provider: {KeyStore, TestKeyStore.provider_opts()},
+         reference_subkey: TestKeyStore.reference_subkey(),
+         suspension_store: {OtherStore, []}
        )}
     end
   end
@@ -262,6 +313,28 @@ defmodule Encryptor.Ecto.KeyStoreShredSuspensionRepoTest do
                KeyStore.shred(OtherRepoScope, "merchant_other_repo", version: :all)
 
       assert key_versions("merchant_other_repo") == []
+    end
+
+    # A store module other than this package's keeps its set where the
+    # shred cannot see, even on the key store's own repo and table, so the
+    # shred leaves its row for the host to reinstate. The store here reads
+    # the same rows `SuspensionStore` does, so a shred that matched on the
+    # repo alone would delete the row.
+    #
+    # Sabotage: dropped the `SuspensionStore` module match from
+    # `suspension_state/2`. The shred deleted this store's row and the
+    # `suspended(OtherStoreScope) == [selector]` assertion went red on `[]`.
+    test "a suspension store module other than this package's" do
+      start_supervised!(OtherStoreScope)
+      selector = "merchant_other_store"
+      TestKeyStore.provision!(selector, 1)
+      assert :ok = Encryptor.Vault.suspend(OtherStoreScope, selector)
+
+      assert {:ok, %Shred{procedure: :scope, versions: [1]}} =
+               KeyStore.shred(OtherStoreScope, selector, version: :all)
+
+      assert key_versions(selector) == []
+      assert suspended(OtherStoreScope) == [selector]
     end
   end
 
