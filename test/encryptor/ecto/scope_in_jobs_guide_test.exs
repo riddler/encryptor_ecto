@@ -23,13 +23,13 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
   alias Encryptor.Ecto.DecryptError
   alias Encryptor.Ecto.MissingScopeError
   alias Encryptor.Ecto.Scope
-  alias Encryptor.Ecto.TestScopeInJobs.LoanProjectionHandler
-  alias Encryptor.Ecto.TestScopeInJobs.LoanProjector
-  alias Encryptor.Ecto.TestScopeInJobs.LoanScope
-  alias Encryptor.Ecto.TestScopeInJobs.LoanView
-  alias Encryptor.Ecto.TestScopeInJobs.OverdueNotices
-  alias Encryptor.Ecto.TestScopeInJobs.Patron
-  alias Encryptor.Ecto.TestScopeInJobs.Patrons
+  alias Encryptor.Ecto.TestScopeInJobs.Item
+  alias Encryptor.Ecto.TestScopeInJobs.ItemProjector
+  alias Encryptor.Ecto.TestScopeInJobs.Items
+  alias Encryptor.Ecto.TestScopeInJobs.ItemView
+  alias Encryptor.Ecto.TestScopeInJobs.ProjectionHandler
+  alias Encryptor.Ecto.TestScopeInJobs.ProjectionScope
+  alias Encryptor.Ecto.TestScopeInJobs.Reminders
 
   @guide Path.expand("../../../docs/guides/scope-in-jobs-and-projectors.md", __DIR__)
   @support Path.expand("../../support/test_scope_in_jobs.ex", __DIR__)
@@ -38,16 +38,16 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
   # the order they apply: the repo alias, the repo, the vault, then the
   # general prefix.
   @substitutions [
-    {"alias Library.Repo", "alias Encryptor.Ecto.TestRepo, as: Repo"},
-    {"Library.Repo", "Encryptor.Ecto.TestRepo"},
-    {"Library.Vault", "Encryptor.Ecto.TestVaults.Merchant"},
-    {"Library.", "Encryptor.Ecto.TestScopeInJobs."}
+    {"alias MyApp.Repo", "alias Encryptor.Ecto.TestRepo, as: Repo"},
+    {"MyApp.Repo", "Encryptor.Ecto.TestRepo"},
+    {"MyApp.Vault", "Encryptor.Ecto.TestVaults.Merchant"},
+    {"MyApp.", "Encryptor.Ecto.TestScopeInJobs."}
   ]
 
   # The two selectors `Encryptor.Ecto.TestVaults.Merchant` holds keys for,
-  # standing in for two libraries' ids.
-  @library "merchant_7f3"
-  @other_library "merchant_a19"
+  # standing in for two owners' ids.
+  @owner "merchant_7f3"
+  @other_owner "merchant_a19"
 
   setup do
     Scope.clear()
@@ -56,7 +56,7 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
 
   describe "the guide's code" do
     # Sabotage: changed the guide's resolver error atom to
-    # `:no_library_for_event`; this test went red on that block. Every
+    # `:no_owner_for_event`; this test went red on that block. Every
     # support-file sabotage below also turned this test red.
     test "every defmodule block in the guide, but the Oban worker, is the support file's code" do
       source = File.read!(@support)
@@ -77,41 +77,41 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
     end
 
     # Sabotage: changed the worker block to delegate to
-    # `Library.OverdueNotices.run/1`; the delegation assertion went red.
+    # `MyApp.Reminders.run/1`; the delegation assertion went red.
     test "the Oban worker block delegates to the tested perform/1" do
       assert [worker] = Enum.filter(guide_modules(), &oban_worker?/1)
 
       assert worker =~
-               "def perform(%Oban.Job{args: args}), do: Library.OverdueNotices.perform(args)"
+               "def perform(%Oban.Job{args: args}), do: MyApp.Reminders.perform(args)"
 
-      assert {:module, OverdueNotices} = Code.ensure_loaded(OverdueNotices)
-      assert function_exported?(OverdueNotices, :perform, 1)
+      assert {:module, Reminders} = Code.ensure_loaded(Reminders)
+      assert function_exported?(Reminders, :perform, 1)
     end
   end
 
   describe "step 1: the scope stops at the process" do
-    # Sabotage: made `Encryptor.Ecto.Scope.get/0` answer a library when
+    # Sabotage: made `Encryptor.Ecto.Scope.get/0` answer an owner when
     # nothing was set; the `:error` assertion went red.
     test "a process started inside a scope has none" do
       assert :error =
-               Scope.wrap(@library, fn ->
+               Scope.wrap(@owner, fn ->
                  fn -> Scope.get() end |> Task.async() |> Task.await()
                end)
     end
 
     # Sabotage: made `Encryptor.Ecto.ScopeContext.Process.resolve/2` answer
-    # a fixed library when no scope was set; the insert went through.
+    # a fixed owner when no scope was set; the insert went through.
     test "a scoped write from that process raises rather than guessing" do
       write = fn ->
         try do
-          TestRepo.insert!(%Patron{library_id: @library, email: "reader@example.com"})
+          TestRepo.insert!(%Item{owner_id: @owner, note: "note-1"})
         rescue
           error in MissingScopeError -> error
         end
       end
 
       assert %MissingScopeError{} =
-               Scope.wrap(@library, fn -> write |> Task.async() |> Task.await() end)
+               Scope.wrap(@owner, fn -> write |> Task.async() |> Task.await() end)
     end
   end
 
@@ -119,20 +119,20 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
     # Sabotage: dropped the `Scope.wrap/2` inside `register_all_async/1`'s
     # task; the task raised on `Scope.fetch!/0` and the test went red.
     test "the task writes under the caller's scope" do
-      patrons =
-        Scope.wrap(@library, fn ->
-          ["one@example.com", "two@example.com"]
-          |> Patrons.register_all_async()
+      items =
+        Scope.wrap(@owner, fn ->
+          ["note-1", "note-2"]
+          |> Items.register_all_async()
           |> Task.await()
         end)
 
-      assert [%Patron{library_id: @library}, %Patron{library_id: @library}] = patrons
+      assert [%Item{owner_id: @owner}, %Item{owner_id: @owner}] = items
 
-      for %Patron{id: id, email: email} <- patrons do
-        assert %Patron{email: ^email} = Scope.wrap(@library, fn -> TestRepo.get!(Patron, id) end)
+      for %Item{id: id, note: note} <- items do
+        assert %Item{note: ^note} = Scope.wrap(@owner, fn -> TestRepo.get!(Item, id) end)
 
         assert_raise DecryptError, fn ->
-          Scope.wrap(@other_library, fn -> TestRepo.get!(Patron, id) end)
+          Scope.wrap(@other_owner, fn -> TestRepo.get!(Item, id) end)
         end
       end
 
@@ -141,134 +141,134 @@ defmodule Encryptor.Ecto.ScopeInJobsGuideTest do
   end
 
   describe "step 3: carry the scope into a background job" do
-    # Sabotage: dropped the `Scope.wrap/2` from `OverdueNotices.perform/1`;
+    # Sabotage: dropped the `Scope.wrap/2` from `Reminders.perform/1`;
     # the load raised `MissingScopeError` in the job's process and the test
-    # went red. Separately, made `job_args/1` put the library id under an
+    # went red. Separately, made `job_args/1` put the owner id under an
     # atom key; the JSON round trip turned it into a string key and the
     # round-trip assertions went red.
     test "the job's arguments carry the scope through JSON to perform/1" do
-      %Patron{id: id} =
-        Scope.wrap(@library, fn ->
-          TestRepo.insert!(%Patron{library_id: @library, email: "late@example.com"})
+      %Item{id: id} =
+        Scope.wrap(@owner, fn ->
+          TestRepo.insert!(%Item{owner_id: @owner, note: "note-3"})
         end)
 
-      args = Scope.wrap(@library, fn -> OverdueNotices.job_args(id) end)
+      args = Scope.wrap(@owner, fn -> Reminders.job_args(id) end)
 
       decoded = args |> Jason.encode!() |> Jason.decode!()
-      assert %{"library_id" => @library, "patron_id" => ^id} = decoded
+      assert %{"owner_id" => @owner, "item_id" => ^id} = decoded
       assert decoded == args
 
-      assert {:ok, "late@example.com"} =
-               fn -> OverdueNotices.perform(decoded) end |> Task.async() |> Task.await()
+      assert {:ok, "note-3"} =
+               fn -> Reminders.perform(decoded) end |> Task.async() |> Task.await()
     end
   end
 
   describe "step 4: feed a projector's resolver from the event" do
-    # Sabotage: made `LoanProjector.project/1` hand `LoanScope` one fixed
-    # library for every event; this test went red.
-    test "a replay of two libraries' events writes each under its own library" do
-      LoanProjector.replay([
-        loan(@library, "Middlemarch", "one@example.com"),
-        loan(@other_library, "Persuasion", "two@example.com"),
-        loan(@library, "Emma", "three@example.com")
+    # Sabotage: made `ItemProjector.project/1` hand `ProjectionScope` one fixed
+    # owner for every event; this test went red.
+    test "a replay of two owners' events writes each under its own owner" do
+      ItemProjector.replay([
+        item_event(@owner, "Title A", "note-1"),
+        item_event(@other_owner, "Title B", "note-2"),
+        item_event(@owner, "Title C", "note-3")
       ])
 
       assert [
-               %LoanView{title: "Middlemarch", patron_email: "one@example.com"},
-               %LoanView{title: "Emma", patron_email: "three@example.com"}
-             ] = @library |> LoanProjector.list() |> Enum.sort_by(& &1.id)
+               %ItemView{title: "Title A", note: "note-1"},
+               %ItemView{title: "Title C", note: "note-3"}
+             ] = @owner |> ItemProjector.list() |> Enum.sort_by(& &1.id)
 
-      assert [%LoanView{title: "Persuasion", patron_email: "two@example.com"}] =
-               LoanProjector.list(@other_library)
+      assert [%ItemView{title: "Title B", note: "note-2"}] =
+               ItemProjector.list(@other_owner)
 
       assert :error = Scope.get()
     end
 
-    # Sabotage: made `LoanScope.resolve/2` read the process scope's key
+    # Sabotage: made `ProjectionScope.resolve/2` read the process scope's key
     # instead of its own; this test went red.
     test "an inline projection ignores the request's scope and leaves it as it was" do
-      Scope.wrap(@other_library, fn ->
-        LoanProjector.project(loan(@library, "Middlemarch", "one@example.com"))
+      Scope.wrap(@other_owner, fn ->
+        ItemProjector.project(item_event(@owner, "Title A", "note-1"))
 
-        assert {:ok, @other_library} = Scope.get()
+        assert {:ok, @other_owner} = Scope.get()
       end)
 
-      assert [%LoanView{patron_email: "one@example.com"}] = LoanProjector.list(@library)
-      assert [] = LoanProjector.list(@other_library)
+      assert [%ItemView{note: "note-1"}] = ItemProjector.list(@owner)
+      assert [] = ItemProjector.list(@other_owner)
     end
 
-    # Sabotage: made `LoanScope.resolve/2` answer `{:ok, "merchant_7f3"}`
+    # Sabotage: made `ProjectionScope.resolve/2` answer `{:ok, "merchant_7f3"}`
     # when nothing was set; the insert went through.
-    test "outside with_library/2 the resolver refuses, and the type raises" do
+    test "outside with_owner/2 the resolver refuses, and the type raises" do
       assert_raise MissingScopeError, fn ->
-        Scope.wrap(@library, fn ->
-          TestRepo.insert!(%LoanView{library_id: @library, patron_email: "one@example.com"})
+        Scope.wrap(@owner, fn ->
+          TestRepo.insert!(%ItemView{owner_id: @owner, note: "note-1"})
         end)
       end
     end
 
-    # Sabotage: dropped the `where:` from `LoanProjector.list/1`; `list/1`
-    # raised `DecryptError` on the other library's row.
-    test "a read whose rows span libraries raises instead of answering" do
-      LoanProjector.replay([
-        loan(@library, "Middlemarch", "one@example.com"),
-        loan(@other_library, "Persuasion", "two@example.com")
+    # Sabotage: dropped the `where:` from `ItemProjector.list/1`; `list/1`
+    # raised `DecryptError` on the other owner's row.
+    test "a read whose rows span owners raises instead of answering" do
+      ItemProjector.replay([
+        item_event(@owner, "Title A", "note-1"),
+        item_event(@other_owner, "Title B", "note-2")
       ])
 
-      assert [_view] = LoanProjector.list(@library)
+      assert [_view] = ItemProjector.list(@owner)
 
       assert_raise DecryptError, fn ->
-        LoanScope.with_library(@library, fn -> TestRepo.all(LoanView) end)
+        ProjectionScope.with_owner(@owner, fn -> TestRepo.all(ItemView) end)
       end
     end
   end
 
   describe "step 5: run the projector in a process of its own" do
     setup do
-      handler = start_supervised!(LoanProjectionHandler)
+      handler = start_supervised!(ProjectionHandler)
       Sandbox.allow(TestRepo, self(), handler)
       %{handler: handler}
     end
 
-    # Sabotage: made `LoanViews.fetch!/1` wrap the load in
-    # `LoanScope.with_library("merchant_7f3", ...)` instead of the row's own
-    # library id; the read-back of the other library's row raised
+    # Sabotage: made `ItemViews.fetch!/1` wrap the load in
+    # `ProjectionScope.with_owner("merchant_7f3", ...)` instead of the row's own
+    # owner id; the read-back of the other owner's row raised
     # `DecryptError` and this test went red. Separately, dropped the
-    # `LoanProjector.project/1` call from the handler's `handle_info/2`; no
+    # `ItemProjector.project/1` call from the handler's `handle_info/2`; no
     # row was written and the listing assertion went red.
-    test "events from any process are written under their own library and read back by id alone",
+    test "events from any process are written under their own owner and read back by id alone",
          %{handler: handler} do
-      send(handler, {:event, loan(@library, "Middlemarch", "one@example.com")})
+      send(handler, {:event, item_event(@owner, "Title A", "note-1")})
 
-      Scope.wrap(@library, fn ->
-        send(handler, {:event, loan(@other_library, "Persuasion", "two@example.com")})
+      Scope.wrap(@owner, fn ->
+        send(handler, {:event, item_event(@other_owner, "Title B", "note-2")})
       end)
 
       # A call after the sends: the handler has handled both events by the
       # time it answers, since messages from one sender arrive in order.
       :sys.get_state(handler)
 
-      assert [{middlemarch, @library}, {persuasion, @other_library}] =
-               TestRepo.all(from(v in LoanView, order_by: v.id, select: {v.id, v.library_id}))
+      assert [{first_id, @owner}, {second_id, @other_owner}] =
+               TestRepo.all(from(v in ItemView, order_by: v.id, select: {v.id, v.owner_id}))
 
-      assert %LoanView{title: "Middlemarch", patron_email: "one@example.com"} =
-               Scope.wrap(@other_library, fn ->
-                 LoanProjectionHandler.fetch_view(handler, middlemarch)
+      assert %ItemView{title: "Title A", note: "note-1"} =
+               Scope.wrap(@other_owner, fn ->
+                 ProjectionHandler.fetch_view(handler, first_id)
                end)
 
-      assert %LoanView{title: "Persuasion", patron_email: "two@example.com"} =
-               LoanProjectionHandler.fetch_view(handler, persuasion)
+      assert %ItemView{title: "Title B", note: "note-2"} =
+               ProjectionHandler.fetch_view(handler, second_id)
 
       assert :error = Scope.get()
     end
   end
 
-  defp loan(library_id, title, email) do
+  defp item_event(owner_id, title, note) do
     %{
-      "type" => "loan_recorded",
-      "library_id" => library_id,
+      "type" => "item_recorded",
+      "owner_id" => owner_id,
       "title" => title,
-      "patron_email" => email
+      "note" => note
     }
   end
 

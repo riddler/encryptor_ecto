@@ -5,7 +5,7 @@ defmodule Encryptor.Ecto.Migrator.RowScope do
   ADR-0002 decision 3: *the migrator installs a per-row scope resolver in the
   params it constructs, which is ADR-0001 decision 5f (the
   `Encryptor.Ecto.ScopeContext` escape hatch) used exactly as intended.* A
-  rewrite declaring `scope_from :merchant_id` reads the scope off the row it
+  rewrite declaring `scope_from :scope_id` reads the scope off the row it
   is rewriting, and this module is how that value reaches the type's
   `dump/3` and `load/3`.
 

@@ -43,17 +43,21 @@ Task-shaped, for someone who already understands the target state.
   how the pairs compose with the vault's static ones, which refusals a
   declaration buys, why a bound value is permanent, and what changing one
   costs.
+- [How to declare and query a blind index](guides/declare-and-query-a-blind-index.md) -
+  the index column, the `blind_index` declaration and the options to choose
+  before the first write, `put_index/3` in every changeset, the query helpers
+  and when to use which, and backfilling and checking the rows that exist.
 - [How to keep scope keys in Google Cloud KMS through the key store](guides/gcp-kms-key-store.md) -
   one `CryptoKey` per scope: the Goth token server, the key store's
   `:gcp_kms` option, provisioning a `"gcp_kms_ciphertext"` row, and the
   shred - destroying the key version, deleting the row, the restore window,
   and the answers the application sees at each step, including the one
   ADR-0005 Amendment A5 proposes.
-- [How to keep a customer scope and an agreement scope in two vaults](guides/two-vaults-customer-and-agreement.md) -
-  a customer vault for platform data and credentials beside an agreement
-  vault for data shared under a data agreement: why two vaults rather than
+- [How to keep a long-lived scope and a short-lived scope in two vaults](guides/two-vaults-long-and-short-lived-scopes.md) -
+  an owner vault for data that lives as long as its owner beside a grant
+  vault for data that ends with its grant: why two vaults rather than
   a composite selector, the two key tables, the process resolver and a
-  resolver fed from the row, the shred of one agreement, and what each
+  resolver fed from the row, the shred of one grant, and what each
   vault's shred reaches.
 - [How to resolve the scope in jobs and projectors](guides/scope-in-jobs-and-projectors.md) -
   why the scope stops at the process that set it, capturing it in the caller

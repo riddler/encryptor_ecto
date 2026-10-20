@@ -29,16 +29,16 @@ defmodule Encryptor.Ecto.ScopeContext do
 
   ## Example
 
-  A payment host that has already resolved the merchant onto a Plug-assigned
+  A host that has already resolved the scope onto a Plug-assigned
   struct, and would rather read it there than mirror it into a second place:
 
-      defmodule Payments.MerchantResolver do
+      defmodule MyApp.ScopeResolver do
         @behaviour Encryptor.Ecto.ScopeContext
 
         @impl Encryptor.Ecto.ScopeContext
         def resolve(_operation, _params) do
-          case Payments.RequestContext.current() do
-            %{merchant_id: id} when is_binary(id) -> {:ok, id}
+          case MyApp.RequestContext.current() do
+            %{scope_id: id} when is_binary(id) -> {:ok, id}
             _other -> {:error, :no_request_context}
           end
         end
@@ -46,10 +46,10 @@ defmodule Encryptor.Ecto.ScopeContext do
 
   Declared at the field's type module:
 
-      defmodule Payments.Encrypted.Binary do
+      defmodule MyApp.Encrypted.Binary do
         use Encryptor.Ecto.Binary,
-          vault: Payments.Vault,
-          scope: Payments.MerchantResolver
+          vault: MyApp.Vault,
+          scope: MyApp.ScopeResolver
       end
 
   `operation` is passed because a resolver may legitimately answer differently

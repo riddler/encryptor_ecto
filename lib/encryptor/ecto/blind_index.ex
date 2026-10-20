@@ -8,20 +8,20 @@ defmodule Encryptor.Ecto.BlindIndex do
   plaintext becomes equality on fingerprint. `blind_index/3` is where a host
   says that a column has one, and what it is:
 
-      defmodule MyApp.Accounts.Customer do
+      defmodule MyApp.Records.Record do
         use Ecto.Schema
         import Encryptor.Ecto.BlindIndex
 
-        schema "customers" do
-          field :merchant_id, :string
+        schema "records" do
+          field :scope_id, :string
 
-          field :email, MyApp.Encrypted.String
-          field :email_index, :binary
-          blind_index :email, :email_index, normalize: :email
+          field :handle, MyApp.Encrypted.String
+          field :handle_index, :binary
+          blind_index :handle, :handle_index, normalize: :downcase
 
-          field :phone, MyApp.Encrypted.String
-          field :phone_index, :binary
-          blind_index :phone, :phone_index, normalize: :digits
+          field :code, MyApp.Encrypted.String
+          field :code_index, :binary
+          blind_index :code, :code_index, normalize: :digits
         end
       end
 
@@ -152,7 +152,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   through the field's declared scope strategy. The behaviour the suite pins:
   the same plaintext, in the same column, under two different scopes derives
   under different keys and therefore stores unrelated bytes. Two scopes
-  sharing a customer are not visible as sharing one, to anyone reading the
+  sharing a value are not visible as sharing one, to anyone reading the
   dump or a backup.
 
   Two further separations are pinned the same way, and both fall out of the
@@ -184,13 +184,13 @@ defmodule Encryptor.Ecto.BlindIndex do
   is usually guessable from that alone. A country code, a plan name, or a
   status-like string that someone indexed by mistake is readable off the
   cardinality without any key at all. This is why the guidance is to reserve
-  indexes for **high-cardinality exact-match keys** - an email address, a
-  phone number, a tax identifier - and why an index on a low-cardinality
-  column is a defect rather than a tradeoff.
+  indexes for **high-cardinality exact-match keys** - a serial number,
+  an external reference, a national identifier - and why an index on a
+  low-cardinality column is a defect rather than a tradeoff.
 
   **A chosen-plaintext oracle.** An attacker who can both cause rows to be
   written and observe the index column learns the index value of a plaintext
-  of their choosing. A public signup form over an indexed column is that
+  of their choosing. A public form over an indexed column is that
   attacker. It is inherent to any deterministic index and cannot be designed
   away here; what bounds it is the scope, since the oracle a `derive: :per_scope`
   index gives away is one scope's, and the oracle a `derive: :global` index
@@ -290,11 +290,11 @@ defmodule Encryptor.Ecto.BlindIndex do
   rather than the source field's, so two indexes over one field are distinct
   without the host writing anything:
 
-      field :email, MyApp.Encrypted.String
-      field :email_index, :binary
-      field :email_v2_index, :binary
-      blind_index :email, :email_index
-      blind_index :email, :email_v2_index, version: 2
+      field :handle, MyApp.Encrypted.String
+      field :handle_index, :binary
+      field :handle_v2_index, :binary
+      blind_index :handle, :handle_index
+      blind_index :handle, :handle_v2_index, version: 2
 
   Decision 6 tables the default as "the column name" and the record uses
   "column" for both the source and the index column. The reading taken here is
@@ -352,10 +352,10 @@ defmodule Encryptor.Ecto.BlindIndex do
   they cannot disagree about normalization or key derivation:
 
       changeset
-      |> cast(attrs, [:email])
-      |> put_index(:email, :email_index)
+      |> cast(attrs, [:handle])
+      |> put_index(:handle, :handle_index)
 
-      from(c in Customer) |> where_eq(:email, "bob@example.com")
+      from(c in Record) |> where_eq(:handle, "ref-100")
 
   `put_index/3` does not recompute an index whose source field was not
   changed, and writes `nil` when the source is set to `nil` (decision 8): a
@@ -387,7 +387,7 @@ defmodule Encryptor.Ecto.BlindIndex do
   decision 3d's per-scope/global pair and decision 7's rotation pair both
   produce. Each therefore has a four-argument form naming the index column:
 
-      from(c in Customer) |> where_eq(:email, :email_v2_index, "bob@example.com")
+      from(c in Record) |> where_eq(:handle, :handle_v2_index, "ref-100")
 
   which is what decision 7 step 4 - "switch `where_eq/3` to the new version" -
   is written with, since during the rotation window both versions are declared
@@ -512,8 +512,8 @@ defmodule Encryptor.Ecto.BlindIndex do
   under the field's index key, and puts the result in `column`:
 
       changeset
-      |> cast(attrs, [:email])
-      |> put_index(:email, :email_index)
+      |> cast(attrs, [:handle])
+      |> put_index(:handle, :handle_index)
 
   Three behaviours are decision 5's and decision 8's rather than conveniences,
   and each is observable:
@@ -574,15 +574,15 @@ defmodule Encryptor.Ecto.BlindIndex do
   @doc """
   Adds an equality constraint on a full-width index.
 
-      from(c in Customer) |> where_eq(:email, "bob@example.com")
+      from(c in Record) |> where_eq(:handle, "ref-100")
 
-  expands to `where: c.email_index == ^computed`, and to nothing else.
+  expands to `where: c.handle_index == ^computed`, and to nothing else.
   Equality is the whole surface (decision 9): there is no `where_like`, no
   `where_gt`, no ordering helper, and no operator argument.
 
   The value is normalized before it is fingerprinted, so the query finds
-  `"Bob@Example.COM "` when asked for `"bob@example.com"` under a
-  `normalize: :email` index. Normalization is lossy and directional, and an
+  `"REF-100 "` when asked for `"ref-100"` under a
+  `normalize: :downcase` index. Normalization is lossy and directional, and an
   index hit is not proof of byte equality.
 
   Raises `Encryptor.Ecto.MissingScopeError` when the index is `derive: :per_scope`

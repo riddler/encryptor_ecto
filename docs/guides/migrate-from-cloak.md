@@ -12,10 +12,11 @@ does and does not restore. If you do not,
 [what changes when you move off cloak_ecto](../explanation/moving-off-cloak.md)
 is that page, and it is worth reading before you run step 3.
 
-The host in the examples is a payment application: a `cards` table with an
-encrypted `pan` and an encrypted `notes`, a `signups` table with an encrypted
-`email` and an A/B `variant` column, and one exact-match lookup - find a signup
-by email, served today by a `Cloak.Ecto.SHA256` sibling column.
+The host in the examples has two tables: a `records` table with an
+encrypted `secret` and an encrypted `notes`, and an `entries` table with an
+encrypted `handle` and a low-cardinality `kind` column, and one exact-match
+lookup - find an entry by its handle, served today by a
+`Cloak.Ecto.SHA256` sibling column.
 
 The steps below rewrite each encrypted column in place, which is the default
 and the shorter walk. A host that would rather keep the old column untouched
@@ -237,10 +238,10 @@ it into something like this:
 defmodule MyApp.Encryption.CloakMigration do
   use Encryptor.Ecto.Migration, repo: MyApp.Repo
 
-  rewrite MyApp.Payments.Card do
-    scope_from :merchant_id
+  rewrite MyApp.Records.Record do
+    scope_from :scope_id
 
-    field :pan,
+    field :secret,
       from: MyApp.Cloak.Encrypted.Binary,
       to: MyApp.Encrypted.Binary,
       source_authenticated: true
@@ -258,20 +259,20 @@ this package's own vault-backed types, and the plan does not compile without it.
 Write `true` when you have checked that the legacy cipher authenticates -
 `Cloak.Ciphers.AES.GCM` does. Write `false` when it does not -
 `Cloak.Ciphers.AES.CTR` does not - and add a `validate:` beside it. On another
-rewrite in the same plan, a `signups.email` field on a CTR vault reads:
+rewrite in the same plan, an `entries.handle` field on a CTR vault reads:
 
 ```elixir
-    field :email,
+    field :handle,
       from: MyApp.Cloak.Encrypted.String,
       to: MyApp.Encrypted.String,
       source_authenticated: false,
-      validate: &MyApp.Encryption.Checks.email_matches_stored_hash?/1
+      validate: &MyApp.Encryption.Checks.handle_matches_stored_hash?/1
 ```
 
 If you have a legacy hash column beside the field, recomputing it over the
 loaded plaintext is the strongest validator available and it is free. It is also
 the reason step 7 drops that column after the rewrite rather than before. The
-sample output in the rest of this guide is from the two-field `Card` plan
+sample output in the rest of this guide is from the two-field `Record` plan
 above, which is why its `migratable_unverified` count stays at zero.
 
 Add the checkpoint table in the same change, with your own migration on your own
@@ -311,8 +312,8 @@ failures: [
   %{
     id: 88123,
     reason: :load_failed,
-    field: :pan,
-    schema: MyApp.Payments.Card
+    field: :secret,
+    schema: MyApp.Records.Record
   },
   ...
 ]
@@ -332,9 +333,9 @@ migratable_unverified: 0
 undecryptable: 3
 concurrent: 0
 failures: 3
-  MyApp.Payments.Card.pan id=88123 reason=:load_failed
-  MyApp.Payments.Card.pan id=88124 reason=:load_failed
-  MyApp.Payments.Card.pan id=91002 reason=:load_failed
+  MyApp.Records.Record.secret id=88123 reason=:load_failed
+  MyApp.Records.Record.secret id=88124 reason=:load_failed
+  MyApp.Records.Record.secret id=91002 reason=:load_failed
 $ echo $?
 1
 ```
@@ -486,8 +487,9 @@ whole purpose included removing it.
 dump - a backup, a replica, a stolen snapshot, a support export - recomputes
 `sha256(value)` for every candidate value they care to guess and matches it
 against the column, with no key material and no access to your application. The
-columns hosts most want to look up on are email addresses, phone numbers and
-tax identifiers, which are exactly the guessable spaces. This is the unkeyed
+columns hosts most want to look up on are short, structured identifiers -
+reference numbers, serial numbers, national identifiers - which are exactly
+the guessable spaces. This is the unkeyed
 folk pattern `Encryptor.Ecto.BlindIndex`'s *Security properties* names as the
 thing a keyed index exists to replace: its second table row, "the dump, and a
 guess at a plaintext they think is present", is the property this column does
@@ -507,8 +509,8 @@ it lacks is the domain separation ADR-0003 decision 2 builds into the HKDF
   the `derive: :global` column of the *Security properties* table - equality
   structure across the whole table rather than within a scope;
 - two columns holding the same value produce identical bytes, so a dump can be
-  joined across every table configured with that key - a `signups.email_hash`
-  against a `contacts.email_hash` - which a per-column `info` string makes
+  joined across every table configured with that key - an `entries.handle_hash`
+  against an `archived_entries.handle_hash` - which a per-column `info` string makes
   structurally impossible;
 - a staging database restored from a production backup keys the same way, since
   there is no per-deployment `:derivation_salt` under the construction;
@@ -524,7 +526,7 @@ one backfills, so the switchover has no gap in it.
 **No sibling column** means you are choosing, not repairing, and the choice has
 its own cost - a blind index is a leakage decision paid per column and
 permanently. Reserve one for high-cardinality exact-match keys. In the example
-host, `signups.email` earns an index and the A/B `variant` column does not: a
+host, `entries.handle` earns an index and the `kind` column does not: a
 two-value column publishes its own distribution to anyone counting rows per
 distinct index value, with no key at all. `Encryptor.Ecto.BlindIndex`'s *What
 this does not defend against* is the full statement, and an index on a
@@ -540,13 +542,13 @@ time:
    ```elixir
    import Encryptor.Ecto.BlindIndex
 
-   schema "signups" do
-     field :merchant_id, :string
-     field :variant, :string
+   schema "entries" do
+     field :scope_id, :string
+     field :kind, :string
 
-     field :email, MyApp.Encrypted.String
-     field :email_index, :binary
-     blind_index :email, :email_index, normalize: :email
+     field :handle, MyApp.Encrypted.String
+     field :handle_index, :binary
+     blind_index :handle, :handle_index, normalize: :downcase
    end
    ```
 
@@ -555,15 +557,15 @@ time:
    beside the legacy one rather than over it:
 
    ```elixir
-   defmodule MyApp.Repo.Migrations.AddSignupEmailIndex do
+   defmodule MyApp.Repo.Migrations.AddEntryHandleIndex do
      use Ecto.Migration
 
      def change do
-       alter table(:signups) do
-         add :email_index, :binary
+       alter table(:entries) do
+         add :handle_index, :binary
        end
 
-       create index(:signups, [:merchant_id, :email_index])
+       create index(:entries, [:scope_id, :handle_index])
      end
    end
    ```
@@ -571,12 +573,12 @@ time:
    On Postgres that is:
 
    ```sql
-   ALTER TABLE "signups" ADD COLUMN "email_index" bytea;
-   CREATE INDEX "signups_merchant_id_email_index_index"
-       ON "signups" ("merchant_id", "email_index");
+   ALTER TABLE "entries" ADD COLUMN "handle_index" bytea;
+   CREATE INDEX "entries_scope_id_handle_index_index"
+       ON "entries" ("scope_id", "handle_index");
    ```
 
-   The database index is on `(merchant_id, email_index)` rather than on the
+   The database index is on `(scope_id, handle_index)` rather than on the
    index column alone, because every lookup is already inside a scope.
 
    Leave the legacy column in place in this migration. It is still serving
@@ -588,14 +590,14 @@ time:
    normalization or width.
 
    ```elixir
-   def changeset(signup, attrs) do
-     signup
-     |> cast(attrs, [:email, :variant])
-     |> put_index(:email, :email_index)
+   def changeset(entry, attrs) do
+     entry
+     |> cast(attrs, [:handle, :kind])
+     |> put_index(:handle, :handle_index)
    end
 
-   def by_email(email) do
-     MyApp.Signup |> where_eq(:email, email) |> MyApp.Repo.one()
+   def by_handle(handle) do
+     MyApp.Entry |> where_eq(:handle, handle) |> MyApp.Repo.one()
    end
    ```
 
@@ -628,19 +630,19 @@ time:
    stale silently while still disclosing everything it disclosed before.
 
    ```elixir
-   defmodule MyApp.Repo.Migrations.DropSignupEmailHash do
+   defmodule MyApp.Repo.Migrations.DropEntryHandleHash do
      use Ecto.Migration
 
      def change do
-       alter table(:signups) do
-         remove :email_hash, :binary
+       alter table(:entries) do
+         remove :handle_hash, :binary
        end
      end
    end
    ```
 
    ```sql
-   ALTER TABLE "signups" DROP COLUMN "email_hash";
+   ALTER TABLE "entries" DROP COLUMN "handle_hash";
    ```
 
    Before you run it, confirm the new column is fully backfilled. This is SQL
@@ -650,18 +652,18 @@ time:
    ```sql
    -- rows with a value but no index: must be zero before the drop
    SELECT count(*) AS unindexed
-   FROM "signups"
-   WHERE "email" IS NOT NULL
-     AND "email_index" IS NULL;
+   FROM "entries"
+   WHERE "handle" IS NOT NULL
+     AND "handle_index" IS NULL;
 
    -- and per scope, which is where a partial backfill actually shows up
-   SELECT "merchant_id",
-          count(*) FILTER (WHERE "email_index" IS NOT NULL) AS indexed,
-          count(*) FILTER (WHERE "email" IS NOT NULL) AS encrypted
-   FROM "signups"
+   SELECT "scope_id",
+          count(*) FILTER (WHERE "handle_index" IS NOT NULL) AS indexed,
+          count(*) FILTER (WHERE "handle" IS NOT NULL) AS encrypted
+   FROM "entries"
    GROUP BY 1
-   HAVING count(*) FILTER (WHERE "email_index" IS NOT NULL)
-        < count(*) FILTER (WHERE "email" IS NOT NULL);
+   HAVING count(*) FILTER (WHERE "handle_index" IS NOT NULL)
+        < count(*) FILTER (WHERE "handle" IS NOT NULL);
    ```
 
    The second query returning no rows is the precondition. A scope listed
@@ -700,8 +702,8 @@ Four facts about this column decide when you can do it, rather than how:
 
 **A dump taken before the drop still contains the old column.** That is a fact
 about your backups, and this package cannot fix it. It is worth saying plainly
-in the unkeyed case: every backup taken while `email_hash` existed still
-discloses every guessable email address in it, to whoever can read that backup,
+in the unkeyed case: every backup taken while `handle_hash` existed still
+discloses every guessable handle in it, to whoever can read that backup,
 forever. Dropping the column stops the disclosure growing; it does not undo it.
 Whether that means re-taking your backup set, shortening its retention, or
 accepting it, is your call and your retention policy's, not this package's.
@@ -763,10 +765,10 @@ walks the table back.
 defmodule MyApp.Encryption.CloakRollback do
   use Encryptor.Ecto.Migration, repo: MyApp.Repo
 
-  rewrite MyApp.Payments.Card do
-    scope_from :merchant_id
+  rewrite MyApp.Records.Record do
+    scope_from :scope_id
 
-    field :pan,
+    field :secret,
       from: MyApp.Encrypted.Binary,
       to: MyApp.Cloak.Encrypted.Binary,
       source_authenticated: true
@@ -791,7 +793,7 @@ declaration.
 
 The in-place walk above is the default. This is the other shape: a new binary
 column beside each encrypted one, named `<field>_encrypted` by convention -
-`pan_encrypted` beside `pan` - which the host's schema writes alongside the old
+`secret_encrypted` beside `secret` - which the host's schema writes alongside the old
 one during the window. The migrator backfills it, reads stay on the old column
 until the backfill verifies, one deploy moves reads to the new column, and only
 then do the old column and the legacy library go.
@@ -828,10 +830,10 @@ write has written and never a legacy one. To see which formats the old column
 holds, run the same format query over the old column yourself:
 
 ```sql
-SELECT substring("pan" from 1 for 4) AS header,
+SELECT substring("secret" from 1 for 4) AS header,
        count(*) AS rows
-FROM "cards"
-WHERE "pan" IS NOT NULL
+FROM "records"
+WHERE "secret" IS NOT NULL
 GROUP BY 1
 ORDER BY 2 DESC;
 ```
@@ -851,8 +853,8 @@ of the in-place walk does, and add the new columns in your own migration. They
 are nullable binary columns: a row the backfill has not reached is `NULL` there.
 
 ```elixir
-alter table(:cards) do
-  add :pan_encrypted, :binary
+alter table(:records) do
+  add :secret_encrypted, :binary
   add :notes_encrypted, :binary
 end
 ```
@@ -875,19 +877,19 @@ defmodule MyApp.Encrypted.String do
   use Encryptor.Ecto.String, vault: MyApp.Vault
 end
 
-schema "cards" do
-  field :merchant_id, :string
-  field :pan, MyApp.Cloak.Encrypted.Binary
+schema "records" do
+  field :scope_id, :string
+  field :secret, MyApp.Cloak.Encrypted.Binary
   field :notes, MyApp.Cloak.Encrypted.String
-  field :pan_encrypted, MyApp.Encrypted.Binary
+  field :secret_encrypted, MyApp.Encrypted.Binary
   field :notes_encrypted, MyApp.Encrypted.String
 end
 
-@pairs [pan: :pan_encrypted, notes: :notes_encrypted]
+@pairs [secret: :secret_encrypted, notes: :notes_encrypted]
 
-def changeset(card, attrs) do
-  card
-  |> cast(attrs, [:merchant_id | Keyword.keys(@pairs)])
+def changeset(record, attrs) do
+  record
+  |> cast(attrs, [:scope_id | Keyword.keys(@pairs)])
   |> dual_write()
 end
 
@@ -910,8 +912,8 @@ A write that bypasses the changeset - an `update_all`, a raw SQL statement - is
 a write the dual write does not see, so find those before this deploy.
 
 The encryption context of a new column binds its own name: this package's types
-derive the declared `"column"` from the field, so `pan_encrypted`'s rows are
-written under `"pan_encrypted"`. Step 8 comes back to that.
+derive the declared `"column"` from the field, so `secret_encrypted`'s rows are
+written under `"secret_encrypted"`. Step 8 comes back to that.
 
 **Expected:** a new row carries both columns, the old one in the legacy format
 and the new one in this package's. An update carries both columns of every field
@@ -934,13 +936,13 @@ package's type, the one step 3 declared without `legacy:`:
 defmodule MyApp.Encryption.CloakParallel do
   use Encryptor.Ecto.Migration, repo: MyApp.Repo
 
-  rewrite MyApp.Payments.Card do
-    scope_from :merchant_id
+  rewrite MyApp.Records.Record do
+    scope_from :scope_id
 
-    field :pan,
+    field :secret,
       from: MyApp.Cloak.Encrypted.Binary,
       to: MyApp.Encrypted.Binary,
-      into: :pan_encrypted,
+      into: :secret_encrypted,
       source_authenticated: true
 
     field :notes,
@@ -1030,11 +1032,11 @@ A host that wants the old field names back can have them without re-encrypting
 anything, provided it pins the context to the name the rows were written under:
 
 ```elixir
-field :pan, MyApp.Encrypted.Binary, source: :pan_encrypted, column: "pan_encrypted"
+field :secret, MyApp.Encrypted.Binary, source: :secret_encrypted, column: "secret_encrypted"
 ```
 
 Without `column:` the declared context would be derived from the field name,
-`"pan"`, and every row would be refused. The same pin keeps a later physical
+`"secret"`, and every row would be refused. The same pin keeps a later physical
 rename of the column readable.
 
 **Expected:** the suite is green and the deploy is ordinary.
@@ -1061,29 +1063,29 @@ $ bin/my_app eval '
   |> Encryptor.Ecto.Migrator.Census.script()
   |> IO.puts()
 '
--- "cards"."pan": format census, grouped on 4 bytes
-SELECT substring("pan" from 1 for 4) AS header,
+-- "records"."secret": format census, grouped on 4 bytes
+SELECT substring("secret" from 1 for 4) AS header,
        count(*) AS rows
-FROM "cards"
-WHERE "pan" IS NOT NULL
+FROM "records"
+WHERE "secret" IS NOT NULL
 GROUP BY 1
 ORDER BY 2 DESC;
 
--- "cards"."pan": nothing became NULL or empty
+-- "records"."secret": nothing became NULL or empty
 SELECT count(*) AS rows,
-       count("pan") AS non_null,
-       count(*) FILTER (WHERE octet_length("pan") = 0) AS empty
-FROM "cards";
+       count("secret") AS non_null,
+       count(*) FILTER (WHERE octet_length("secret") = 0) AS empty
+FROM "records";
 
--- "cards"."pan": rotation progress for one scope
+-- "records"."secret": rotation progress for one scope
 SELECT count(*) FILTER (
-         WHERE substring("pan" from 1 for 4) = :current_header
+         WHERE substring("secret" from 1 for 4) = :current_header
        ) AS done,
-       count(*) FILTER (WHERE "pan" IS NOT NULL) AS total
-FROM "cards"
-WHERE "merchant_id" = :scope;
+       count(*) FILTER (WHERE "secret" IS NOT NULL) AS total
+FROM "records"
+WHERE "scope_id" = :scope;
 
--- ... and the same three queries again for "cards"."notes", and for every
+-- ... and the same three queries again for "records"."notes", and for every
 -- other field of every other rewrite the plan declares.
 ```
 

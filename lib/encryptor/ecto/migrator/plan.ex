@@ -19,8 +19,8 @@ defmodule Encryptor.Ecto.Migrator.Plan do
   rather than reading an ambient scope. So a rewrite's `:scope` says where
   the *migrator* finds it:
 
-    * `{:column, :account_id}` - read it off the row being rewritten, which is
-      `scope_from :account_id` in the DSL.
+    * `{:column, :scope_id}` - read it off the row being rewritten, which is
+      `scope_from :scope_id` in the DSL.
     * `:none` - the field is global; there is no scope to resolve.
     * a module - an `Encryptor.Ecto.ScopeContext` implementation the migrator
       asks, for a host whose scope is not a column of the table being

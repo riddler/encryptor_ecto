@@ -3,10 +3,10 @@ defmodule Encryptor.Ecto.TwoVaultsGuideTest do
   The two-vaults guide's host, run against real vaults, a real key store and
   real tables.
 
-  `docs/guides/two-vaults-customer-and-agreement.md` shows a host with a
-  customer vault and an agreement vault, a schema for each, the built-in
+  `docs/guides/two-vaults-long-and-short-lived-scopes.md` shows a host with an
+  owner vault and a grant vault, a schema for each, the built-in
   process resolver on one and a host resolver on the other, and a shred per
-  agreement. `Encryptor.Ecto.TestTwoVaults` is that code; the first test
+  grant. `Encryptor.Ecto.TestTwoVaults` is that code; the first test
   below holds it to the guide's text, and the rest assert what the guide says
   the host sees.
 
@@ -24,32 +24,32 @@ defmodule Encryptor.Ecto.TwoVaultsGuideTest do
   alias Encryptor.Ecto.KeyStore.Shred
   alias Encryptor.Ecto.MissingScopeError
   alias Encryptor.Ecto.Scope
-  alias Encryptor.Ecto.TestTwoVaults.Account
-  alias Encryptor.Ecto.TestTwoVaults.AgreementScope
-  alias Encryptor.Ecto.TestTwoVaults.AgreementVault
-  alias Encryptor.Ecto.TestTwoVaults.CustomerVault
+  alias Encryptor.Ecto.TestTwoVaults.GrantRecord
+  alias Encryptor.Ecto.TestTwoVaults.GrantRecords
+  alias Encryptor.Ecto.TestTwoVaults.GrantScope
+  alias Encryptor.Ecto.TestTwoVaults.GrantVault
   alias Encryptor.Ecto.TestTwoVaults.Keys
-  alias Encryptor.Ecto.TestTwoVaults.Loans
+  alias Encryptor.Ecto.TestTwoVaults.OwnerRecord
+  alias Encryptor.Ecto.TestTwoVaults.OwnerVault
   alias Encryptor.Ecto.TestTwoVaults.RootVault
-  alias Encryptor.Ecto.TestTwoVaults.SharedLoan
 
-  @guide Path.expand("../../../docs/guides/two-vaults-customer-and-agreement.md", __DIR__)
+  @guide Path.expand("../../../docs/guides/two-vaults-long-and-short-lived-scopes.md", __DIR__)
   @support Path.expand("../../support/test_two_vaults.ex", __DIR__)
 
   # The substitutions `Encryptor.Ecto.TestTwoVaults`'s moduledoc names, in
   # the order they apply: the repo alias, then the repo, then the general
   # prefix.
   @substitutions [
-    {"alias Library.Repo", "alias Encryptor.Ecto.TestRepo, as: Repo"},
-    {"Library.Repo", "Encryptor.Ecto.TestRepo"},
-    {"Library.", "Encryptor.Ecto.TestTwoVaults."},
-    {":library", ":encryptor_ecto"}
+    {"alias MyApp.Repo", "alias Encryptor.Ecto.TestRepo, as: Repo"},
+    {"MyApp.Repo", "Encryptor.Ecto.TestRepo"},
+    {"MyApp.", "Encryptor.Ecto.TestTwoVaults."},
+    {":my_app", ":encryptor_ecto"}
   ]
 
-  @customer "lib_branch_north"
-  @other_customer "lib_branch_south"
-  @agreement "agr_2026_reading_study"
-  @other_agreement "agr_2026_holds_pilot"
+  @owner "owner-1"
+  @other_owner "owner-2"
+  @grant "grant-1"
+  @other_grant "grant-2"
 
   setup do
     # Stands in for the host's runtime configuration. A fixture root is still
@@ -65,20 +65,20 @@ defmodule Encryptor.Ecto.TwoVaultsGuideTest do
     Scope.clear()
 
     start_supervised!(RootVault)
-    start_supervised!(CustomerVault)
-    start_supervised!(AgreementVault)
+    start_supervised!(OwnerVault)
+    start_supervised!(GrantVault)
 
-    :ok = Keys.provision(:customer, @customer)
-    :ok = Keys.provision(:customer, @other_customer)
-    :ok = Keys.provision(:agreement, @agreement)
-    :ok = Keys.provision(:agreement, @other_agreement)
+    :ok = Keys.provision(:owner, @owner)
+    :ok = Keys.provision(:owner, @other_owner)
+    :ok = Keys.provision(:grant, @grant)
+    :ok = Keys.provision(:grant, @other_grant)
 
     :ok
   end
 
   describe "the guide's code" do
     # Sabotage: changed the guide's resolver error atom to
-    # `:no_agreement_in_request`; this test went red on that block. Every
+    # `:no_grant_in_request`; this test went red on that block. Every
     # support-file sabotage below also turned this test red.
     test "every defmodule block in the guide is the support file's code" do
       source = File.read!(@support)
@@ -100,152 +100,152 @@ defmodule Encryptor.Ecto.TwoVaultsGuideTest do
   end
 
   describe "step 3: each vault reads its own key table" do
-    # Sabotage: made `Keys.provision/2` write agreement keys into the default
-    # table; this test went red, and so did every agreement read and write.
-    test "the customer's rows are in the default table, the agreement's in their own" do
-      assert customer_ref = ref(@customer)
-      assert agreement_ref = ref(@agreement)
+    # Sabotage: made `Keys.provision/2` write grant keys into the default
+    # table; this test went red, and so did every grant read and write.
+    test "the owner's rows are in the default table, the grant's in their own" do
+      assert owner_ref = ref(@owner)
+      assert grant_ref = ref(@grant)
 
-      assert [1] = key_versions(KeyStore.default_table(), customer_ref)
-      assert [] = key_versions(KeyStore.default_table(), agreement_ref)
-      assert [1] = key_versions(Keys.agreement_table(), agreement_ref)
-      assert [] = key_versions(Keys.agreement_table(), customer_ref)
+      assert [1] = key_versions(KeyStore.default_table(), owner_ref)
+      assert [] = key_versions(KeyStore.default_table(), grant_ref)
+      assert [1] = key_versions(Keys.grant_table(), grant_ref)
+      assert [] = key_versions(Keys.grant_table(), owner_ref)
     end
   end
 
-  describe "step 4: the customer vault resolves from the process" do
-    # Sabotage: made the customer type module name `AgreementVault`; the
+  describe "step 4: the owner vault resolves from the process" do
+    # Sabotage: made the owner type module name `GrantVault`; the
     # round trip raised.
-    test "a customer's token round-trips under its own scope and fails under another" do
-      %Account{id: id} =
-        Scope.wrap(@customer, fn ->
-          TestRepo.insert!(%Account{customer_id: @customer, catalog_api_token: "tok-north"})
+    test "an owner's token round-trips under its own scope and fails under another" do
+      %OwnerRecord{id: id} =
+        Scope.wrap(@owner, fn ->
+          TestRepo.insert!(%OwnerRecord{owner_id: @owner, secret_token: "token-1"})
         end)
 
-      assert %Account{catalog_api_token: "tok-north"} =
-               Scope.wrap(@customer, fn -> TestRepo.get!(Account, id) end)
+      assert %OwnerRecord{secret_token: "token-1"} =
+               Scope.wrap(@owner, fn -> TestRepo.get!(OwnerRecord, id) end)
 
       assert_raise DecryptError, fn ->
-        Scope.wrap(@other_customer, fn -> TestRepo.get!(Account, id) end)
+        Scope.wrap(@other_owner, fn -> TestRepo.get!(OwnerRecord, id) end)
       end
     end
 
     # Sabotage: made `Encryptor.Ecto.ScopeContext.Process.resolve/2` answer
-    # a fixed customer when no scope was set; nothing raised.
-    test "with no customer in scope a write raises rather than guessing" do
+    # a fixed owner when no scope was set; nothing raised.
+    test "with no owner in scope a write raises rather than guessing" do
       assert_raise MissingScopeError, fn ->
-        TestRepo.insert!(%Account{customer_id: @customer, catalog_api_token: "tok-north"})
+        TestRepo.insert!(%OwnerRecord{owner_id: @owner, secret_token: "token-1"})
       end
     end
   end
 
-  describe "step 5: the agreement vault resolves from the row" do
-    # Sabotage: made `Loans.record/1` swap the two agreements; `list/1`
+  describe "step 5: the grant vault resolves from the row" do
+    # Sabotage: made `GrantRecords.record/1` swap the two grants; `list/1`
     # raised `DecryptError`. Separately, dropped the `where:` from
-    # `Loans.list/1`; the same `list/1` raised on the other agreement's row.
-    test "a loan is written under the agreement on its row and read back by agreement" do
-      assert {:ok, _loan} = record(@agreement, "reader@example.com")
-      assert {:ok, _loan} = record(@other_agreement, "other@example.com")
+    # `GrantRecords.list/1`; the same `list/1` raised on the other grant's row.
+    test "a record is written under the grant on its row and read back by grant" do
+      assert {:ok, _record} = record(@grant, "note-1")
+      assert {:ok, _record} = record(@other_grant, "note-2")
 
-      assert [%SharedLoan{patron_email: "reader@example.com"}] = Loans.list(@agreement)
-      assert [%SharedLoan{patron_email: "other@example.com"}] = Loans.list(@other_agreement)
+      assert [%GrantRecord{note: "note-1"}] = GrantRecords.list(@grant)
+      assert [%GrantRecord{note: "note-2"}] = GrantRecords.list(@other_grant)
     end
 
-    # Sabotage: dropped `validate_required/2` from `Loans.record/1`; the
+    # Sabotage: dropped `validate_required/2` from `GrantRecords.record/1`; the
     # insert crashed instead of returning the invalid changeset.
-    test "a changeset with no agreement id is refused before anything is encrypted" do
+    test "a changeset with no grant id is refused before anything is encrypted" do
       assert {:error, %Ecto.Changeset{valid?: false} = changeset} =
-               Loans.record(%{customer_id: @customer, patron_email: "reader@example.com"})
+               GrantRecords.record(%{owner_id: @owner, note: "note-1"})
 
-      assert {"can't be blank", _meta} = changeset.errors[:agreement_id]
+      assert {"can't be blank", _meta} = changeset.errors[:grant_id]
     end
 
-    # Sabotage: made `AgreementScope.resolve/2` answer the first agreement
+    # Sabotage: made `GrantScope.resolve/2` answer the first grant
     # whatever was set, so both rows were written under one key; the load
     # read both and nothing raised.
-    test "a read whose rows span agreements raises instead of answering" do
-      {:ok, _loan} = record(@agreement, "reader@example.com")
-      {:ok, _loan} = record(@other_agreement, "other@example.com")
+    test "a read whose rows span grants raises instead of answering" do
+      {:ok, _record} = record(@grant, "note-1")
+      {:ok, _record} = record(@other_grant, "note-2")
 
       assert_raise DecryptError, fn ->
-        AgreementScope.with_agreement(@agreement, fn -> TestRepo.all(SharedLoan) end)
+        GrantScope.with_grant(@grant, fn -> TestRepo.all(GrantRecord) end)
       end
     end
 
-    # Sabotage: made `AgreementScope.resolve/2` answer `{:ok, "agr_default"}`
+    # Sabotage: made `GrantScope.resolve/2` answer `{:ok, "grant-default"}`
     # when nothing was set; the raise became an `unknown_key` EncryptError.
-    test "outside with_agreement/2 the resolver refuses, and the type raises" do
+    test "outside with_grant/2 the resolver refuses, and the type raises" do
       assert_raise MissingScopeError, fn ->
-        TestRepo.insert!(%SharedLoan{
-          customer_id: @customer,
-          agreement_id: @agreement,
-          patron_email: "reader@example.com"
+        TestRepo.insert!(%GrantRecord{
+          owner_id: @owner,
+          grant_id: @grant,
+          note: "note-1"
         })
       end
     end
 
-    test "with_agreement/2 restores the scope it found, nested or not" do
-      AgreementScope.with_agreement(@agreement, fn ->
-        AgreementScope.with_agreement(@other_agreement, fn ->
-          assert {:ok, @other_agreement} = AgreementScope.resolve(:dump, %{})
+    test "with_grant/2 restores the scope it found, nested or not" do
+      GrantScope.with_grant(@grant, fn ->
+        GrantScope.with_grant(@other_grant, fn ->
+          assert {:ok, @other_grant} = GrantScope.resolve(:dump, %{})
         end)
 
-        assert {:ok, @agreement} = AgreementScope.resolve(:dump, %{})
+        assert {:ok, @grant} = GrantScope.resolve(:dump, %{})
       end)
 
-      assert {:error, :no_agreement_in_scope} = AgreementScope.resolve(:load, %{})
+      assert {:error, :no_grant_in_scope} = GrantScope.resolve(:load, %{})
     end
   end
 
-  describe "step 6: shred one agreement" do
-    # Sabotage: made `Keys.shred_agreement/2` shred through the customer
+  describe "step 6: shred one grant" do
+    # Sabotage: made `Keys.shred_grant/2` shred through the owner
     # vault; the record assertion went red on `{:error, {:unknown_key, _}}`.
     # Removing the vault restart below left this test green: after a
     # whole-scope shred the answers do not depend on the drain, so this test
     # does not pin the cache's behaviour.
-    test "deleting the agreement's key rows ends that agreement and nothing else" do
-      {:ok, _loan} = record(@agreement, "reader@example.com")
-      {:ok, _loan} = record(@other_agreement, "other@example.com")
+    test "deleting the grant's key rows ends that grant and nothing else" do
+      {:ok, _record} = record(@grant, "note-1")
+      {:ok, _record} = record(@other_grant, "note-2")
 
-      %Account{id: account_id} =
-        Scope.wrap(@customer, fn ->
-          TestRepo.insert!(%Account{customer_id: @customer, catalog_api_token: "tok-north"})
+      %OwnerRecord{id: record_id} =
+        Scope.wrap(@owner, fn ->
+          TestRepo.insert!(%OwnerRecord{owner_id: @owner, secret_token: "token-1"})
         end)
 
-      assert [_loan] = Loans.list(@agreement)
+      assert [_record] = GrantRecords.list(@grant)
 
       assert {:ok, %Shred{procedure: :scope, versions: [1]}} =
-               Keys.shred_agreement(@agreement, drain: :skip)
+               Keys.shred_grant(@grant, drain: :skip)
 
-      assert [] = key_versions(Keys.agreement_table(), ref(@agreement))
+      assert [] = key_versions(Keys.grant_table(), ref(@grant))
 
       # The runbook's cache drain (encryptor ADR-0005, P3 step 3), done the
       # way the guide offers beside the default wait: restart the vault.
-      :ok = stop_supervised(AgreementVault)
-      start_supervised!(AgreementVault)
+      :ok = stop_supervised(GrantVault)
+      start_supervised!(GrantVault)
 
-      assert %DecryptError{reason: {:unknown_key, @agreement}} =
-               assert_raise(DecryptError, fn -> Loans.list(@agreement) end)
+      assert %DecryptError{reason: {:unknown_key, @grant}} =
+               assert_raise(DecryptError, fn -> GrantRecords.list(@grant) end)
 
-      assert %EncryptError{reason: {:unknown_key, @agreement}} =
-               assert_raise(EncryptError, fn -> record(@agreement, "late@example.com") end)
+      assert %EncryptError{reason: {:unknown_key, @grant}} =
+               assert_raise(EncryptError, fn -> record(@grant, "note-3") end)
 
-      assert [%SharedLoan{patron_email: "other@example.com"}] = Loans.list(@other_agreement)
+      assert [%GrantRecord{note: "note-2"}] = GrantRecords.list(@other_grant)
 
-      assert %Account{catalog_api_token: "tok-north"} =
-               Scope.wrap(@customer, fn -> TestRepo.get!(Account, account_id) end)
+      assert %OwnerRecord{secret_token: "token-1"} =
+               Scope.wrap(@owner, fn -> TestRepo.get!(OwnerRecord, record_id) end)
 
-      # Step 4 of the runbook: the ciphertext rows still carry the agreement's
+      # Step 4 of the runbook: the ciphertext rows still carry the grant's
       # pseudonym in every header, so they go too.
-      assert {:ok, 1} = Loans.forget(@agreement)
+      assert {:ok, 1} = GrantRecords.forget(@grant)
 
       assert [] =
-               TestRepo.all(from(l in SharedLoan, where: l.agreement_id == ^@agreement))
+               TestRepo.all(from(l in GrantRecord, where: l.grant_id == ^@grant))
     end
   end
 
-  defp record(agreement_id, email) do
-    Loans.record(%{customer_id: @customer, agreement_id: agreement_id, patron_email: email})
+  defp record(grant_id, note) do
+    GrantRecords.record(%{owner_id: @owner, grant_id: grant_id, note: note})
   end
 
   defp ref(selector) do

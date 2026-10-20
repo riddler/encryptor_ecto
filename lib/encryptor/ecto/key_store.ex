@@ -482,7 +482,7 @@ defmodule Encryptor.Ecto.KeyStore do
   (`version: n`). Irreversible.
 
       {:ok, %Encryptor.Ecto.KeyStore.Shred{procedure: :scope, versions: [1, 2]}} =
-        Encryptor.Ecto.KeyStore.shred(MyApp.ScopedVault, "workspace-7", version: :all)
+        Encryptor.Ecto.KeyStore.shred(MyApp.ScopedVault, "scope-1", version: :all)
 
   `vault` is a started vault whose provider is this module; the rows are
   deleted from the table, prefix and repo its provider options name, so the

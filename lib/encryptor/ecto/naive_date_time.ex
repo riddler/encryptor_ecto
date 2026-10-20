@@ -3,16 +3,16 @@ defmodule Encryptor.Ecto.NaiveDateTime do
   An encrypted zoneless timestamp field: `Encryptor.Ecto.Binary` over the
   value's ISO 8601 form (ADR-0001 decision 1).
 
-      defmodule Payments.Encrypted.NaiveDateTime do
-        use Encryptor.Ecto.NaiveDateTime, vault: Payments.Vault
+      defmodule MyApp.Encrypted.NaiveDateTime do
+        use Encryptor.Ecto.NaiveDateTime, vault: MyApp.Vault
       end
 
-      defmodule Payments.Cards.Card do
+      defmodule MyApp.Records.Record do
         use Ecto.Schema
 
-        schema "cards" do
-          field :merchant_id, :string
-          field :agreed_at, Payments.Encrypted.NaiveDateTime
+        schema "records" do
+          field :scope_id, :string
+          field :confirmed_at, MyApp.Encrypted.NaiveDateTime
         end
       end
 
@@ -90,10 +90,10 @@ defmodule Encryptor.Ecto.NaiveDateTime do
   Checks a declaration's option set while the declaring module compiles.
 
       iex> Encryptor.Ecto.NaiveDateTime.validate_declaration!(
-      ...>   Payments.Encrypted.NaiveDateTime,
-      ...>   vault: Payments.Vault
+      ...>   MyApp.Encrypted.NaiveDateTime,
+      ...>   vault: MyApp.Vault
       ...> )
-      [vault: Payments.Vault]
+      [vault: MyApp.Vault]
   """
   @spec validate_declaration!(module(), keyword()) :: keyword()
   def validate_declaration!(module, opts),

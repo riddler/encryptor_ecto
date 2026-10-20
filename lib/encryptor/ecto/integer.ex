@@ -3,16 +3,16 @@ defmodule Encryptor.Ecto.Integer do
   An encrypted integer field: `Encryptor.Ecto.Binary` over the value's decimal
   form (ADR-0001 decision 1).
 
-      defmodule Payments.Encrypted.Integer do
-        use Encryptor.Ecto.Integer, vault: Payments.Vault
+      defmodule MyApp.Encrypted.Integer do
+        use Encryptor.Ecto.Integer, vault: MyApp.Vault
       end
 
-      defmodule Payments.Cards.Card do
+      defmodule MyApp.Records.Record do
         use Ecto.Schema
 
-        schema "cards" do
-          field :merchant_id, :string
-          field :retry_count, Payments.Encrypted.Integer
+        schema "records" do
+          field :scope_id, :string
+          field :retry_count, MyApp.Encrypted.Integer
         end
       end
 
@@ -92,10 +92,10 @@ defmodule Encryptor.Ecto.Integer do
   @doc """
   Checks a declaration's option set while the declaring module compiles.
 
-      iex> Encryptor.Ecto.Integer.validate_declaration!(Payments.Encrypted.Integer,
-      ...>   vault: Payments.Vault
+      iex> Encryptor.Ecto.Integer.validate_declaration!(MyApp.Encrypted.Integer,
+      ...>   vault: MyApp.Vault
       ...> )
-      [vault: Payments.Vault]
+      [vault: MyApp.Vault]
   """
   @spec validate_declaration!(module(), keyword()) :: keyword()
   def validate_declaration!(module, opts),
