@@ -552,7 +552,7 @@ defmodule Encryptor.Ecto.Migration do
       not Source.vault_backed?(from, source_opts) ->
         raise_at!(meta, undeclared_source_message(source_opts, from))
 
-      legacy = legacy_reader(from, source_opts) ->
+      legacy = legacy_reader(from, source_opts, meta) ->
         raise_at!(meta, undeclared_legacy_message(source_opts, from, legacy))
 
       true ->
@@ -563,11 +563,29 @@ defmodule Encryptor.Ecto.Migration do
   # The `legacy:` module a vault-backed type's frozen params name, or `nil`
   # where the declaration named none. Called only after `Source.vault_backed?/2`
   # answered `true`, so `init/1` exists and returns the frozen map, `:legacy`
-  # among its keys.
-  @spec legacy_reader(module(), Source.field_opts()) :: module() | nil
-  defp legacy_reader(from, source_opts) do
-    %{legacy: legacy} = from.init(schema: source_opts[:schema], field: source_opts[:field])
-    legacy
+  # among its keys. That answer came from a first call, and `init/1` is the
+  # host's own code: a second call that raises or answers something else is
+  # refused here as a located `CompileError` naming the field, not left to
+  # surface as a bare exception from the compiler.
+  @spec legacy_reader(module(), Source.field_opts(), meta()) :: module() | nil
+  defp legacy_reader(from, source_opts, meta) do
+    case second_init(from, source_opts) do
+      {:ok, %{legacy: legacy}} ->
+        legacy
+
+      {:ok, other} ->
+        raise_at!(meta, legacy_reader_failed_message(source_opts, from, {:answered, other}))
+
+      {:raised, exception} ->
+        raise_at!(meta, legacy_reader_failed_message(source_opts, from, {:raised, exception}))
+    end
+  end
+
+  @spec second_init(module(), Source.field_opts()) :: {:ok, term()} | {:raised, Exception.t()}
+  defp second_init(from, source_opts) do
+    {:ok, from.init(schema: source_opts[:schema], field: source_opts[:field])}
+  rescue
+    exception -> {:raised, exception}
   end
 
   # A validator is escaped into the compiled plan, so it has to be a remote
@@ -828,6 +846,21 @@ defmodule Encryptor.Ecto.Migration do
       "if nobody knows - the answer the forward plan gave for that legacy " <>
       "module (ADR-0004 decision 3)."
   end
+
+  defp legacy_reader_failed_message(source_opts, from, outcome) do
+    "#{field_at(source_opts)} declares no `source_authenticated:`, and its " <>
+      "`from:` type #{inspect(from)} is asked a second time for the `legacy:` " <>
+      "module it declares, which #{legacy_reader_outcome(outcome)}. The " <>
+      "type's `init/1` has to answer the same way every time it is called " <>
+      "for one field; fix it, or write `source_authenticated: true` or " <>
+      "`source_authenticated: false` so that the question is not asked."
+  end
+
+  defp legacy_reader_outcome({:raised, exception}),
+    do: "failed with #{inspect(exception.__struct__)}: #{Exception.message(exception)}"
+
+  defp legacy_reader_outcome({:answered, _other}),
+    do: "answered something other than the frozen map that names `:legacy`"
 
   defp not_an_acknowledgement_message(source_opts, given) do
     "#{field_at(source_opts)} declares `source_authenticated: #{inspect(given)}`. " <>
