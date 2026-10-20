@@ -19,6 +19,63 @@ defmodule Encryptor.Ecto.MigrationTest do
     def load(value, _loader, _params), do: {:ok, value}
   end
 
+  defmodule SecondCallRaises do
+    @moduledoc """
+    A vault-backed type whose `init/1` answers the frozen map once per process
+    and raises on every call after the first: the shape a plan sees when the
+    host's `init/1` is impure.
+    """
+
+    def init(opts) do
+      case Process.get({__MODULE__, :calls}, 0) do
+        0 ->
+          Process.put({__MODULE__, :calls}, 1)
+
+          opts
+          |> Map.new()
+          |> Map.merge(%{
+            vault: Encryptor.Ecto.TestVaults.Merchant,
+            scope: :none,
+            context: [],
+            table: "cards",
+            column: "pan",
+            legacy: Encryptor.Ecto.TestLegacy.Binary
+          })
+
+        _later ->
+          raise "init/1 is not repeatable"
+      end
+    end
+
+    def type(_params), do: :binary
+    def cast(value, _params), do: {:ok, value}
+    def load(value, _loader, _params), do: {:ok, value}
+    def dump(value, _dumper, _params), do: {:ok, value}
+  end
+
+  defmodule SecondCallAnswersNothing do
+    @moduledoc """
+    `SecondCallRaises`'s sibling: every call after the first answers `nil`
+    where the frozen map belongs.
+    """
+
+    def init(opts) do
+      case Process.get({__MODULE__, :calls}, 0) do
+        0 ->
+          Process.put({__MODULE__, :calls}, 1)
+          SecondCallRaises.init(opts)
+
+        _later ->
+          nil
+      end
+    end
+
+    def type(_params), do: :binary
+    def cast(value, _params), do: {:ok, value}
+    def load(value, _loader, _params), do: {:ok, value}
+    def dump(value, _dumper, _params), do: {:ok, value}
+  end
+
   defmodule PlainTarget do
     @moduledoc "A plain `Ecto.Type` target: loads and dumps at arity 1."
 
@@ -613,6 +670,58 @@ defmodule Encryptor.Ecto.MigrationTest do
       assert message =~ "`legacy: Encryptor.Ecto.TestLegacy.Binary`"
       assert message =~ "source_authenticated: true"
       assert message =~ "source_authenticated: false"
+    end
+
+    # Sabotage: made `legacy_reader/3`'s `{:raised, _}` arm re-raise - the
+    # second `init/1` call's failure reached the host as the type's own bare
+    # exception, with no file, no line and no field.
+    test "locates a from: type whose second init/1 call raises" do
+      Process.delete({SecondCallRaises, :calls})
+
+      error =
+        assert_compile_error(fn ->
+          compile_rewrite("""
+              scope :none
+              field :pan,
+                from: Encryptor.Ecto.MigrationTest.SecondCallRaises,
+                to: Encryptor.Ecto.TestTypes.Pan
+          """)
+        end)
+
+      assert error.file == "plan.ex"
+      assert error.line > 0
+      message = Exception.message(error)
+      assert message =~ "plan.ex:#{error.line}"
+      assert message =~ "Card.pan"
+      assert message =~ "Encryptor.Ecto.MigrationTest.SecondCallRaises"
+      assert message =~ "init/1 is not repeatable"
+      assert message =~ "source_authenticated: true"
+    end
+
+    # Sabotage: made `legacy_reader/3`'s `{:ok, other}` arm return `nil` - a
+    # type whose second `init/1` call answered no frozen map compiled silent,
+    # as if it declared no `legacy:` module.
+    test "locates a from: type whose second init/1 call answers no frozen map" do
+      Process.delete({SecondCallRaises, :calls})
+      Process.delete({SecondCallAnswersNothing, :calls})
+
+      error =
+        assert_compile_error(fn ->
+          compile_rewrite("""
+              scope :none
+              field :pan,
+                from: Encryptor.Ecto.MigrationTest.SecondCallAnswersNothing,
+                to: Encryptor.Ecto.TestTypes.Pan
+          """)
+        end)
+
+      assert error.file == "plan.ex"
+      assert error.line > 0
+      message = Exception.message(error)
+      assert message =~ "Card.pan"
+      assert message =~ "Encryptor.Ecto.MigrationTest.SecondCallAnswersNothing"
+      assert message =~ "answered something other than the frozen map"
+      refute message =~ "failed with"
     end
 
     # Sabotage: made the `legacy:` refusal fire for a declared `false` too - a
